@@ -102,6 +102,7 @@ export const forkThread = Effect.fn("forkThread")(function* (input: Orchestratio
         sourceThreadId: source.id,
         targetThreadId: input.threadId,
         numTurns: droppedTurns,
+        firstDroppedPrompt: source.messages[cut]?.text,
       })
       .pipe(
         Effect.catch((cause) =>

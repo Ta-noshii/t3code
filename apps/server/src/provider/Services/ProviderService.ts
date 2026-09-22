@@ -130,6 +130,7 @@ export interface ProviderServiceShape {
     readonly sourceThreadId: ThreadId;
     readonly targetThreadId: ThreadId;
     readonly numTurns: number;
+    readonly firstDroppedPrompt?: string | undefined;
   }) => Effect.Effect<boolean, ProviderServiceError>;
 
   /**

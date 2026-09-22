@@ -151,6 +151,8 @@ export interface ProviderAdapterShape<TError> {
     readonly resumeCursor: unknown;
     readonly cwd: string | undefined;
     readonly numTurns: number;
+    /** Text of the user message that opens the first dropped turn, for older histories. */
+    readonly firstDroppedPrompt?: string | undefined;
   }) => Effect.Effect<{ readonly resumeCursor: unknown }, TError>;
 
   /**

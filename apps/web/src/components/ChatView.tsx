@@ -7246,9 +7246,12 @@ export default function ChatView(props: ChatViewProps) {
           toastManager.add({
             type: "info",
             title: "Earlier messages travel with your next message",
-            description: capabilities?.fileAttachments
-              ? `This server can't copy thread history, so ${plan.retained.length} earlier messages are attached as earlier-conversation.md.`
-              : `This server can't copy thread history, so ${plan.retained.length} earlier messages were added to the prompt.`,
+            description:
+              capabilities?.threadFork === true
+                ? `Claude couldn't pick up this conversation where it left off, so the ${plan.retained.length} earlier messages are also attached as earlier-conversation.md.`
+                : capabilities?.fileAttachments
+                  ? `This server can't copy thread history, so ${plan.retained.length} earlier messages are attached as earlier-conversation.md.`
+                  : `This server can't copy thread history, so ${plan.retained.length} earlier messages were added to the prompt.`,
           });
         }
         useComposerDraftStore.getState().setPrompt(target, prompt);

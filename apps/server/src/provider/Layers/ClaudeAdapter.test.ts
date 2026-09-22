@@ -6895,6 +6895,61 @@ describe("ClaudeAdapterLive", () => {
     },
   );
 
+  it.effect("forks older Claude histories whose turn boundaries were never recorded", () => {
+    // A steer makes three human prompts for two T3 turns, so boundaries cannot be inferred.
+    const original = [
+      claudeHistoryMessage({ type: "user", uuid: "u1", content: "first question" }),
+      claudeHistoryMessage({ type: "assistant", uuid: "a1" }),
+      claudeHistoryMessage({ type: "user", uuid: "s1", content: "also check the tests" }),
+      claudeHistoryMessage({ type: "assistant", uuid: "a1b" }),
+      claudeHistoryMessage({
+        type: "user",
+        uuid: "u2",
+        content: [{ type: "text", text: "build the   panel [File: a.md; ref=ctx_1]" }],
+      }),
+      claudeHistoryMessage({ type: "assistant", uuid: "a2" }),
+    ];
+    const forkCalls: Array<Parameters<NonNullable<ClaudeAdapterLiveOptions["forkSession"]>>> = [];
+    const harness = makeHarness({
+      forkSession: async (...args) => {
+        forkCalls.push(args);
+        return { sessionId: CLAUDE_FORK_SESSION_ID };
+      },
+      getSessionMessages: async () => original,
+    });
+    const resumeCursor = { threadId: THREAD_ID, resume: CLAUDE_ORIGINAL_SESSION_ID, turnCount: 2 };
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const fork = (numTurns: number, firstDroppedPrompt?: string) =>
+        adapter.forkThread!({
+          sourceThreadId: THREAD_ID,
+          targetThreadId: ThreadId.make("thread-claude-fork"),
+          resumeCursor,
+          cwd: undefined,
+          numTurns,
+          firstDroppedPrompt,
+        });
+
+      assert.deepEqual((yield* fork(0)).resumeCursor, {
+        threadId: ThreadId.make("thread-claude-fork"),
+        resume: CLAUDE_FORK_SESSION_ID,
+        turnCount: 3,
+        turnStartMessageIds: [null, null, null],
+      });
+      // The dropped turn is found by its prompt, with context chips reduced to plain text.
+      yield* fork(1, "build the panel [a.md](t3-context://v1/file/ctx_1)");
+      const missing = yield* fork(1, "a prompt Claude never saw").pipe(Effect.flip);
+      assert.include(missing.message, "turn boundary is unavailable");
+      assert.deepEqual(
+        forkCalls.map(([, options]) => options?.upToMessageId),
+        ["a2", "a1b"],
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("rewinds Claude history when the fork omits retained system messages", () => {
     const forkCalls: Array<Parameters<NonNullable<ClaudeAdapterLiveOptions["forkSession"]>>> = [];
     let firstTurnId = "";

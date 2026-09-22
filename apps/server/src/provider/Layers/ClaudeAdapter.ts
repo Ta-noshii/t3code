@@ -224,6 +224,46 @@ const remapClaudeForkTurnBoundaries = (
   return remapped.some((id) => id === null) ? undefined : remapped;
 };
 
+const CONTEXT_MARKER = /\[[A-Z][^\]\n]*; ref=[^\]\n]+\]/g;
+const CONTEXT_LINK = /!?\[[^\]\n]*\]\(t3-context:[^)\s]*\)/g;
+const normalizePromptText = (text: string): string =>
+  text.replace(CONTEXT_MARKER, " ").replace(CONTEXT_LINK, " ").replace(/\s+/g, " ").trim();
+
+const claudeHumanText = (message: ClaudeHistoryMessage): string => {
+  const body = message.message;
+  if (typeof body !== "object" || body === null || !("content" in body)) return "";
+  const content = body.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part: unknown) =>
+      typeof part === "object" && part !== null && "text" in part && typeof part.text === "string"
+        ? part.text
+        : "",
+    )
+    .join("\n");
+};
+
+// Threads from before native boundaries were recorded can still be cut where the
+// prompt that opens the first dropped turn appears, searching from the newest.
+const findClaudeTurnStartByPrompt = (
+  messages: ReadonlyArray<ClaudeHistoryMessage>,
+  prompt: string,
+): number => {
+  const anchor = normalizePromptText(prompt).slice(0, 120);
+  if (anchor.length < 4) return -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (
+      isClaudeHumanTurnStart(message) &&
+      normalizePromptText(claudeHumanText(message)).includes(anchor)
+    ) {
+      return index;
+    }
+  }
+  return -1;
+};
+
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
 type ClaudeTextStreamKind = Extract<
   RuntimeContentStreamKind,
@@ -5332,8 +5372,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     readonly sessionId: string | undefined;
     readonly turnStartMessageIds: ReadonlyArray<string | null>;
     readonly numTurns: number;
+    /**
+     * Forks tolerate histories from before native boundaries were recorded: a full copy
+     * needs none, and a partial one is cut where `firstDroppedPrompt` appears. Rewinds
+     * leave this off and stay exact.
+     */
+    readonly allowUnknownBoundaries?: boolean;
+    readonly firstDroppedPrompt?: string | undefined;
   }) {
     const { threadId, method, cwd, sessionId, turnStartMessageIds, numTurns } = input;
+    const lenient = input.allowUnknownBoundaries === true;
     if (!sessionId) {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
@@ -5417,17 +5465,25 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (boundaries.every((id): boolean => id === null) && boundaries.length === turnStarts.length) {
       boundaries.splice(0, boundaries.length, ...turnStarts.map((index) => messages[index]!.uuid));
     }
-    const retainedCount = Math.max(0, boundaries.length - numTurns);
+    const boundariesKnown = boundaries.length > 0 && boundaries.every((id) => id !== null);
+    const knownRetained = Math.max(0, boundaries.length - numTurns);
     // Keeping every turn copies the whole transcript.
     const firstRemoved =
       numTurns === 0
         ? messages.length
-        : messages.findIndex((message) => message.uuid === boundaries[retainedCount]);
-    if (
-      boundaries.length === 0 ||
-      boundaries.some((id) => id === null) ||
-      (retainedCount > 0 && firstRemoved < 1)
-    ) {
+        : boundariesKnown
+          ? messages.findIndex((message) => message.uuid === boundaries[knownRetained])
+          : lenient && input.firstDroppedPrompt !== undefined
+            ? findClaudeTurnStartByPrompt(messages, input.firstDroppedPrompt)
+            : -1;
+    // Without boundaries, the copy keeps every human prompt before the cut.
+    const retainedCount = boundariesKnown
+      ? knownRetained
+      : turnStarts.filter((index) => index < firstRemoved).length;
+    const cutFound = boundariesKnown
+      ? retainedCount === 0 || firstRemoved >= 1
+      : lenient && firstRemoved >= 1;
+    if (!cutFound) {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
         method,
@@ -5452,8 +5508,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           catch: (cause) => toRequestError(threadId, method, cause),
         })
       : undefined;
-    const retainedBoundaries = boundaries.slice(0, retainedCount);
-    if (fork) {
+    // Unknown boundaries stay unknown in the copy, like any older cursor.
+    const retainedBoundaries = boundariesKnown
+      ? boundaries.slice(0, retainedCount)
+      : Array.from({ length: retainedCount }, (): string | null => null);
+    if (fork && boundariesKnown) {
       const forkMessages = yield* readHistory(fork.sessionId);
       const remappedBoundaries = remapClaudeForkTurnBoundaries(
         messages,
@@ -5536,7 +5595,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const turnStartMessageIds =
         resumeState?.turnStartMessageIds ??
         Array.from({ length: resumeState?.turnCount ?? 0 }, () => null);
-      if (input.numTurns >= turnStartMessageIds.length) return { resumeCursor: undefined };
+      if (turnStartMessageIds.length > 0 && input.numTurns >= turnStartMessageIds.length) {
+        return { resumeCursor: undefined };
+      }
       const { fork, retainedCount, retainedBoundaries } = yield* forkClaudeHistory({
         threadId: input.sourceThreadId,
         method: "thread/fork",
@@ -5544,6 +5605,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         sessionId: resumeState?.resume,
         turnStartMessageIds,
         numTurns: input.numTurns,
+        allowUnknownBoundaries: true,
+        firstDroppedPrompt: input.firstDroppedPrompt,
       });
       return {
         resumeCursor: fork
