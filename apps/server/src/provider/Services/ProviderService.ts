@@ -122,6 +122,17 @@ export interface ProviderServiceShape {
   }) => Effect.Effect<void, ProviderServiceError>;
 
   /**
+   * Give `targetThreadId` a copy of `sourceThreadId`'s native conversation without its
+   * last `numTurns` turns, resumed on the target's first turn. Returns false when the
+   * provider cannot fork, so the caller must carry the history some other way.
+   */
+  readonly forkConversation: (input: {
+    readonly sourceThreadId: ThreadId;
+    readonly targetThreadId: ThreadId;
+    readonly numTurns: number;
+  }) => Effect.Effect<boolean, ProviderServiceError>;
+
+  /**
    * Upload a thread and return the provider's shareable feedback identifier.
    */
   readonly uploadFeedback: (

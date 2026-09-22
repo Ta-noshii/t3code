@@ -5320,6 +5320,159 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     },
   );
 
+  /**
+   * Copies a Claude transcript without its last `numTurns` turns into a new native
+   * session, remapping retained turn boundaries onto the copy. Keeping no turns
+   * returns no fork, meaning the caller should start a fresh session.
+   */
+  const forkClaudeHistory = Effect.fn("forkClaudeHistory")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly method: string;
+    readonly cwd: string | undefined;
+    readonly sessionId: string | undefined;
+    readonly turnStartMessageIds: ReadonlyArray<string | null>;
+    readonly numTurns: number;
+  }) {
+    const { threadId, method, cwd, sessionId, turnStartMessageIds, numTurns } = input;
+    if (!sessionId) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method,
+        detail: "Claude session id is unavailable.",
+      });
+    }
+    // The single-executable has no sibling script and no Node to run one
+    // with, so it hosts the worker as a hidden subcommand of itself.
+    const historyWorkerArguments = (yield* HostProcessIsExecutable)
+      ? ["__claude-history"]
+      : [
+          yield* path
+            .fromFileUrl(
+              new URL(
+                import.meta.url.endsWith(".ts")
+                  ? "../../claude-history-worker.ts"
+                  : "./claude-history-worker.mjs",
+                import.meta.url,
+              ),
+            )
+            .pipe(Effect.mapError((cause) => toRequestError(threadId, method, cause))),
+        ];
+    const runScopedHistoryCommand = async (
+      command: "getSessionMessages" | "forkSession",
+      args: object,
+      historySessionId = sessionId,
+    ) => {
+      // SDK history helpers read process.env. Isolate the provider's home instead
+      // of changing the server's environment while other providers are running.
+      // @effect-diagnostics-next-line runEffectInsideEffect:off - SDK callback runs outside the fiber; the spawn is self-contained
+      const result = await Effect.runPromise(
+        spawnAndCollect(
+          process.execPath,
+          ChildProcess.make(
+            process.execPath,
+            [...historyWorkerArguments, command, historySessionId, encodeHistoryArgs(args)],
+            { env: { ...claudeEnvironment, ELECTRON_RUN_AS_NODE: "1" } },
+          ),
+        ).pipe(
+          Effect.timeout("30 seconds"),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        ),
+      );
+      if (result.code !== 0) throw new Error(result.stderr || "Claude history command failed.");
+      return result.stdout;
+    };
+    const readHistory = (historySessionId: string) =>
+      Effect.tryPromise({
+        try: async () => {
+          const readOptions = {
+            ...(cwd ? { dir: cwd } : {}),
+            includeSystemMessages: true,
+          };
+          if (options?.getSessionMessages)
+            return options.getSessionMessages(historySessionId, readOptions);
+          if (claudeEnvironment.CLAUDE_CONFIG_DIR === process.env.CLAUDE_CONFIG_DIR) {
+            return getSessionMessages(historySessionId, readOptions);
+          }
+          return decodeSessionMessages(
+            await runScopedHistoryCommand("getSessionMessages", readOptions, historySessionId),
+          );
+        },
+        catch: (cause) => toRequestError(threadId, method, cause),
+      });
+    const messages = yield* readHistory(sessionId);
+    // Tool results are user-role messages too. Only human prompts begin a turn.
+    const turnStarts = messages.flatMap((message, index) =>
+      isClaudeHumanTurnStart(message) ? [index] : [],
+    );
+    if (messages.length === 0) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method,
+        detail: "Claude session history is unavailable.",
+      });
+    }
+    const boundaries = [...turnStartMessageIds];
+    // Older cursors did not record native boundaries. Infer them only when
+    // their T3 turn count agrees; steers must never be treated as extra turns.
+    if (boundaries.every((id): boolean => id === null) && boundaries.length === turnStarts.length) {
+      boundaries.splice(0, boundaries.length, ...turnStarts.map((index) => messages[index]!.uuid));
+    }
+    const retainedCount = Math.max(0, boundaries.length - numTurns);
+    // Keeping every turn copies the whole transcript.
+    const firstRemoved =
+      numTurns === 0
+        ? messages.length
+        : messages.findIndex((message) => message.uuid === boundaries[retainedCount]);
+    if (
+      boundaries.length === 0 ||
+      boundaries.some((id) => id === null) ||
+      (retainedCount > 0 && firstRemoved < 1)
+    ) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method,
+        detail:
+          "The exact Claude turn boundary is unavailable, possibly after compaction or recovery of older history. Start a new thread instead.",
+      });
+    }
+    const rollbackAt = retainedCount > 0 ? messages[firstRemoved - 1]?.uuid : undefined;
+    const fork = rollbackAt
+      ? yield* Effect.tryPromise({
+          try: async () => {
+            const forkOptions = {
+              ...(cwd ? { dir: cwd } : {}),
+              upToMessageId: rollbackAt,
+            };
+            if (options?.forkSession) return options.forkSession(sessionId, forkOptions);
+            if (claudeEnvironment.CLAUDE_CONFIG_DIR === process.env.CLAUDE_CONFIG_DIR) {
+              return forkSession(sessionId, forkOptions);
+            }
+            return decodeHistoryFork(await runScopedHistoryCommand("forkSession", forkOptions));
+          },
+          catch: (cause) => toRequestError(threadId, method, cause),
+        })
+      : undefined;
+    const retainedBoundaries = boundaries.slice(0, retainedCount);
+    if (fork) {
+      const forkMessages = yield* readHistory(fork.sessionId);
+      const remappedBoundaries = remapClaudeForkTurnBoundaries(
+        messages,
+        forkMessages,
+        firstRemoved,
+        retainedBoundaries,
+      );
+      if (!remappedBoundaries) {
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method,
+          detail: "Claude fork history did not preserve the retained turn boundaries.",
+        });
+      }
+      retainedBoundaries.splice(0, retainedBoundaries.length, ...remappedBoundaries);
+    }
+    return { fork, retainedCount, retainedBoundaries };
+  });
+
   const rollbackThread: ClaudeAdapterShape["rollbackThread"] = Effect.fn("rollbackThread")(
     function* (threadId, numTurns) {
       const context = yield* requireSession(threadId);
@@ -5343,148 +5496,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         return yield* snapshotThread(yield* requireSession(threadId));
       }
-      const sessionId = context.resumeSessionId;
-      if (!sessionId) {
-        return yield* new ProviderAdapterRequestError({
-          provider: PROVIDER,
-          method: "thread/rollback",
-          detail: "Claude session id is unavailable.",
-        });
-      }
-      // The single-executable has no sibling script and no Node to run one
-      // with, so it hosts the worker as a hidden subcommand of itself.
-      const historyWorkerArguments = (yield* HostProcessIsExecutable)
-        ? ["__claude-history"]
-        : [
-            yield* path
-              .fromFileUrl(
-                new URL(
-                  import.meta.url.endsWith(".ts")
-                    ? "../../claude-history-worker.ts"
-                    : "./claude-history-worker.mjs",
-                  import.meta.url,
-                ),
-              )
-              .pipe(Effect.mapError((cause) => toRequestError(threadId, "thread/rollback", cause))),
-          ];
-      const runScopedHistoryCommand = async (
-        method: "getSessionMessages" | "forkSession",
-        args: object,
-        historySessionId = sessionId,
-      ) => {
-        // SDK history helpers read process.env. Isolate the provider's home instead
-        // of changing the server's environment while other providers are running.
-        // @effect-diagnostics-next-line runEffectInsideEffect:off - SDK callback runs outside the fiber; the spawn is self-contained
-        const result = await Effect.runPromise(
-          spawnAndCollect(
-            process.execPath,
-            ChildProcess.make(
-              process.execPath,
-              [...historyWorkerArguments, method, historySessionId, encodeHistoryArgs(args)],
-              { env: { ...claudeEnvironment, ELECTRON_RUN_AS_NODE: "1" } },
-            ),
-          ).pipe(
-            Effect.timeout("30 seconds"),
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          ),
-        );
-        if (result.code !== 0) throw new Error(result.stderr || "Claude history command failed.");
-        return result.stdout;
-      };
-      const readHistory = (historySessionId: string) =>
-        Effect.tryPromise({
-          try: async () => {
-            const readOptions = {
-              ...(context.session.cwd ? { dir: context.session.cwd } : {}),
-              includeSystemMessages: true,
-            };
-            if (options?.getSessionMessages)
-              return options.getSessionMessages(historySessionId, readOptions);
-            if (claudeEnvironment.CLAUDE_CONFIG_DIR === process.env.CLAUDE_CONFIG_DIR) {
-              return getSessionMessages(historySessionId, readOptions);
-            }
-            return decodeSessionMessages(
-              await runScopedHistoryCommand("getSessionMessages", readOptions, historySessionId),
-            );
-          },
-          catch: (cause) => toRequestError(threadId, "thread/rollback", cause),
-        });
-      const messages = yield* readHistory(sessionId);
-      // Tool results are user-role messages too. Only human prompts begin a turn.
-      const turnStarts = messages.flatMap((message, index) =>
-        isClaudeHumanTurnStart(message) ? [index] : [],
-      );
-      if (messages.length === 0) {
-        return yield* new ProviderAdapterRequestError({
-          provider: PROVIDER,
-          method: "thread/rollback",
-          detail: "Claude session history is unavailable.",
-        });
-      }
-      const boundaries = [...context.turnStartMessageIds];
-      // Older cursors did not record native boundaries. Infer them only when
-      // their T3 turn count agrees; steers must never be treated as extra turns.
-      if (
-        boundaries.every((id): boolean => id === null) &&
-        boundaries.length === turnStarts.length
-      ) {
-        boundaries.splice(
-          0,
-          boundaries.length,
-          ...turnStarts.map((index) => messages[index]!.uuid),
-        );
-      }
-      const retainedCount = Math.max(0, boundaries.length - numTurns);
-      const firstRemovedId = boundaries[retainedCount];
-      const firstRemoved = messages.findIndex((message) => message.uuid === firstRemovedId);
-      if (
-        boundaries.length === 0 ||
-        boundaries.some((id) => id === null) ||
-        (retainedCount > 0 && firstRemoved < 1)
-      ) {
-        return yield* new ProviderAdapterRequestError({
-          provider: PROVIDER,
-          method: "thread/rollback",
-          detail:
-            "The exact Claude turn boundary is unavailable, possibly after compaction or recovery of older history. Start a new thread instead.",
-        });
-      }
-      const rollbackAt = retainedCount > 0 ? messages[firstRemoved - 1]?.uuid : undefined;
+      const { fork, retainedCount, retainedBoundaries } = yield* forkClaudeHistory({
+        threadId,
+        method: "thread/rollback",
+        cwd: context.session.cwd,
+        sessionId: context.resumeSessionId,
+        turnStartMessageIds: context.turnStartMessageIds,
+        numTurns,
+      });
       const retainedTurns = context.turns.slice(0, Math.max(0, context.turns.length - numTurns));
-      const fork = rollbackAt
-        ? yield* Effect.tryPromise({
-            try: async () => {
-              const forkOptions = {
-                ...(context.session.cwd ? { dir: context.session.cwd } : {}),
-                upToMessageId: rollbackAt,
-              };
-              if (options?.forkSession) return options.forkSession(sessionId, forkOptions);
-              if (claudeEnvironment.CLAUDE_CONFIG_DIR === process.env.CLAUDE_CONFIG_DIR) {
-                return forkSession(sessionId, forkOptions);
-              }
-              return decodeHistoryFork(await runScopedHistoryCommand("forkSession", forkOptions));
-            },
-            catch: (cause) => toRequestError(threadId, "thread/rollback", cause),
-          })
-        : undefined;
-      const retainedBoundaries = boundaries.slice(0, retainedCount);
-      if (fork) {
-        const forkMessages = yield* readHistory(fork.sessionId);
-        const remappedBoundaries = remapClaudeForkTurnBoundaries(
-          messages,
-          forkMessages,
-          firstRemoved,
-          retainedBoundaries,
-        );
-        if (!remappedBoundaries) {
-          return yield* new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "thread/rollback",
-            detail: "Claude fork history did not preserve the retained turn boundaries.",
-          });
-        }
-        retainedBoundaries.splice(0, retainedBoundaries.length, ...remappedBoundaries);
-      }
       yield* stopSessionInternal(context, { emitExitEvent: false });
       yield* startSession({
         ...context.startInput,
@@ -5500,6 +5520,41 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const restarted = yield* requireSession(threadId);
       restarted.turns.push(...retainedTurns);
       return yield* snapshotThread(restarted);
+    },
+  );
+
+  const forkThread: NonNullable<ClaudeAdapterShape["forkThread"]> = Effect.fn("forkThread")(
+    function* (input) {
+      const resumeState = readClaudeResumeState(input.resumeCursor);
+      if (!Number.isInteger(input.numTurns) || input.numTurns < 0) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "forkThread",
+          issue: "numTurns must be an integer >= 0.",
+        });
+      }
+      const turnStartMessageIds =
+        resumeState?.turnStartMessageIds ??
+        Array.from({ length: resumeState?.turnCount ?? 0 }, () => null);
+      if (input.numTurns >= turnStartMessageIds.length) return { resumeCursor: undefined };
+      const { fork, retainedCount, retainedBoundaries } = yield* forkClaudeHistory({
+        threadId: input.sourceThreadId,
+        method: "thread/fork",
+        cwd: input.cwd,
+        sessionId: resumeState?.resume,
+        turnStartMessageIds,
+        numTurns: input.numTurns,
+      });
+      return {
+        resumeCursor: fork
+          ? {
+              threadId: input.targetThreadId,
+              resume: fork.sessionId,
+              turnCount: retainedCount,
+              turnStartMessageIds: retainedBoundaries,
+            }
+          : undefined,
+      };
     },
   );
 
@@ -5594,6 +5649,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     interruptTurn,
     readThread,
     rollbackThread,
+    forkThread,
     respondToRequest,
     respondToUserInput,
     stopSession,

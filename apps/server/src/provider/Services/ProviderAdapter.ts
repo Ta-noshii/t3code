@@ -140,6 +140,20 @@ export interface ProviderAdapterShape<TError> {
   ) => Effect.Effect<ProviderThreadSnapshot, TError>;
 
   /**
+   * Copy a thread's persisted native conversation, minus its last `numTurns`
+   * turns, into a new provider session for another thread. Works from the
+   * persisted resume cursor, so the source session does not need to be running.
+   * An undefined cursor means the target starts a fresh session.
+   */
+  readonly forkThread?: (input: {
+    readonly sourceThreadId: ThreadId;
+    readonly targetThreadId: ThreadId;
+    readonly resumeCursor: unknown;
+    readonly cwd: string | undefined;
+    readonly numTurns: number;
+  }) => Effect.Effect<{ readonly resumeCursor: unknown }, TError>;
+
+  /**
    * Upload a thread to the provider when the adapter supports feedback.
    */
   readonly uploadFeedback?: (

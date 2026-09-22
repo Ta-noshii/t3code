@@ -6820,6 +6820,81 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "forks a persisted Claude conversation into another thread without a live session",
+    () => {
+      const original = [
+        claudeHistoryMessage({ type: "user", uuid: "u1", content: "first" }),
+        claudeHistoryMessage({ type: "assistant", uuid: "a1" }),
+        claudeHistoryMessage({ type: "user", uuid: "u2", content: "second" }),
+        claudeHistoryMessage({ type: "assistant", uuid: "a2" }),
+      ];
+      const forkCalls: Array<Parameters<NonNullable<ClaudeAdapterLiveOptions["forkSession"]>>> = [];
+      const harness = makeHarness({
+        forkSession: async (...args) => {
+          forkCalls.push(args);
+          return { sessionId: CLAUDE_FORK_SESSION_ID };
+        },
+        getSessionMessages: async (sessionId) => {
+          if (sessionId !== CLAUDE_FORK_SESSION_ID) return original;
+          // Forks copy through `upToMessageId` and rewrite every uuid.
+          const upTo = forkCalls.at(-1)?.[1]?.upToMessageId;
+          return original
+            .slice(0, original.findIndex((message) => message.uuid === upTo) + 1)
+            .map((message) => ({
+              ...message,
+              uuid: `fork-${message.uuid}`,
+              session_id: sessionId,
+            }));
+        },
+      });
+      const targetThreadId = ThreadId.make("thread-claude-fork");
+      const resumeCursor = {
+        threadId: THREAD_ID,
+        resume: CLAUDE_ORIGINAL_SESSION_ID,
+        turnCount: 2,
+        turnStartMessageIds: ["u1", "u2"],
+      };
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const fork = (numTurns: number) =>
+          adapter.forkThread!({
+            sourceThreadId: THREAD_ID,
+            targetThreadId,
+            resumeCursor,
+            cwd: undefined,
+            numTurns,
+          });
+
+        assert.deepEqual(yield* fork(1), {
+          resumeCursor: {
+            threadId: targetThreadId,
+            resume: CLAUDE_FORK_SESSION_ID,
+            turnCount: 1,
+            turnStartMessageIds: ["fork-u1"],
+          },
+        });
+        // Keeping every turn copies through the last message.
+        assert.deepEqual((yield* fork(0)).resumeCursor, {
+          threadId: targetThreadId,
+          resume: CLAUDE_FORK_SESSION_ID,
+          turnCount: 2,
+          turnStartMessageIds: ["fork-u1", "fork-u2"],
+        });
+        // Keeping no turns needs no copy: the fork starts a fresh session.
+        assert.deepEqual(yield* fork(2), { resumeCursor: undefined });
+        assert.deepEqual(forkCalls, [
+          [CLAUDE_ORIGINAL_SESSION_ID, { upToMessageId: "a1" }],
+          [CLAUDE_ORIGINAL_SESSION_ID, { upToMessageId: "a2" }],
+        ]);
+        assert.deepEqual(yield* adapter.listSessions(), []);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("rewinds Claude history when the fork omits retained system messages", () => {
     const forkCalls: Array<Parameters<NonNullable<ClaudeAdapterLiveOptions["forkSession"]>>> = [];
     let firstTurnId = "";

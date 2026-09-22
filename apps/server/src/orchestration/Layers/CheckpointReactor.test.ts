@@ -139,6 +139,7 @@ function createProviderServiceHarness(
         },
       }),
     rollbackConversation,
+    forkConversation: () => Effect.succeed(false),
     uploadFeedback: () => unsupported(),
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub);
@@ -153,6 +154,7 @@ function createProviderServiceHarness(
     service,
     assertConversationRollbackSupported,
     rollbackConversation,
+    forkConversation: () => Effect.succeed(false),
     emit,
   };
 }

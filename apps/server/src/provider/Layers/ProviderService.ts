@@ -2263,6 +2263,47 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const forkConversation: ProviderServiceMethod<"forkConversation"> = Effect.fn("forkConversation")(
+    function* (input) {
+      const binding = Option.getOrUndefined(yield* directory.getBinding(input.sourceThreadId));
+      if (!binding?.resumeCursor) return false;
+      const instanceId = yield* requireBindingInstanceId(
+        "ProviderService.forkConversation",
+        binding,
+      );
+      const adapter = yield* registry.getByInstance(instanceId);
+      if (!adapter.forkThread) return false;
+      const cwd = readPersistedCwd(binding.runtimePayload);
+      const { resumeCursor } = yield* adapter.forkThread({
+        sourceThreadId: input.sourceThreadId,
+        targetThreadId: input.targetThreadId,
+        resumeCursor: binding.resumeCursor,
+        cwd,
+        numTurns: input.numTurns,
+      });
+      if (resumeCursor === undefined) return false;
+      const modelSelection = readPersistedModelSelection(binding.runtimePayload);
+      // Insert-ignore: a session the target already started owns its binding.
+      yield* directory.upsert(
+        {
+          threadId: input.targetThreadId,
+          provider: binding.provider,
+          providerInstanceId: instanceId,
+          status: "stopped",
+          ...(binding.runtimeMode !== undefined ? { runtimeMode: binding.runtimeMode } : {}),
+          resumeCursor,
+          runtimePayload: { cwd: cwd ?? null, ...(modelSelection ? { modelSelection } : {}) },
+        },
+        { onConflict: "ignore" },
+      );
+      yield* analytics.record("provider.conversation.forked", {
+        provider: adapter.provider,
+        turns: input.numTurns,
+      });
+      return true;
+    },
+  );
+
   const uploadFeedback: ProviderServiceMethod<"uploadFeedback"> = Effect.fn("uploadFeedback")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -2427,6 +2468,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     getInstanceInfo,
     assertConversationRollbackSupported,
     rollbackConversation,
+    forkConversation,
     uploadFeedback,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each

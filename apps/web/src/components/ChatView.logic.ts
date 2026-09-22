@@ -21,6 +21,7 @@ import {
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
+import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import {
   squashAtomCommandFailure,
   type AtomCommandResult,
@@ -1383,4 +1384,68 @@ export function restorePlanFollowUpComposer(input: {
     prompt: input.snapshot.prompt,
     detectTrigger: true,
   });
+}
+
+export interface ThreadForkPlan {
+  /** First message the fork leaves out, or null when it copies the whole thread. */
+  beforeMessageId: MessageId | null;
+  /** The user message being edited in the fork, restored to its composer. */
+  editMessage: ChatMessage | null;
+  /** Finished messages the fork keeps. */
+  retained: ChatMessage[];
+}
+
+/**
+ * A user message forks just before itself, so it can be edited in the new thread. A reply
+ * forks after its whole turn, keeping every message up to the next user message.
+ */
+export function planThreadFork(
+  messages: ReadonlyArray<ChatMessage>,
+  messageId: MessageId,
+): ThreadForkPlan | null {
+  const index = messages.findIndex((message) => message.id === messageId);
+  const message = messages[index];
+  if (!message) return null;
+  const cut =
+    message.role === "user"
+      ? index
+      : messages.findIndex((candidate, i) => i > index && candidate.role === "user");
+  const end = cut < 0 ? messages.length : cut;
+  return {
+    beforeMessageId: messages[end]?.id ?? null,
+    editMessage: message.role === "user" ? message : null,
+    retained: messages
+      .slice(0, end)
+      .filter(
+        (candidate) =>
+          !candidate.streaming && (candidate.role === "user" || candidate.role === "assistant"),
+      ),
+  };
+}
+
+/**
+ * The retained conversation as Markdown, for forks whose provider cannot copy its own
+ * session. It rides along as an attachment on the fork's first message.
+ */
+export function buildForkTranscript(input: {
+  title: string;
+  messages: ReadonlyArray<ChatMessage>;
+}): string {
+  const sections = input.messages.flatMap((message) => {
+    const text = replaceComposerContextReferences(
+      message.text,
+      (reference) => reference.label,
+    ).trim();
+    const attachments = (message.attachments ?? []).map((attachment) => attachment.name);
+    const body = [text, attachments.length > 0 ? `(Attached: ${attachments.join(", ")})` : ""]
+      .filter((part) => part.length > 0)
+      .join("\n\n");
+    if (body.length === 0) return [];
+    return [`## ${message.role === "user" ? "User" : "Assistant"}\n\n${body}`];
+  });
+  return [
+    "# Earlier conversation",
+    `This thread was forked from "${input.title}". Below is the conversation up to the fork, oldest first. Treat it as context you already have; the request to act on follows this file.`,
+    ...sections,
+  ].join("\n\n");
 }

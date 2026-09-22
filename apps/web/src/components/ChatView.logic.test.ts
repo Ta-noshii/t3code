@@ -88,6 +88,8 @@ import {
   shouldWriteThreadErrorToCurrentServerThread,
   waitForRevertedMessage,
   prepareRevertedMessageAttachments,
+  planThreadFork,
+  buildForkTranscript,
 } from "./ChatView.logic";
 
 describe("agent browser close confirmation", () => {
@@ -2428,5 +2430,57 @@ describe("worktree setup visibility", () => {
       ...settledDone,
       sequence: 9,
     });
+  });
+});
+
+describe("thread forks", () => {
+  const message = (id: string, role: "user" | "assistant", text: string, streaming = false) => ({
+    id: MessageId.make(id),
+    role,
+    text,
+    turnId: null,
+    createdAt: now,
+    updatedAt: now,
+    streaming,
+  });
+  const messages = [
+    message("u1", "user", "Why does parsing fail?"),
+    message("a1", "assistant", "Trailing commas."),
+    message("a1b", "assistant", "They are dropped in tokenize()."),
+    message("u2", "user", "Fix it"),
+    message("a2", "assistant", "Working", true),
+  ];
+
+  it("forks a user message just before itself so it can be edited", () => {
+    const plan = planThreadFork(messages, MessageId.make("u2"));
+    expect(plan?.beforeMessageId).toBe("u2");
+    expect(plan?.editMessage?.id).toBe("u2");
+    expect(plan?.retained.map((m) => m.id)).toEqual(["u1", "a1", "a1b"]);
+  });
+
+  it("forks a reply after its whole turn", () => {
+    const plan = planThreadFork(messages, MessageId.make("a1"));
+    expect(plan?.beforeMessageId).toBe("u2");
+    expect(plan?.editMessage).toBeNull();
+    expect(plan?.retained.map((m) => m.id)).toEqual(["u1", "a1", "a1b"]);
+  });
+
+  it("copies the whole thread from its last reply, leaving streaming text behind", () => {
+    const plan = planThreadFork(messages, MessageId.make("a2"));
+    expect(plan?.beforeMessageId).toBeNull();
+    expect(plan?.retained.map((m) => m.id)).toEqual(["u1", "a1", "a1b", "u2"]);
+  });
+
+  it("writes the transcript with context links reduced to their labels", () => {
+    const transcript = buildForkTranscript({
+      title: "Parser",
+      messages: [
+        message("u1", "user", "Read [parser.ts](t3-context://v1/mention/ctx_1)"),
+        message("a1", "assistant", "Done."),
+      ],
+    });
+    expect(transcript).toContain('forked from "Parser"');
+    expect(transcript).toContain("## User\n\nRead parser.ts");
+    expect(transcript).toContain("## Assistant\n\nDone.");
   });
 });

@@ -38,6 +38,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
+  forkThread: "orchestration.forkThread",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -2364,6 +2365,32 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedError<Orch
   }
 }
 
+/** Copies a thread's conversation into a new thread in the same workspace. */
+export const OrchestrationForkThreadInput = Schema.Struct({
+  sourceThreadId: ThreadId,
+  threadId: ThreadId,
+  /** First message left out of the fork, or null to copy the whole thread. */
+  beforeMessageId: Schema.NullOr(MessageId),
+  title: TrimmedNonEmptyString,
+});
+export type OrchestrationForkThreadInput = typeof OrchestrationForkThreadInput.Type;
+
+export const OrchestrationForkThreadResult = Schema.Struct({
+  threadId: ThreadId,
+  /** The provider resumes the copied conversation itself. When false, only the visible
+      history was copied and the client must hand the agent the transcript. */
+  nativeHistory: Schema.Boolean,
+});
+export type OrchestrationForkThreadResult = typeof OrchestrationForkThreadResult.Type;
+
+export class OrchestrationForkThreadError extends Schema.TaggedError<OrchestrationForkThreadError>()(
+  "OrchestrationForkThreadError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -2384,6 +2411,10 @@ export const OrchestrationRpcSchemas = {
   searchThreads: {
     input: OrchestrationSearchThreadsInput,
     output: OrchestrationSearchThreadsResult,
+  },
+  forkThread: {
+    input: OrchestrationForkThreadInput,
+    output: OrchestrationForkThreadResult,
   },
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),

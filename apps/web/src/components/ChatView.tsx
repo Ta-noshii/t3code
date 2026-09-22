@@ -298,6 +298,7 @@ import {
   composerDraftHasUserContent,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
+  type ComposerThreadTarget,
   type DraftThreadEnvMode,
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThreadByRef,
@@ -448,6 +449,8 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   resolveFileAttachmentUrl,
+  buildForkTranscript,
+  planThreadFork,
   prepareRevertedMessageAttachments,
   waitForRevertedMessage,
   reconcileMountedTerminalThreadIds,
@@ -496,6 +499,7 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { fileAttachmentCapabilityBlockReason } from "./chat/composerAttachmentFiles";
 import { assetEnvironment } from "../state/assets";
 import { readPreparedConnection } from "../state/session";
+import { threadForkCommand } from "../state/threadFork";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { Button } from "./ui/button";
@@ -1473,6 +1477,33 @@ function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | n
   return current.messageId === null ? current : { ...current, messageId: null };
 }
 
+/** Puts a message's downloaded attachments back into a composer, images as previews. */
+function addRestoredComposerAttachments(
+  target: ComposerThreadTarget,
+  files: ReadonlyArray<File>,
+  message: ChatMessage | null,
+): void {
+  const images: ComposerImageAttachment[] = [];
+  const restoredFiles: ComposerFileAttachment[] = [];
+  files.forEach((file, index) => {
+    const attachment = {
+      id: randomUUID(),
+      name: file.name,
+      mimeType: file.type,
+      sizeBytes: file.size,
+      file,
+    };
+    if (message?.attachments?.[index]?.type === "image") {
+      images.push({ ...attachment, type: "image", previewUrl: URL.createObjectURL(file) });
+    } else {
+      restoredFiles.push({ ...attachment, type: "file" });
+    }
+  });
+  const store = useComposerDraftStore.getState();
+  store.addImages(target, images, { allowDuplicates: true });
+  store.addFiles(target, restoredFiles, { allowDuplicates: true });
+}
+
 export default function ChatView(props: ChatViewProps) {
   const {
     environmentId,
@@ -1543,6 +1574,7 @@ export default function ChatView(props: ChatViewProps) {
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
+  const forkThreadOnServer = useAtomCommand(threadForkCommand, { reportFailure: false });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const { environments } = useEnvironments();
@@ -7089,24 +7121,7 @@ export default function ChatView(props: ChatViewProps) {
               ? `${currentPrompt}\n\n${restoredPrompt}`
               : restoredPrompt;
         store.setPrompt(composerDraftTarget, nextPrompt);
-        const images: ComposerImageAttachment[] = [];
-        const restoredFiles: ComposerFileAttachment[] = [];
-        files.forEach((file, index) => {
-          const attachment = {
-            id: randomUUID(),
-            name: file.name,
-            mimeType: file.type,
-            sizeBytes: file.size,
-            file,
-          };
-          if (message.attachments?.[index]?.type === "image") {
-            images.push({ ...attachment, type: "image", previewUrl: URL.createObjectURL(file) });
-          } else {
-            restoredFiles.push({ ...attachment, type: "file" });
-          }
-        });
-        store.addImages(composerDraftTarget, images, { allowDuplicates: true });
-        store.addFiles(composerDraftTarget, restoredFiles, { allowDuplicates: true });
+        addRestoredComposerAttachments(composerDraftTarget, files, message);
         if (currentRouteThreadKeyRef.current === routeThreadKey) {
           promptRef.current = nextPrompt;
           composerRef.current?.resetCursorState({ prompt: nextPrompt, cursor: nextPrompt.length });
@@ -7145,6 +7160,130 @@ export default function ChatView(props: ChatViewProps) {
       routeThreadRef,
       setThreadError,
       supportsConversationRollback,
+    ],
+  );
+
+  const [isForkingThread, setIsForkingThread] = useState(false);
+  const onForkFromMessage = useCallback(
+    async (messageId: MessageId) => {
+      if (!activeThread || isForkingThread) return;
+      if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
+        setThreadError(
+          activeThread.id,
+          `Reconnect ${activeEnvironmentUnavailableLabel} before forking this thread.`,
+        );
+        return;
+      }
+      if (phase === "running" || isSendBusy || isConnecting) {
+        setThreadError(activeThread.id, "Interrupt the current turn before forking this thread.");
+        return;
+      }
+      const plan = planThreadFork(activeThread.messages, messageId);
+      if (!plan) return;
+
+      setIsForkingThread(true);
+      setThreadError(activeThread.id, null);
+      try {
+        const connection = readPreparedConnection(environmentId);
+        if (!connection) throw new Error("The environment is not connected.");
+        const editFiles = plan.editMessage
+          ? await prepareRevertedMessageAttachments({
+              message: plan.editMessage,
+              environmentId,
+              httpBaseUrl: connection.httpBaseUrl,
+              createAssetUrl: createAttachmentAssetUrl,
+            })
+          : [];
+        const capabilities = serverConfig?.environment.capabilities;
+        let target: ComposerThreadTarget;
+        let targetThreadRef: ScopedThreadRef | null = null;
+        let nativeHistory = false;
+        if (capabilities?.threadFork === true) {
+          const threadId = newThreadId();
+          const result = await forkThreadOnServer({
+            environmentId,
+            input: {
+              sourceThreadId: activeThread.id,
+              threadId,
+              beforeMessageId: plan.beforeMessageId,
+              title: activeThread.title,
+            },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          nativeHistory = result.value.nativeHistory;
+          targetThreadRef = scopeThreadRef(environmentId, threadId);
+          target = targetThreadRef;
+        } else {
+          // Older servers cannot copy history, so the fork starts as a draft in the same
+          // workspace and the transcript travels with its first message.
+          const draft = await handleNewThread(
+            scopeProjectRef(activeThread.environmentId, activeThread.projectId),
+            {
+              branch: activeThread.branch,
+              worktreePath: activeThread.worktreePath,
+              envMode: activeThread.worktreePath ? "worktree" : "local",
+              startFromOrigin: false,
+            },
+          );
+          if (!draft) throw new Error("Could not start a new thread for the fork.");
+          target = draft.draftId;
+        }
+
+        let prompt = plan.editMessage ? recallableComposerPrompt(plan.editMessage.text) : "";
+        const transcriptFiles: File[] = [];
+        if (!nativeHistory && plan.retained.length > 0) {
+          const transcript = buildForkTranscript({
+            title: activeThread.title,
+            messages: plan.retained,
+          });
+          if (capabilities?.fileAttachments) {
+            transcriptFiles.push(
+              new File([transcript], "earlier-conversation.md", { type: "text/markdown" }),
+            );
+          } else {
+            prompt = prompt.length > 0 ? `${transcript}\n\n---\n\n${prompt}` : transcript;
+          }
+          toastManager.add({
+            type: "info",
+            title: "Earlier messages travel with your next message",
+            description: capabilities?.fileAttachments
+              ? `This server can't copy thread history, so ${plan.retained.length} earlier messages are attached as earlier-conversation.md.`
+              : `This server can't copy thread history, so ${plan.retained.length} earlier messages were added to the prompt.`,
+          });
+        }
+        useComposerDraftStore.getState().setPrompt(target, prompt);
+        addRestoredComposerAttachments(target, transcriptFiles, null);
+        addRestoredComposerAttachments(target, editFiles, plan.editMessage);
+        if (targetThreadRef) {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(targetThreadRef),
+          });
+        }
+      } catch (error) {
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to fork this thread.",
+        );
+      } finally {
+        setIsForkingThread(false);
+      }
+    },
+    [
+      activeThread,
+      activeEnvironmentUnavailable,
+      activeEnvironmentUnavailableLabel,
+      createAttachmentAssetUrl,
+      environmentId,
+      forkThreadOnServer,
+      handleNewThread,
+      isConnecting,
+      isForkingThread,
+      isSendBusy,
+      navigate,
+      phase,
+      serverConfig,
+      setThreadError,
     ],
   );
 
@@ -9429,6 +9568,11 @@ export default function ChatView(props: ChatViewProps) {
   const onRevertTimelineTurn = useCallback((targetTurnCount: number, messageId: MessageId) => {
     void onRevertToTurnCountRef.current(targetTurnCount, messageId);
   }, []);
+  const onForkFromMessageRef = useRef(onForkFromMessage);
+  onForkFromMessageRef.current = onForkFromMessage;
+  const onForkTimelineMessage = useCallback((messageId: MessageId) => {
+    void onForkFromMessageRef.current(messageId);
+  }, []);
 
   // Files dropped on a sidebar row land here once the dropped-on thread is
   // actually open, then take the exact same path as a workspace drop:
@@ -9860,6 +10004,7 @@ export default function ChatView(props: ChatViewProps) {
                 onRevertToTurnCount={
                   paintOnlyDisplayedTimeline ? noopHeldRevert : onRevertTimelineTurn
                 }
+                onForkFromMessage={paintOnlyDisplayedTimeline ? undefined : onForkTimelineMessage}
                 isRevertingCheckpoint={!paintOnlyDisplayedTimeline && isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 onFileOpen={paintOnlyDisplayedTimeline ? noopHeldAttachment : openFileAttachment}
