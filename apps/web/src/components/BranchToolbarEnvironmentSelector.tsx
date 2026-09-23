@@ -241,7 +241,7 @@ function CloneEnvironmentSelector({
             <SelectTrigger
               variant="ghost"
               size="xs"
-              className="min-w-0 max-w-full font-normal text-xs!"
+              className="min-w-0 max-w-full"
               aria-label="Environment, or clone this chat to another"
               data-composer-shortcut="composer.host"
               data-composer-context-control

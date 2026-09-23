@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { getSessionMessages } from "@anthropic-ai/claude-agent-sdk";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { exportClaudeSession, importClaudeSession } from "./claudeHistoryWorker.ts";
 

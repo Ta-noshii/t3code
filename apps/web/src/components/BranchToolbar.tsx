@@ -206,8 +206,8 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
     return (
       <Menu>
         <MenuTrigger
-          render={<Button variant="ghost" size="xs" />}
-          className="min-w-0 max-w-[48%] flex-initial justify-start font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80"
+          render={<ComposerControl size="xs" />}
+          className="min-w-0 max-w-[48%] flex-initial justify-start"
           data-composer-context-control
           data-composer-shortcut="composer.host"
         >

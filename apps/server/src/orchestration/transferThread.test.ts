@@ -9,6 +9,7 @@ import {
   type OrchestrationMessage,
   type OrchestrationThread,
 } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -67,7 +68,16 @@ const services =
     readonly dispatched?: Array<OrchestrationCommand>;
     readonly imports?: Array<{ cwd: string; data: unknown }>;
   }) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  <A, E>(
+    effect: Effect.Effect<
+      A,
+      E,
+      | ProjectionSnapshotQuery.ProjectionSnapshotQuery
+      | OrchestrationEngine.OrchestrationEngineService
+      | ProviderService
+      | Crypto.Crypto
+    >,
+  ) =>
     effect.pipe(
       Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
         getThreadDetailById: () => Effect.succeed(Option.some(source)),
@@ -91,7 +101,7 @@ const services =
           }),
       } as unknown as ProviderService["Service"]),
       Effect.provide(NodeServices.layer),
-    ) as Effect.Effect<A, E, never>;
+    );
 
 describe("transferThread", () => {
   it.effect("exports the visible history with the provider conversation", () =>
