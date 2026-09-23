@@ -59,8 +59,74 @@ export function shouldShowEnvironmentIndicator(input: {
   activeEnvironment: Pick<EnvironmentOption, "isPrimary"> | null;
   canPickEnvironment: boolean;
 }): boolean {
-  if (input.canPickEnvironment) return true;
-  return input.activeEnvironment !== null && !input.activeEnvironment.isPrimary;
+  // Always shown, this device included: it is also where a chat is cloned elsewhere.
+  return input.canPickEnvironment || input.activeEnvironment !== null;
+}
+
+/** Where a started chat can be cloned: an environment and the project it lands in. */
+export interface CloneTargetOption {
+  environmentId: EnvironmentId;
+  projectId: ProjectId;
+  environmentLabel: string;
+  machine: EnvironmentMachineKind;
+  /** Null when the target holds this same project, else the target project's name. */
+  projectLabel: string | null;
+  connected: boolean;
+}
+
+/**
+ * Other environments holding this project come first, one entry each. Environments without
+ * it offer each of their own projects, since a clone needs somewhere to live.
+ */
+export function buildCloneTargets(input: {
+  currentEnvironmentId: EnvironmentId;
+  projectEnvironments: ReadonlyArray<EnvironmentOption>;
+  environments: ReadonlyArray<{
+    environmentId: EnvironmentId;
+    label: string;
+    machine: EnvironmentMachineKind;
+    connected: boolean;
+  }>;
+  projects: ReadonlyArray<{ environmentId: EnvironmentId; id: ProjectId; title: string }>;
+}): CloneTargetOption[] {
+  const byId = new Map(
+    input.environments.map((environment) => [environment.environmentId, environment]),
+  );
+  const sameProject = input.projectEnvironments.flatMap((option) => {
+    if (option.environmentId === input.currentEnvironmentId) return [];
+    const environment = byId.get(option.environmentId);
+    return [
+      {
+        environmentId: option.environmentId,
+        projectId: option.projectId,
+        environmentLabel: option.label,
+        machine: option.machine,
+        projectLabel: null,
+        connected: environment?.connected ?? false,
+      },
+    ];
+  });
+  const covered = new Set<EnvironmentId>([
+    input.currentEnvironmentId,
+    ...input.projectEnvironments.map((option) => option.environmentId),
+  ]);
+  const otherProjects = input.environments
+    .filter((environment) => !covered.has(environment.environmentId))
+    .toSorted((a, b) => a.label.localeCompare(b.label))
+    .flatMap((environment) =>
+      input.projects
+        .filter((project) => project.environmentId === environment.environmentId)
+        .toSorted((a, b) => a.title.localeCompare(b.title))
+        .map((project) => ({
+          environmentId: environment.environmentId,
+          projectId: project.id,
+          environmentLabel: environment.label,
+          machine: environment.machine,
+          projectLabel: project.title,
+          connected: environment.connected,
+        })),
+    );
+  return [...sameProject, ...otherProjects];
 }
 
 export function shouldShowComposerContextStrip(input: {

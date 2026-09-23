@@ -23,6 +23,7 @@ import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
 import {
+  type CloneTargetOption,
   type EnvMode,
   type EnvironmentOption,
   resolveContextStripLabelsCompact,
@@ -45,6 +46,7 @@ import {
   Menu,
   MenuGroup,
   MenuGroupLabel,
+  MenuItem,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
@@ -86,6 +88,8 @@ interface BranchToolbarProps {
   onComposerFocusRequest?: () => void;
   availableEnvironments?: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
+  cloneTargets?: readonly CloneTargetOption[];
+  onCloneToEnvironment?: (target: CloneTargetOption) => void;
   composerControlsHostRef?: (element: HTMLDivElement | null) => void;
   contextStripVisible?: boolean;
 }
@@ -101,6 +105,8 @@ interface MobileRunContextSelectorProps {
   showEnvironmentPicker: boolean;
   showEnvironmentIndicator: boolean;
   onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
+  cloneTargets: readonly CloneTargetOption[] | undefined;
+  onCloneToEnvironment: ((target: CloneTargetOption) => void) | undefined;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
@@ -120,6 +126,8 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   showEnvironmentPicker,
   showEnvironmentIndicator,
   onEnvironmentChange,
+  cloneTargets,
+  onCloneToEnvironment,
   effectiveEnvMode,
   activeWorktreePath,
   onEnvModeChange,
@@ -193,6 +201,43 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
       </span>
     </>
   );
+
+  if (envLocked && cloneTargets && cloneTargets.length > 0 && onCloneToEnvironment) {
+    return (
+      <Menu>
+        <MenuTrigger
+          render={<Button variant="ghost" size="xs" />}
+          className="min-w-0 max-w-[48%] flex-initial justify-start font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80"
+          data-composer-context-control
+          data-composer-shortcut="composer.host"
+        >
+          {triggerContent}
+          <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        </MenuTrigger>
+        <MenuPopup align="start" side="top" {...composerFloatingLayerProps}>
+          <MenuGroup>
+            <MenuGroupLabel>Clone chat to</MenuGroupLabel>
+            {cloneTargets.map((target, index) => (
+              <MenuItem
+                key={index}
+                disabled={!target.connected}
+                onClick={() => onCloneToEnvironment(target)}
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <EnvironmentMachineIcon kind={target.machine} className="size-3" />
+                  <span className="min-w-0 truncate">
+                    {target.projectLabel
+                      ? `${target.environmentLabel} · ${target.projectLabel}`
+                      : target.environmentLabel}
+                  </span>
+                </span>
+              </MenuItem>
+            ))}
+          </MenuGroup>
+        </MenuPopup>
+      </Menu>
+    );
+  }
 
   if (isLocked) {
     return (
@@ -523,6 +568,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   onComposerFocusRequest,
   availableEnvironments,
   onEnvironmentChange,
+  cloneTargets,
+  onCloneToEnvironment,
   composerControlsHostRef,
   contextStripVisible = true,
 }: BranchToolbarProps) {
@@ -642,6 +689,8 @@ export const BranchToolbar = memo(function BranchToolbar({
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={showEnvironmentIndicator}
             onEnvironmentChange={onEnvironmentChange}
+            cloneTargets={cloneTargets}
+            onCloneToEnvironment={onCloneToEnvironment}
             effectiveEnvMode={effectiveEnvMode}
             activeWorktreePath={activeWorktreePath}
             onEnvModeChange={onEnvModeChange}
@@ -668,6 +717,8 @@ export const BranchToolbar = memo(function BranchToolbar({
                 environmentId={environmentId}
                 availableEnvironments={availableEnvironments}
                 {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
+                cloneTargets={cloneTargets}
+                onCloneToEnvironment={onCloneToEnvironment}
               />
               {showGitControls ? (
                 <Separator

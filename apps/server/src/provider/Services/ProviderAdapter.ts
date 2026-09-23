@@ -156,6 +156,27 @@ export interface ProviderAdapterShape<TError> {
   }) => Effect.Effect<{ readonly resumeCursor: unknown }, TError>;
 
   /**
+   * Serialize the provider's own conversation so another machine can resume it. Undefined
+   * when there is nothing to export.
+   */
+  readonly exportConversation?: (input: {
+    readonly threadId: ThreadId;
+    readonly resumeCursor: unknown;
+    readonly cwd: string | undefined;
+  }) => Effect.Effect<{ readonly format: string; readonly data: unknown } | undefined, TError>;
+
+  /**
+   * Recreate an exported conversation on this machine for `threadId`, returning the cursor
+   * its first turn resumes.
+   */
+  readonly importConversation?: (input: {
+    readonly threadId: ThreadId;
+    readonly cwd: string;
+    readonly format: string;
+    readonly data: unknown;
+  }) => Effect.Effect<{ readonly resumeCursor: unknown }, TError>;
+
+  /**
    * Upload a thread to the provider when the adapter supports feedback.
    */
   readonly uploadFeedback?: (

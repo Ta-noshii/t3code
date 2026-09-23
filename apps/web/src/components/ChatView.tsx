@@ -1,4 +1,6 @@
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
+import { requestConfirmDialog } from "~/confirmDialog";
+import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import {
@@ -22,6 +24,7 @@ import {
   type ChatFileAttachment,
   DEFAULT_MODEL,
   type EnvironmentId,
+  type OrchestrationExportThreadResult,
   type MessageId,
   type ModelSelection,
   type ProjectScript,
@@ -386,6 +389,8 @@ import {
   resolveLocalCheckoutBranchMismatch,
   shouldShowComposerContextStrip,
   shouldShowEnvironmentIndicator,
+  buildCloneTargets,
+  type CloneTargetOption,
 } from "./BranchToolbar.logic";
 import {
   getProviderStatusBannerKey,
@@ -451,6 +456,7 @@ import {
   resolveFileAttachmentUrl,
   buildForkTranscript,
   planThreadFork,
+  resolveCloneModelSelection,
   prepareRevertedMessageAttachments,
   waitForRevertedMessage,
   reconcileMountedTerminalThreadIds,
@@ -500,6 +506,7 @@ import { fileAttachmentCapabilityBlockReason } from "./chat/composerAttachmentFi
 import { assetEnvironment } from "../state/assets";
 import { readPreparedConnection } from "../state/session";
 import { threadForkCommand } from "../state/threadFork";
+import { threadExportCommand, threadImportCommand } from "../state/threadTransfer";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { Button } from "./ui/button";
@@ -1575,6 +1582,8 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const forkThreadOnServer = useAtomCommand(threadForkCommand, { reportFailure: false });
+  const exportThreadFromServer = useAtomCommand(threadExportCommand, { reportFailure: false });
+  const importThreadOnServer = useAtomCommand(threadImportCommand, { reportFailure: false });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const { environments } = useEnvironments();
@@ -2508,6 +2517,24 @@ export default function ChatView(props: ChatViewProps) {
     return envs;
   }, [activeProject, allProjects, projectGroupingSettings, primaryEnvironmentId, environmentById]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
+  const cloneTargets = useMemo(
+    () =>
+      activeThread
+        ? buildCloneTargets({
+            currentEnvironmentId: activeThread.environmentId,
+            projectEnvironments: logicalProjectEnvironments,
+            environments: environments.map((environment) => ({
+              environmentId: environment.environmentId,
+              label: environment.label,
+              machine: resolveEnvironmentMachineKind(environment.serverConfig ?? null),
+              connected:
+                environment.connection.phase === "connected" && environment.serverConfig !== null,
+            })),
+            projects: allProjects,
+          })
+        : [],
+    [activeThread, allProjects, environments, logicalProjectEnvironments],
+  );
   const activeEnvironmentOption =
     logicalProjectEnvironments.find(
       (environment) => environment.environmentId === activeThread?.environmentId,
@@ -7290,6 +7317,176 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const onCloneToEnvironment = useCallback(
+    async (targetOption: CloneTargetOption) => {
+      const targetEnvironmentId = targetOption.environmentId;
+      if (!activeThread || isForkingThread || targetEnvironmentId === environmentId) return;
+      const targetEnvironment = environmentById.get(targetEnvironmentId);
+      if (!targetEnvironment) return;
+      const targetLabel = targetOption.projectLabel
+        ? `${targetOption.environmentLabel} (${targetOption.projectLabel})`
+        : targetOption.environmentLabel;
+      const sourceLabel =
+        logicalProjectEnvironments.find((option) => option.environmentId === environmentId)
+          ?.label ?? "this machine";
+      if (phase === "running" || isSendBusy || isConnecting) {
+        setThreadError(activeThread.id, "Interrupt the current turn before cloning this thread.");
+        return;
+      }
+      if (targetEnvironment.connection.phase !== "connected" || !targetEnvironment.serverConfig) {
+        setThreadError(
+          activeThread.id,
+          `Connect ${targetOption.environmentLabel} before cloning this thread to it.`,
+        );
+        return;
+      }
+      const confirmed =
+        (await requestConfirmDialog(
+          [
+            `Clone this chat to ${targetLabel}?`,
+            `A copy of the conversation opens on ${targetOption.environmentLabel}, in the ${targetOption.projectLabel ? `"${targetOption.projectLabel}" project's` : "project's"} main folder${activeThread.worktreePath ? " rather than this thread's worktree" : ""}. This chat stays here unchanged.`,
+          ].join("\n"),
+        )) ?? true;
+      if (!confirmed) return;
+
+      setIsForkingThread(true);
+      setThreadError(activeThread.id, null);
+      try {
+        const sourceCapabilities = serverConfig?.environment.capabilities;
+        const targetConfig = targetEnvironment.serverConfig;
+        const targetCapabilities = targetConfig.environment.capabilities;
+        const messages = activeThread.messages.filter(
+          (message) =>
+            !message.streaming && (message.role === "user" || message.role === "assistant"),
+        );
+        let exported: OrchestrationExportThreadResult | null = null;
+        if (sourceCapabilities?.threadTransfer === true) {
+          const result = await exportThreadFromServer({
+            environmentId,
+            input: { threadId: activeThread.id },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          exported = result.value;
+        }
+        const modelSelection =
+          resolveCloneModelSelection({
+            source: activeThread.modelSelection,
+            sourceProviders: serverConfig?.providers ?? [],
+            targetProviders: targetConfig.providers,
+          }) ?? activeThread.modelSelection;
+
+        let target: ComposerThreadTarget;
+        let targetThreadRef: ScopedThreadRef | null = null;
+        let nativeHistory = false;
+        if (targetCapabilities.threadTransfer === true) {
+          const threadId = newThreadId();
+          const importInput = {
+            threadId,
+            projectId: targetOption.projectId,
+            title: activeThread.title,
+            modelSelection,
+            runtimeMode: activeThread.runtimeMode,
+            interactionMode: activeThread.interactionMode,
+            messages:
+              exported?.messages ??
+              messages.map((message) => ({
+                role: message.role as "user" | "assistant",
+                text:
+                  replaceComposerContextReferences(message.text, (reference) => reference.label) ||
+                  "[attachments]",
+                createdAt: message.createdAt,
+              })),
+            conversation: exported?.conversation ?? null,
+          };
+          let result = await importThreadOnServer({
+            environmentId: targetEnvironmentId,
+            input: importInput,
+          });
+          // A provider session too large for the connection still clones as visible history.
+          if (result._tag === "Failure" && importInput.conversation !== null) {
+            result = await importThreadOnServer({
+              environmentId: targetEnvironmentId,
+              input: { ...importInput, conversation: null },
+            });
+          }
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          nativeHistory = result.value.nativeHistory;
+          targetThreadRef = scopeThreadRef(targetEnvironmentId, threadId);
+          target = targetThreadRef;
+        } else {
+          // Servers without the import RPC take the clone as a draft whose first message
+          // carries the transcript.
+          const draft = await handleNewThread(
+            scopeProjectRef(targetEnvironmentId, targetOption.projectId),
+            { branch: null, worktreePath: null, envMode: "local", startFromOrigin: false },
+          );
+          if (!draft) {
+            throw new Error(`Could not start a thread on ${targetOption.environmentLabel}.`);
+          }
+          target = draft.draftId;
+        }
+
+        let prompt = "";
+        const transcriptFiles: File[] = [];
+        if (!nativeHistory && messages.length > 0) {
+          const transcript = buildForkTranscript({
+            title: activeThread.title,
+            messages,
+            clonedFrom: sourceLabel,
+          });
+          if (targetCapabilities.fileAttachments) {
+            transcriptFiles.push(
+              new File([transcript], "earlier-conversation.md", { type: "text/markdown" }),
+            );
+          } else {
+            prompt = transcript;
+          }
+          toastManager.add({
+            type: "info",
+            title: "Earlier messages travel with your next message",
+            description: `${targetOption.environmentLabel} couldn't take over the agent's own session, so the ${messages.length} earlier messages are ${targetCapabilities.fileAttachments ? "attached as earlier-conversation.md" : "in the prompt"}.`,
+          });
+        }
+        useComposerDraftStore.getState().setPrompt(target, prompt);
+        addRestoredComposerAttachments(target, transcriptFiles, null);
+        if (targetThreadRef) {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(targetThreadRef),
+          });
+        }
+      } catch (error) {
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to clone this thread.",
+        );
+      } finally {
+        setIsForkingThread(false);
+      }
+    },
+    [
+      activeThread,
+      environmentById,
+      environmentId,
+      exportThreadFromServer,
+      handleNewThread,
+      importThreadOnServer,
+      isConnecting,
+      isForkingThread,
+      isSendBusy,
+      logicalProjectEnvironments,
+      navigate,
+      phase,
+      serverConfig,
+      setThreadError,
+    ],
+  );
+
+  const onCloneTargetSelected = useCallback(
+    (target: CloneTargetOption) => void onCloneToEnvironment(target),
+    [onCloneToEnvironment],
+  );
+
   const onCompactContext = async () => {
     if (compactDisabled || !activeThread || !clientSettingsHydrated || sendInFlightRef.current) {
       return;
@@ -10304,6 +10501,9 @@ export default function ChatView(props: ChatViewProps) {
                                     : undefined
                                 }
                                 availableEnvironments={logicalProjectEnvironments}
+                                {...(routeKind === "server" && envLocked
+                                  ? { cloneTargets, onCloneToEnvironment: onCloneTargetSelected }
+                                  : {})}
                                 composerControlsHostRef={setRestingComposerControlsHost}
                                 contextStripVisible={showComposerContextStrip}
                               />

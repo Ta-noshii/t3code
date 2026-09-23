@@ -28,6 +28,9 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.searchThreads]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.forkThread]: AuthOrchestrationOperateScope,
+  // Exports carry the provider's raw session, which includes more than the thread shows.
+  [ORCHESTRATION_WS_METHODS.exportThread]: AuthOrchestrationOperateScope,
+  [ORCHESTRATION_WS_METHODS.importThread]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_WS_METHODS.subscribeShell]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.subscribeThread]: AuthOrchestrationReadScope,

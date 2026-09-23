@@ -1424,12 +1424,37 @@ export function planThreadFork(
 }
 
 /**
+ * The model a clone uses on another environment. Instance ids are per machine, so keep
+ * the source's instance only if the target has it with the same driver, otherwise take
+ * the target's first usable instance of that driver. Null when the target has none.
+ */
+export function resolveCloneModelSelection(input: {
+  source: ModelSelection;
+  sourceProviders: ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver">>;
+  targetProviders: ReadonlyArray<
+    Pick<ServerProvider, "instanceId" | "driver" | "enabled" | "installed">
+  >;
+}): ModelSelection | null {
+  const driver = input.sourceProviders.find(
+    (provider) => provider.instanceId === input.source.instanceId,
+  )?.driver;
+  const usable = input.targetProviders.filter(
+    (provider) => provider.enabled && provider.installed && provider.driver === driver,
+  );
+  const target =
+    usable.find((provider) => provider.instanceId === input.source.instanceId) ?? usable[0];
+  return target ? { ...input.source, instanceId: target.instanceId } : null;
+}
+
+/**
  * The retained conversation as Markdown, for forks whose provider cannot copy its own
  * session. It rides along as an attachment on the fork's first message.
  */
 export function buildForkTranscript(input: {
   title: string;
   messages: ReadonlyArray<ChatMessage>;
+  /** Label of the environment a whole-thread clone came from. */
+  clonedFrom?: string;
 }): string {
   const sections = input.messages.flatMap((message) => {
     const text = replaceComposerContextReferences(
@@ -1445,7 +1470,9 @@ export function buildForkTranscript(input: {
   });
   return [
     "# Earlier conversation",
-    `This thread was forked from "${input.title}". Below is the conversation up to the fork, oldest first. Treat it as context you already have; the request to act on follows this file.`,
+    input.clonedFrom === undefined
+      ? `This thread was forked from "${input.title}". Below is the conversation up to the fork, oldest first. Treat it as context you already have; the request to act on follows this file.`
+      : `This thread was cloned from "${input.title}" on ${input.clonedFrom}, another machine, so file paths and the working tree may differ here. Below is the whole conversation, oldest first. Treat it as context you already have; the request to act on follows this file.`,
     ...sections,
   ].join("\n\n");
 }

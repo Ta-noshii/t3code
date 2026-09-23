@@ -24,6 +24,8 @@ import type {
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
   MessageId,
+  ModelSelection,
+  RuntimeMode,
   ThreadId,
   ProviderTurnStartResult,
 } from "@t3tools/contracts";
@@ -34,6 +36,14 @@ import type * as Stream from "effect/Stream";
 import type { ProviderServiceError } from "../Errors.ts";
 import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
 import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
+
+/** A provider conversation in transit between environments. */
+export interface ProviderConversationExport {
+  /** Provider driver kind that produced it; only the same driver can import it. */
+  readonly driver: string;
+  readonly format: string;
+  readonly data: unknown;
+}
 
 /**
  * ProviderServiceShape - Service API for provider session and turn orchestration.
@@ -131,6 +141,26 @@ export interface ProviderServiceShape {
     readonly targetThreadId: ThreadId;
     readonly numTurns: number;
     readonly firstDroppedPrompt?: string | undefined;
+  }) => Effect.Effect<boolean, ProviderServiceError>;
+
+  /**
+   * Export the provider conversation bound to a thread, or null when its provider has
+   * nothing it can export.
+   */
+  readonly exportConversation: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<ProviderConversationExport | null, ProviderServiceError>;
+
+  /**
+   * Bind `threadId` to a copy of an exported conversation. False when the selected
+   * provider instance cannot take it, so the caller must carry the history another way.
+   */
+  readonly importConversation: (input: {
+    readonly threadId: ThreadId;
+    readonly modelSelection: ModelSelection;
+    readonly runtimeMode: RuntimeMode;
+    readonly cwd: string;
+    readonly conversation: ProviderConversationExport;
   }) => Effect.Effect<boolean, ProviderServiceError>;
 
   /**

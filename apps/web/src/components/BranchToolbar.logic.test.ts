@@ -1,4 +1,4 @@
-import { EnvironmentId, type VcsRef } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, type VcsRef } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   dedupeRemoteBranchesWithLocalMatches,
@@ -20,6 +20,7 @@ import {
   shouldIncludeBranchPickerItem,
   shouldShowComposerContextStrip,
   shouldShowEnvironmentIndicator,
+  buildCloneTargets,
 } from "./BranchToolbar.logic";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
@@ -404,13 +405,13 @@ describe("shouldShowEnvironmentIndicator", () => {
     ).toBe(true);
   });
 
-  it("hides a sole primary (this-device) environment", () => {
+  it("shows a sole primary (this-device) environment, the entry point for cloning", () => {
     expect(
       shouldShowEnvironmentIndicator({
         activeEnvironment: { isPrimary: true },
         canPickEnvironment: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("hides the indicator when the active environment is unknown", () => {
@@ -856,5 +857,63 @@ describe("sanitizeNewRefName", () => {
   it("does not collapse dashes the user typed", () => {
     expect(sanitizeNewRefName("new - branch")).toBe("new---branch");
     expect(sanitizeNewRefName("foo--bar")).toBe("foo--bar");
+  });
+});
+
+describe("buildCloneTargets", () => {
+  const thirdEnvironmentId = EnvironmentId.make("environment-third");
+  it("lists this project's other environments, then other environments' projects", () => {
+    const targets = buildCloneTargets({
+      currentEnvironmentId: localEnvironmentId,
+      projectEnvironments: [
+        {
+          environmentId: localEnvironmentId,
+          projectId: ProjectId.make("p-local"),
+          label: "This device",
+          isPrimary: true,
+          machine: "linux",
+        },
+        {
+          environmentId: remoteEnvironmentId,
+          projectId: ProjectId.make("p-remote"),
+          label: "misc-01-prod",
+          isPrimary: false,
+          machine: "server",
+        },
+      ],
+      environments: [
+        {
+          environmentId: localEnvironmentId,
+          label: "This device",
+          machine: "linux",
+          connected: true,
+        },
+        {
+          environmentId: remoteEnvironmentId,
+          label: "misc-01-prod",
+          machine: "server",
+          connected: true,
+        },
+        {
+          environmentId: thirdEnvironmentId,
+          label: "build-box",
+          machine: "server",
+          connected: false,
+        },
+      ],
+      projects: [
+        { environmentId: localEnvironmentId, id: ProjectId.make("p-local"), title: "parser" },
+        { environmentId: remoteEnvironmentId, id: ProjectId.make("p-remote"), title: "parser" },
+        { environmentId: thirdEnvironmentId, id: ProjectId.make("p-z"), title: "zeta" },
+        { environmentId: thirdEnvironmentId, id: ProjectId.make("p-a"), title: "alpha" },
+      ],
+    });
+    expect(
+      targets.map((target) => [target.environmentLabel, target.projectLabel, target.connected]),
+    ).toEqual([
+      ["misc-01-prod", null, true],
+      ["build-box", "alpha", false],
+      ["build-box", "zeta", false],
+    ]);
   });
 });

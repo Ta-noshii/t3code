@@ -39,6 +39,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
   forkThread: "orchestration.forkThread",
+  exportThread: "orchestration.exportThread",
+  importThread: "orchestration.importThread",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -2391,6 +2393,66 @@ export class OrchestrationForkThreadError extends Schema.TaggedError<Orchestrati
   },
 ) {}
 
+/** A message carried between environments when a thread is cloned. */
+export const OrchestrationTransferMessage = Schema.Struct({
+  role: Schema.Literals(["user", "assistant"]),
+  text: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type OrchestrationTransferMessage = typeof OrchestrationTransferMessage.Type;
+
+/** A provider's own conversation state, so the agent on another machine resumes with full
+    context rather than a transcript. `data` is opaque to everything but the provider. */
+export const OrchestrationTransferConversation = Schema.Struct({
+  driver: TrimmedNonEmptyString,
+  format: TrimmedNonEmptyString,
+  /** Gzipped JSON, base64 encoded. */
+  data: Schema.String,
+});
+export type OrchestrationTransferConversation = typeof OrchestrationTransferConversation.Type;
+
+export const OrchestrationExportThreadInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationExportThreadInput = typeof OrchestrationExportThreadInput.Type;
+
+export const OrchestrationExportThreadResult = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  messages: Schema.Array(OrchestrationTransferMessage),
+  /** Null when the provider cannot export its conversation. */
+  conversation: Schema.NullOr(OrchestrationTransferConversation),
+});
+export type OrchestrationExportThreadResult = typeof OrchestrationExportThreadResult.Type;
+
+/** Creates a thread from another environment's export. */
+export const OrchestrationImportThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  messages: Schema.Array(OrchestrationTransferMessage),
+  conversation: Schema.NullOr(OrchestrationTransferConversation),
+});
+export type OrchestrationImportThreadInput = typeof OrchestrationImportThreadInput.Type;
+
+/** Same meaning as the fork result: without native history the client hands the agent
+    the transcript. */
+export const OrchestrationImportThreadResult = OrchestrationForkThreadResult;
+export type OrchestrationImportThreadResult = typeof OrchestrationImportThreadResult.Type;
+
+export class OrchestrationTransferThreadError extends Schema.TaggedError<OrchestrationTransferThreadError>()(
+  "OrchestrationTransferThreadError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -2415,6 +2477,14 @@ export const OrchestrationRpcSchemas = {
   forkThread: {
     input: OrchestrationForkThreadInput,
     output: OrchestrationForkThreadResult,
+  },
+  exportThread: {
+    input: OrchestrationExportThreadInput,
+    output: OrchestrationExportThreadResult,
+  },
+  importThread: {
+    input: OrchestrationImportThreadInput,
+    output: OrchestrationImportThreadResult,
   },
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),

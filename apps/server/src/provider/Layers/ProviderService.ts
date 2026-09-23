@@ -2305,6 +2305,59 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const exportConversation: ProviderServiceMethod<"exportConversation"> = Effect.fn(
+    "exportConversation",
+  )(function* (input) {
+    const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+    if (!binding?.resumeCursor) return null;
+    const instanceId = yield* requireBindingInstanceId(
+      "ProviderService.exportConversation",
+      binding,
+    );
+    const adapter = yield* registry.getByInstance(instanceId);
+    if (!adapter.exportConversation) return null;
+    const exported = yield* adapter.exportConversation({
+      threadId: input.threadId,
+      resumeCursor: binding.resumeCursor,
+      cwd: readPersistedCwd(binding.runtimePayload),
+    });
+    return exported ? { driver: adapter.provider, ...exported } : null;
+  });
+
+  const importConversation: ProviderServiceMethod<"importConversation"> = Effect.fn(
+    "importConversation",
+  )(function* (input) {
+    const found = yield* registry
+      .getByInstance(input.modelSelection.instanceId)
+      .pipe(Effect.option);
+    if (Option.isNone(found)) return false;
+    const adapter = found.value;
+    if (!adapter.importConversation || adapter.provider !== input.conversation.driver) {
+      return false;
+    }
+    const { resumeCursor } = yield* adapter.importConversation({
+      threadId: input.threadId,
+      cwd: input.cwd,
+      format: input.conversation.format,
+      data: input.conversation.data,
+    });
+    // Insert-ignore: a session the thread already started owns its binding.
+    yield* directory.upsert(
+      {
+        threadId: input.threadId,
+        provider: adapter.provider,
+        providerInstanceId: input.modelSelection.instanceId,
+        status: "stopped",
+        runtimeMode: input.runtimeMode,
+        resumeCursor,
+        runtimePayload: { cwd: input.cwd, modelSelection: input.modelSelection },
+      },
+      { onConflict: "ignore" },
+    );
+    yield* analytics.record("provider.conversation.imported", { provider: adapter.provider });
+    return true;
+  });
+
   const uploadFeedback: ProviderServiceMethod<"uploadFeedback"> = Effect.fn("uploadFeedback")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -2470,6 +2523,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     assertConversationRollbackSupported,
     rollbackConversation,
     forkConversation,
+    exportConversation,
+    importConversation,
     uploadFeedback,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each

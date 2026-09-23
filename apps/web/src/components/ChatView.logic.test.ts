@@ -90,6 +90,7 @@ import {
   prepareRevertedMessageAttachments,
   planThreadFork,
   buildForkTranscript,
+  resolveCloneModelSelection,
 } from "./ChatView.logic";
 
 describe("agent browser close confirmation", () => {
@@ -2482,5 +2483,53 @@ describe("thread forks", () => {
     expect(transcript).toContain('forked from "Parser"');
     expect(transcript).toContain("## User\n\nRead parser.ts");
     expect(transcript).toContain("## Assistant\n\nDone.");
+  });
+});
+
+describe("resolveCloneModelSelection", () => {
+  const provider = (instanceId: string, driver: string, enabled = true) => ({
+    instanceId: ProviderInstanceId.make(instanceId),
+    driver: ProviderDriverKind.make(driver),
+    enabled,
+    installed: true,
+  });
+  const source = { instanceId: ProviderInstanceId.make("claude-work"), model: "claude-opus-5-5" };
+  const sourceProviders = [provider("claude-work", "claudeAgent")];
+
+  it("keeps the source instance when the target has it", () => {
+    expect(
+      resolveCloneModelSelection({
+        source,
+        sourceProviders,
+        targetProviders: [
+          provider("claudeAgent", "claudeAgent"),
+          provider("claude-work", "claudeAgent"),
+        ],
+      })?.instanceId,
+    ).toBe("claude-work");
+  });
+
+  it("falls back to the target's instance of the same driver", () => {
+    expect(
+      resolveCloneModelSelection({
+        source,
+        sourceProviders,
+        targetProviders: [
+          provider("codex", "codex"),
+          provider("claude-off", "claudeAgent", false),
+          provider("claudeAgent", "claudeAgent"),
+        ],
+      }),
+    ).toEqual({ instanceId: "claudeAgent", model: "claude-opus-5-5" });
+  });
+
+  it("returns null when the target lacks the driver", () => {
+    expect(
+      resolveCloneModelSelection({
+        source,
+        sourceProviders,
+        targetProviders: [provider("codex", "codex")],
+      }),
+    ).toBeNull();
   });
 });

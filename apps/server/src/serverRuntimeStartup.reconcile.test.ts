@@ -69,6 +69,8 @@ const makeProviderService = (liveThreadIds: ReadonlyArray<ThreadId> = []) =>
     getInstanceInfo: () => Effect.die("unused"),
     rollbackConversation: () => Effect.die("unused"),
     forkConversation: () => Effect.succeed(false),
+    exportConversation: () => Effect.succeed(null),
+    importConversation: () => Effect.succeed(false),
     uploadFeedback: () => Effect.die("unused"),
     streamEvents: Stream.empty,
   }) satisfies ProviderService.ProviderService["Service"];

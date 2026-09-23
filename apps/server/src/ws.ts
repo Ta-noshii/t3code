@@ -146,6 +146,7 @@ import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import { importRecentAgentThreads } from "./project/AgentSessionImporter.ts";
 import { forkThread } from "./orchestration/forkThread.ts";
+import { exportThread, importThread } from "./orchestration/transferThread.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
@@ -2013,6 +2014,35 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.forkThread,
             forkThread(input).pipe(
+              Effect.provideService(
+                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                projectionSnapshotQuery,
+              ),
+              Effect.provideService(
+                OrchestrationEngine.OrchestrationEngineService,
+                orchestrationEngine,
+              ),
+              Effect.provideService(ProviderService.ProviderService, providerService),
+              Effect.provideService(Crypto.Crypto, crypto),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.exportThread]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.exportThread,
+            exportThread(input).pipe(
+              Effect.provideService(
+                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                projectionSnapshotQuery,
+              ),
+              Effect.provideService(ProviderService.ProviderService, providerService),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.importThread]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.importThread,
+            importThread(input).pipe(
               Effect.provideService(
                 ProjectionSnapshotQuery.ProjectionSnapshotQuery,
                 projectionSnapshotQuery,
