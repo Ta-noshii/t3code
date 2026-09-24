@@ -69,8 +69,9 @@ export interface CloneTargetOption {
   projectId: ProjectId;
   environmentLabel: string;
   machine: EnvironmentMachineKind;
-  /** Null when the target holds this same project, else the target project's name. */
-  projectLabel: string | null;
+  projectLabel: string;
+  /** The target project is this chat's project, checked out on the other environment. */
+  sameProject: boolean;
   connected: boolean;
 }
 
@@ -80,6 +81,7 @@ export interface CloneTargetOption {
  */
 export function buildCloneTargets(input: {
   currentEnvironmentId: EnvironmentId;
+  currentProjectLabel: string;
   projectEnvironments: ReadonlyArray<EnvironmentOption>;
   environments: ReadonlyArray<{
     environmentId: EnvironmentId;
@@ -95,13 +97,18 @@ export function buildCloneTargets(input: {
   const sameProject = input.projectEnvironments.flatMap((option) => {
     if (option.environmentId === input.currentEnvironmentId) return [];
     const environment = byId.get(option.environmentId);
+    const project = input.projects.find(
+      (candidate) =>
+        candidate.environmentId === option.environmentId && candidate.id === option.projectId,
+    );
     return [
       {
         environmentId: option.environmentId,
         projectId: option.projectId,
         environmentLabel: option.label,
         machine: option.machine,
-        projectLabel: null,
+        projectLabel: project?.title ?? input.currentProjectLabel,
+        sameProject: true,
         connected: environment?.connected ?? false,
       },
     ];
@@ -123,6 +130,7 @@ export function buildCloneTargets(input: {
           environmentLabel: environment.label,
           machine: environment.machine,
           projectLabel: project.title,
+          sameProject: false,
           connected: environment.connected,
         })),
     );

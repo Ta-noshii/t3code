@@ -38,7 +38,10 @@ import {
   BranchToolbarBranchSelector,
   type BranchToolbarBranchSelectorHandle,
 } from "./BranchToolbarBranchSelector";
-import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
+import {
+  BranchToolbarEnvironmentSelector,
+  CloneEnvironmentMenuContent,
+} from "./BranchToolbarEnvironmentSelector";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { ComposerControl } from "./chat/ComposerControl";
@@ -46,7 +49,6 @@ import {
   Menu,
   MenuGroup,
   MenuGroupLabel,
-  MenuItem,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
@@ -215,25 +217,11 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
           <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
         </MenuTrigger>
         <MenuPopup align="start" side="top" {...composerFloatingLayerProps}>
-          <MenuGroup>
-            <MenuGroupLabel>Clone chat to</MenuGroupLabel>
-            {cloneTargets.map((target, index) => (
-              <MenuItem
-                key={index}
-                disabled={!target.connected}
-                onClick={() => onCloneToEnvironment(target)}
-              >
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <EnvironmentMachineIcon kind={target.machine} className="size-3" />
-                  <span className="min-w-0 truncate">
-                    {target.projectLabel
-                      ? `${target.environmentLabel} · ${target.projectLabel}`
-                      : target.environmentLabel}
-                  </span>
-                </span>
-              </MenuItem>
-            ))}
-          </MenuGroup>
+          <CloneEnvironmentMenuContent
+            activeEnvironment={activeEnvironment ?? null}
+            cloneTargets={cloneTargets}
+            onCloneToEnvironment={onCloneToEnvironment}
+          />
         </MenuPopup>
       </Menu>
     );

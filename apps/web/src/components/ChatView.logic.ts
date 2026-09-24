@@ -1456,7 +1456,55 @@ export function buildForkTranscript(input: {
   /** Label of the environment a whole-thread clone came from. */
   clonedFrom?: string;
 }): string {
-  const sections = input.messages.flatMap((message) => {
+  const sections = transcriptSections(input.messages);
+  return [
+    "# Earlier conversation",
+    input.clonedFrom === undefined
+      ? `This thread was forked from "${input.title}". Below is the conversation up to the fork, oldest first. Treat it as context you already have; the request to act on follows this file.`
+      : `This thread was cloned from "${input.title}" on ${input.clonedFrom}, another machine, so file paths and the working tree may differ here. Below is the whole conversation, oldest first. Treat it as context you already have; the request to act on follows this file.`,
+    ...sections,
+  ].join("\n\n");
+}
+
+/**
+ * First message of a clone whose agent session could not move with it. It carries the
+ * conversation and asks the agent to pick it up, so the clone is ready without the user
+ * resending anything. The oldest messages drop out when the whole conversation would
+ * pass `maxChars`.
+ */
+export function buildCloneHandoffMessage(input: {
+  title: string;
+  messages: ReadonlyArray<ChatMessage>;
+  clonedFrom: string;
+  maxChars: number;
+}): string {
+  const intro = `This chat was copied from "${input.title}" on ${input.clonedFrom}, another machine. Your earlier session could not come with it, so the conversation so far is below, oldest first. File paths and the working tree here may differ from ${input.clonedFrom}.`;
+  const outro =
+    "# Your task now\n\nRead the conversation above and take it over as your own. Don't run tools or change files yet. Reply with a short summary of where we left off and what was about to happen next, then wait for my next message.";
+  const sections = transcriptSections(input.messages);
+  const budget = input.maxChars - intro.length - outro.length - 200;
+  const kept: string[] = [];
+  let used = 0;
+  for (let index = sections.length - 1; index >= 0; index -= 1) {
+    const section = sections[index]!;
+    if (used + section.length + 2 > budget) break;
+    kept.unshift(section);
+    used += section.length + 2;
+  }
+  const dropped = sections.length - kept.length;
+  return [
+    intro,
+    "# Earlier conversation",
+    ...(dropped > 0
+      ? [`(The ${dropped} oldest messages were left out to fit the message size limit.)`]
+      : []),
+    ...kept,
+    outro,
+  ].join("\n\n");
+}
+
+function transcriptSections(messages: ReadonlyArray<ChatMessage>): string[] {
+  return messages.flatMap((message) => {
     const text = replaceComposerContextReferences(
       message.text,
       (reference) => reference.label,
@@ -1468,11 +1516,4 @@ export function buildForkTranscript(input: {
     if (body.length === 0) return [];
     return [`## ${message.role === "user" ? "User" : "Assistant"}\n\n${body}`];
   });
-  return [
-    "# Earlier conversation",
-    input.clonedFrom === undefined
-      ? `This thread was forked from "${input.title}". Below is the conversation up to the fork, oldest first. Treat it as context you already have; the request to act on follows this file.`
-      : `This thread was cloned from "${input.title}" on ${input.clonedFrom}, another machine, so file paths and the working tree may differ here. Below is the whole conversation, oldest first. Treat it as context you already have; the request to act on follows this file.`,
-    ...sections,
-  ].join("\n\n");
 }

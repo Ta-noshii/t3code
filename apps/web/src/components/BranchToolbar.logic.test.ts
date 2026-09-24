@@ -865,6 +865,7 @@ describe("buildCloneTargets", () => {
   it("lists this project's other environments, then other environments' projects", () => {
     const targets = buildCloneTargets({
       currentEnvironmentId: localEnvironmentId,
+      currentProjectLabel: "parser",
       projectEnvironments: [
         {
           environmentId: localEnvironmentId,
@@ -909,11 +910,16 @@ describe("buildCloneTargets", () => {
       ],
     });
     expect(
-      targets.map((target) => [target.environmentLabel, target.projectLabel, target.connected]),
+      targets.map((target) => [
+        target.environmentLabel,
+        target.projectLabel,
+        target.sameProject,
+        target.connected,
+      ]),
     ).toEqual([
-      ["misc-01-prod", null, true],
-      ["build-box", "alpha", false],
-      ["build-box", "zeta", false],
+      ["misc-01-prod", "parser", true, true],
+      ["build-box", "alpha", false, false],
+      ["build-box", "zeta", false, false],
     ]);
   });
 });

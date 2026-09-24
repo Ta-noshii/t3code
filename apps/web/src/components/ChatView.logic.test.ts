@@ -89,6 +89,7 @@ import {
   waitForRevertedMessage,
   prepareRevertedMessageAttachments,
   planThreadFork,
+  buildCloneHandoffMessage,
   buildForkTranscript,
   resolveCloneModelSelection,
 } from "./ChatView.logic";
@@ -2483,6 +2484,34 @@ describe("thread forks", () => {
     expect(transcript).toContain('forked from "Parser"');
     expect(transcript).toContain("## User\n\nRead parser.ts");
     expect(transcript).toContain("## Assistant\n\nDone.");
+  });
+
+  it("hands a clone the conversation and asks the agent to pick it up", () => {
+    const handoff = buildCloneHandoffMessage({
+      title: "Parser",
+      messages: [message("u1", "user", "Fix the parser"), message("a1", "assistant", "Done.")],
+      clonedFrom: "graduation",
+      maxChars: 10_000,
+    });
+    expect(handoff).toContain('copied from "Parser" on graduation');
+    expect(handoff).toContain("## User\n\nFix the parser\n\n## Assistant\n\nDone.");
+    expect(handoff.endsWith("then wait for my next message.")).toBe(true);
+  });
+
+  it("drops the oldest messages when a clone's conversation is too long", () => {
+    const handoff = buildCloneHandoffMessage({
+      title: "Parser",
+      messages: [
+        message("u1", "user", "old ".repeat(300)),
+        message("a1", "assistant", "Newest reply."),
+      ],
+      clonedFrom: "graduation",
+      maxChars: 1_000,
+    });
+    expect(handoff.length).toBeLessThanOrEqual(1_000);
+    expect(handoff).toContain("The 1 oldest messages were left out");
+    expect(handoff).not.toContain("old old");
+    expect(handoff).toContain("Newest reply.");
   });
 });
 

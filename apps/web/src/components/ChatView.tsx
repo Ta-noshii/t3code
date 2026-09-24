@@ -41,6 +41,7 @@ import {
   type KeybindingCommand,
   OrchestrationThreadActivity,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderInteractionMode,
   ProviderDriverKind,
   resolveEnvironmentMachineKind,
@@ -454,6 +455,7 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   resolveFileAttachmentUrl,
+  buildCloneHandoffMessage,
   buildForkTranscript,
   planThreadFork,
   resolveCloneModelSelection,
@@ -2522,6 +2524,7 @@ export default function ChatView(props: ChatViewProps) {
       activeThread
         ? buildCloneTargets({
             currentEnvironmentId: activeThread.environmentId,
+            currentProjectLabel: activeProject?.title ?? "this project",
             projectEnvironments: logicalProjectEnvironments,
             environments: environments.map((environment) => ({
               environmentId: environment.environmentId,
@@ -2533,7 +2536,7 @@ export default function ChatView(props: ChatViewProps) {
             projects: allProjects,
           })
         : [],
-    [activeThread, allProjects, environments, logicalProjectEnvironments],
+    [activeProject?.title, activeThread, allProjects, environments, logicalProjectEnvironments],
   );
   const activeEnvironmentOption =
     logicalProjectEnvironments.find(
@@ -7323,28 +7326,26 @@ export default function ChatView(props: ChatViewProps) {
       if (!activeThread || isForkingThread || targetEnvironmentId === environmentId) return;
       const targetEnvironment = environmentById.get(targetEnvironmentId);
       if (!targetEnvironment) return;
-      const targetLabel = targetOption.projectLabel
-        ? `${targetOption.environmentLabel} (${targetOption.projectLabel})`
-        : targetOption.environmentLabel;
+      const targetLabel = `${targetOption.environmentLabel} (${targetOption.projectLabel})`;
       const sourceLabel =
         logicalProjectEnvironments.find((option) => option.environmentId === environmentId)
           ?.label ?? "this machine";
       if (phase === "running" || isSendBusy || isConnecting) {
-        setThreadError(activeThread.id, "Interrupt the current turn before cloning this thread.");
+        setThreadError(activeThread.id, "Stop the current turn before copying this chat.");
         return;
       }
       if (targetEnvironment.connection.phase !== "connected" || !targetEnvironment.serverConfig) {
         setThreadError(
           activeThread.id,
-          `Connect ${targetOption.environmentLabel} before cloning this thread to it.`,
+          `Connect ${targetOption.environmentLabel} before copying this chat to it.`,
         );
         return;
       }
       const confirmed =
         (await requestConfirmDialog(
           [
-            `Clone this chat to ${targetLabel}?`,
-            `A copy of the conversation opens on ${targetOption.environmentLabel}, in the ${targetOption.projectLabel ? `"${targetOption.projectLabel}" project's` : "project's"} main folder${activeThread.worktreePath ? " rather than this thread's worktree" : ""}. This chat stays here unchanged.`,
+            `Copy this chat to ${targetLabel}?`,
+            `A new chat opens on ${targetOption.environmentLabel} with this conversation in it and continues from where you are. It works in the "${targetOption.projectLabel}" project's main folder${activeThread.worktreePath ? ", not this chat's worktree" : ""}. This chat stays here unchanged.`,
           ].join("\n"),
         )) ?? true;
       if (!confirmed) return;
@@ -7375,11 +7376,10 @@ export default function ChatView(props: ChatViewProps) {
             targetProviders: targetConfig.providers,
           }) ?? activeThread.modelSelection;
 
-        let target: ComposerThreadTarget;
-        let targetThreadRef: ScopedThreadRef | null = null;
+        const threadId = newThreadId();
         let nativeHistory = false;
+        let threadCreated = false;
         if (targetCapabilities.threadTransfer === true) {
-          const threadId = newThreadId();
           const importInput = {
             threadId,
             projectId: targetOption.projectId,
@@ -7411,54 +7411,77 @@ export default function ChatView(props: ChatViewProps) {
           }
           if (result._tag === "Failure") throw squashAtomCommandFailure(result);
           nativeHistory = result.value.nativeHistory;
-          targetThreadRef = scopeThreadRef(targetEnvironmentId, threadId);
-          target = targetThreadRef;
-        } else {
-          // Servers without the import RPC take the clone as a draft whose first message
-          // carries the transcript.
+          threadCreated = true;
+        }
+
+        // Without the agent's own session, the agent on the target reads the conversation
+        // from a first message the clone sends for it.
+        if (!nativeHistory && messages.length > 0) {
+          const createdAt = new Date().toISOString();
+          const result = await startThreadTurn({
+            environmentId: targetEnvironmentId,
+            input: {
+              threadId,
+              message: {
+                messageId: newMessageId(),
+                role: "user",
+                text: buildCloneHandoffMessage({
+                  title: activeThread.title,
+                  messages,
+                  clonedFrom: sourceLabel,
+                  maxChars: PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+                }),
+                attachments: [],
+              },
+              modelSelection,
+              titleSeed: activeThread.title,
+              runtimeMode: activeThread.runtimeMode,
+              interactionMode: activeThread.interactionMode,
+              ...(threadCreated
+                ? {}
+                : {
+                    bootstrap: {
+                      createThread: {
+                        projectId: targetOption.projectId,
+                        title: activeThread.title,
+                        modelSelection,
+                        runtimeMode: activeThread.runtimeMode,
+                        interactionMode: activeThread.interactionMode,
+                        branch: null,
+                        worktreePath: null,
+                        createdAt,
+                      },
+                    },
+                  }),
+              createdAt,
+            },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        } else if (!threadCreated) {
           const draft = await handleNewThread(
             scopeProjectRef(targetEnvironmentId, targetOption.projectId),
             { branch: null, worktreePath: null, envMode: "local", startFromOrigin: false },
           );
           if (!draft) {
-            throw new Error(`Could not start a thread on ${targetOption.environmentLabel}.`);
+            throw new Error(`Could not start a chat on ${targetOption.environmentLabel}.`);
           }
-          target = draft.draftId;
+          return;
         }
-
-        let prompt = "";
-        const transcriptFiles: File[] = [];
-        if (!nativeHistory && messages.length > 0) {
-          const transcript = buildForkTranscript({
-            title: activeThread.title,
-            messages,
-            clonedFrom: sourceLabel,
-          });
-          if (targetCapabilities.fileAttachments) {
-            transcriptFiles.push(
-              new File([transcript], "earlier-conversation.md", { type: "text/markdown" }),
-            );
-          } else {
-            prompt = transcript;
-          }
-          toastManager.add({
-            type: "info",
-            title: "Earlier messages travel with your next message",
-            description: `${targetOption.environmentLabel} couldn't take over the agent's own session, so the ${messages.length} earlier messages are ${targetCapabilities.fileAttachments ? "attached as earlier-conversation.md" : "in the prompt"}.`,
-          });
-        }
-        useComposerDraftStore.getState().setPrompt(target, prompt);
-        addRestoredComposerAttachments(target, transcriptFiles, null);
-        if (targetThreadRef) {
-          await navigate({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(targetThreadRef),
-          });
-        }
+        toastManager.add({
+          type: "success",
+          title: `Copied to ${targetLabel}`,
+          description: nativeHistory
+            ? "The agent's session came along, so it remembers the whole chat."
+            : "The agent is reading the earlier conversation and will reply with a summary.",
+        });
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(scopeThreadRef(targetEnvironmentId, threadId)),
+        });
       } catch (error) {
         setThreadError(
           activeThread.id,
-          error instanceof Error ? error.message : "Failed to clone this thread.",
+          error instanceof Error ? error.message : "Failed to copy this chat.",
         );
       } finally {
         setIsForkingThread(false);
@@ -7471,6 +7494,7 @@ export default function ChatView(props: ChatViewProps) {
       exportThreadFromServer,
       handleNewThread,
       importThreadOnServer,
+      startThreadTurn,
       isConnecting,
       isForkingThread,
       isSendBusy,

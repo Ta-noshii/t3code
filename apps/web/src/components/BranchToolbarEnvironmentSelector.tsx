@@ -1,10 +1,23 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { CopyIcon, ScaleIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, FolderIcon, ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import type { CloneTargetOption, EnvironmentOption } from "./BranchToolbar.logic";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { ComposerControl } from "./chat/ComposerControl";
 import { useComposerMenuProps } from "./chat/composerEventScope";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "./ui/menu";
 import {
   Select,
   SelectGroup,
@@ -176,9 +189,80 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   );
 });
 
-const CURRENT_ENVIRONMENT_VALUE = "current";
+/**
+ * Menu body for a started chat: where it runs now, then one submenu per other environment
+ * listing the projects the chat can be copied into.
+ */
+export function CloneEnvironmentMenuContent({
+  activeEnvironment,
+  cloneTargets,
+  onCloneToEnvironment,
+}: {
+  activeEnvironment: EnvironmentOption | null;
+  cloneTargets: readonly CloneTargetOption[];
+  onCloneToEnvironment: (target: CloneTargetOption) => void;
+}) {
+  const composerFloatingLayerProps = useComposerMenuProps();
+  const groups = new Map<EnvironmentId, CloneTargetOption[]>();
+  for (const target of cloneTargets) {
+    const group = groups.get(target.environmentId) ?? [];
+    group.push(target);
+    groups.set(target.environmentId, group);
+  }
 
-/** Environment picker for a started chat: the current environment plus clone targets. */
+  return (
+    <>
+      <MenuGroup>
+        <MenuGroupLabel>This chat runs on</MenuGroupLabel>
+        <MenuItem>
+          <EnvironmentMachineIcon kind={activeEnvironment?.machine ?? "server"} />
+          <span className="min-w-0 flex-1 truncate">{activeEnvironment?.label ?? "Unknown"}</span>
+          <CheckIcon className="ms-3" />
+        </MenuItem>
+      </MenuGroup>
+      <MenuSeparator />
+      <MenuGroup>
+        <MenuGroupLabel>Copy this chat to another machine</MenuGroupLabel>
+        {Array.from(groups.values(), (targets) => {
+          const first = targets[0]!;
+          if (!first.connected) {
+            return (
+              <MenuItem key={first.environmentId} disabled>
+                <EnvironmentMachineIcon kind={first.machine} />
+                <span className="min-w-0 flex-1 truncate">{first.environmentLabel}</span>
+                <span className="ms-3 text-muted-foreground text-xs">offline</span>
+              </MenuItem>
+            );
+          }
+          return (
+            <MenuSub key={first.environmentId}>
+              <MenuSubTrigger>
+                <EnvironmentMachineIcon kind={first.machine} />
+                <span className="min-w-0 flex-1 truncate">{first.environmentLabel}</span>
+              </MenuSubTrigger>
+              <MenuSubPopup {...composerFloatingLayerProps}>
+                <MenuGroup>
+                  <MenuGroupLabel>Into project</MenuGroupLabel>
+                  {targets.map((target) => (
+                    <MenuItem key={target.projectId} onClick={() => onCloneToEnvironment(target)}>
+                      <FolderIcon />
+                      <span className="min-w-0 flex-1 truncate">{target.projectLabel}</span>
+                      {target.sameProject ? (
+                        <span className="ms-3 text-muted-foreground text-xs">same project</span>
+                      ) : null}
+                    </MenuItem>
+                  ))}
+                </MenuGroup>
+              </MenuSubPopup>
+            </MenuSub>
+          );
+        })}
+      </MenuGroup>
+    </>
+  );
+}
+
+/** Environment chip for a started chat. Opens the copy menu. */
 function CloneEnvironmentSelector({
   activeEnvironment,
   cloneTargets,
@@ -190,59 +274,16 @@ function CloneEnvironmentSelector({
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const label = activeEnvironment?.label ?? "Run on";
-  const items = useMemo(
-    () => [
-      { value: CURRENT_ENVIRONMENT_VALUE, label },
-      ...cloneTargets.map((target, index) => ({
-        value: String(index),
-        label: target.projectLabel
-          ? `${target.environmentLabel} · ${target.projectLabel}`
-          : target.environmentLabel,
-      })),
-    ],
-    [cloneTargets, label],
-  );
-  const sameProjectTargets = cloneTargets.flatMap((target, index) =>
-    target.projectLabel === null ? [{ target, index }] : [],
-  );
-  const otherProjectGroups = new Map<
-    EnvironmentId,
-    Array<{ target: CloneTargetOption; index: number }>
-  >();
-  cloneTargets.forEach((target, index) => {
-    if (target.projectLabel === null) return;
-    const group = otherProjectGroups.get(target.environmentId) ?? [];
-    group.push({ target, index });
-    otherProjectGroups.set(target.environmentId, group);
-  });
-  const renderTarget = ({ target, index }: { target: CloneTargetOption; index: number }) => (
-    <SelectItem key={index} value={String(index)} disabled={!target.connected}>
-      <span className="inline-flex min-w-0 items-center gap-1.5">
-        <EnvironmentMachineIcon kind={target.machine} className="size-3 shrink-0" />
-        <span className="min-w-0 truncate">{target.projectLabel ?? target.environmentLabel}</span>
-        {target.connected ? null : <span className="text-muted-foreground/70">offline</span>}
-      </span>
-    </SelectItem>
-  );
 
   return (
-    <Select
-      modal={false}
-      value={CURRENT_ENVIRONMENT_VALUE}
-      onValueChange={(value) => {
-        const target = value === null ? undefined : cloneTargets[Number(value)];
-        if (value !== CURRENT_ENVIRONMENT_VALUE && target) onCloneToEnvironment(target);
-      }}
-      items={items}
-    >
+    <Menu modal={false}>
       <Tooltip>
         <TooltipTrigger
           render={
-            <SelectTrigger
-              variant="ghost"
-              size="xs"
+            <MenuTrigger
+              render={<ComposerControl size="xs" />}
               className="min-w-0 max-w-full"
-              aria-label="Environment, or clone this chat to another"
+              aria-label={`Runs on ${label}. Copy this chat to another machine`}
               data-composer-shortcut="composer.host"
               data-composer-context-control
             />
@@ -260,48 +301,20 @@ function CloneEnvironmentSelector({
               data-composer-label-motion
               className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
             >
-              <SelectValue />
-            </span>
-          </span>
-        </TooltipTrigger>
-        <TooltipPopup>{`${label} · pick another environment to clone this chat there`}</TooltipPopup>
-      </Tooltip>
-      <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
-        <SelectGroup>
-          <SelectGroupLabel>Running on</SelectGroupLabel>
-          <SelectItem value={CURRENT_ENVIRONMENT_VALUE}>
-            <span className="inline-flex items-center gap-1.5">
-              <EnvironmentMachineIcon
-                kind={activeEnvironment?.machine ?? "server"}
-                className="size-3"
-              />
               {label}
             </span>
-          </SelectItem>
-        </SelectGroup>
-        {sameProjectTargets.length > 0 ? (
-          <SelectGroup>
-            <SelectGroupLabel>
-              <span className="inline-flex items-center gap-1.5">
-                <CopyIcon className="size-3" aria-hidden="true" />
-                Clone chat to
-              </span>
-            </SelectGroupLabel>
-            {sameProjectTargets.map(renderTarget)}
-          </SelectGroup>
-        ) : null}
-        {Array.from(otherProjectGroups.values(), (group) => (
-          <SelectGroup key={group[0]!.target.environmentId}>
-            <SelectGroupLabel>
-              <span className="inline-flex items-center gap-1.5">
-                <CopyIcon className="size-3" aria-hidden="true" />
-                Clone chat to {group[0]!.target.environmentLabel}
-              </span>
-            </SelectGroupLabel>
-            {group.map(renderTarget)}
-          </SelectGroup>
-        ))}
-      </SelectPopup>
-    </Select>
+          </span>
+          <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        </TooltipTrigger>
+        <TooltipPopup>{`Runs on ${label}. Click to copy this chat to another machine.`}</TooltipPopup>
+      </Tooltip>
+      <MenuPopup align="start" side="top" {...composerFloatingLayerProps}>
+        <CloneEnvironmentMenuContent
+          activeEnvironment={activeEnvironment}
+          cloneTargets={cloneTargets}
+          onCloneToEnvironment={onCloneToEnvironment}
+        />
+      </MenuPopup>
+    </Menu>
   );
 }
