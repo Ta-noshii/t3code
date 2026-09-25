@@ -1,4 +1,4 @@
-import { gunzipSync, gzipSync } from "node:zlib";
+import * as NodeZlib from "node:zlib";
 
 import {
   CommandId,
@@ -28,11 +28,11 @@ const transferError = (message: string, cause?: unknown) =>
   new OrchestrationTransferThreadError({ message, ...(cause !== undefined ? { cause } : {}) });
 
 export function encodeTransferData(data: unknown): string {
-  return gzipSync(Buffer.from(JSON.stringify(data), "utf8")).toString("base64");
+  return NodeZlib.gzipSync(Buffer.from(JSON.stringify(data), "utf8")).toString("base64");
 }
 
 export function decodeTransferData(data: string): unknown {
-  return JSON.parse(gunzipSync(Buffer.from(data, "base64")).toString("utf8"));
+  return JSON.parse(NodeZlib.gunzipSync(Buffer.from(data, "base64")).toString("utf8"));
 }
 
 /** Reads a thread and its provider conversation for cloning onto another environment. */
