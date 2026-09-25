@@ -9997,6 +9997,8 @@ export default function ChatView(props: ChatViewProps) {
         model={agentPanelModel}
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
+        cwd={activeThread?.worktreePath ?? activeProject?.workspaceRoot}
+        transcriptsSupported={serverConfig?.environment.capabilities.agentTranscripts === true}
       />
     ) : renderedRightPanelSurface?.kind === "device" ? (
       <Suspense fallback={null}>

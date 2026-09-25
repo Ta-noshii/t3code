@@ -99,6 +99,7 @@ import {
   OrchestrationExportThreadInput,
   OrchestrationImportThreadInput,
   OrchestrationTransferThreadError,
+  OrchestrationGetAgentTranscriptError,
   OrchestrationSearchThreadsError,
   OrchestrationSearchThreadsInput,
   OrchestrationGetTurnDiffError,
@@ -1319,6 +1320,12 @@ const WsOrchestrationExportThreadRpc = Rpc.make(ORCHESTRATION_WS_METHODS.exportT
   error: Schema.Union([OrchestrationTransferThreadError, EnvironmentAuthorizationError]),
 });
 
+const WsOrchestrationGetAgentTranscriptRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getAgentTranscript, {
+  payload: OrchestrationRpcSchemas.getAgentTranscript.input,
+  success: OrchestrationRpcSchemas.getAgentTranscript.output,
+  error: Schema.Union([OrchestrationGetAgentTranscriptError, EnvironmentAuthorizationError]),
+});
+
 const WsOrchestrationImportThreadRpc = Rpc.make(ORCHESTRATION_WS_METHODS.importThread, {
   payload: OrchestrationImportThreadInput,
   success: OrchestrationRpcSchemas.importThread.output,
@@ -1559,6 +1566,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationForkThreadRpc,
   WsOrchestrationExportThreadRpc,
   WsOrchestrationImportThreadRpc,
+  WsOrchestrationGetAgentTranscriptRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,

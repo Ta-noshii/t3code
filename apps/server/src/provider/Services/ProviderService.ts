@@ -29,12 +29,13 @@ import type {
   ThreadId,
   ProviderTurnStartResult,
 } from "@t3tools/contracts";
+
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 
 import type { ProviderServiceError } from "../Errors.ts";
-import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
+import type { AgentTranscript, ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
 import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
 
 /** A provider conversation in transit between environments. */
@@ -162,6 +163,15 @@ export interface ProviderServiceShape {
     readonly cwd: string;
     readonly conversation: ProviderConversationExport;
   }) => Effect.Effect<boolean, ProviderServiceError>;
+
+  /**
+   * Read a subagent's own conversation for the Agents panel, or null when the thread's
+   * provider keeps none this server can read.
+   */
+  readonly readAgentTranscript: (input: {
+    readonly threadId: ThreadId;
+    readonly toolUseId: string;
+  }) => Effect.Effect<AgentTranscript | null, ProviderServiceError>;
 
   /**
    * Upload a thread and return the provider's shareable feedback identifier.

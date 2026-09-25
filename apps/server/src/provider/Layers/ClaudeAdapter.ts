@@ -8,8 +8,8 @@
  * @module ClaudeAdapterLive
  */
 
-import * as NodeFs from "node:fs/promises";
-import * as NodeOs from "node:os";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import {
@@ -61,6 +61,7 @@ import {
   ThreadId,
   TurnId,
   type UserInputQuestion,
+  OrchestrationAgentTranscriptEntry,
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
@@ -123,6 +124,7 @@ import {
   type ClaudeSessionExport,
   exportClaudeSession,
   importClaudeSession,
+  readClaudeSubagentTranscript,
 } from "../../claudeHistoryWorker.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
@@ -144,6 +146,16 @@ const isClaudeSessionExport = Schema.is(
 function decodeClaudeSessionExport(data: unknown): ClaudeSessionExport | undefined {
   return isClaudeSessionExport(data) ? (data as ClaudeSessionExport) : undefined;
 }
+const decodeAgentTranscript = Schema.decodeSync(
+  Schema.fromJsonString(
+    Schema.NullOr(
+      Schema.Struct({
+        entries: Schema.Array(OrchestrationAgentTranscriptEntry),
+        truncated: Schema.Boolean,
+      }),
+    ),
+  ),
+);
 const decodeHistoryFork = Schema.decodeSync(
   Schema.fromJsonString(Schema.Struct({ sessionId: Schema.String })),
 );
@@ -5415,7 +5427,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             .pipe(Effect.mapError((cause) => toRequestError(threadId, method, cause))),
         ];
     return async (
-      command: "getSessionMessages" | "forkSession" | "exportSession" | "importSession",
+      command:
+        | "getSessionMessages"
+        | "forkSession"
+        | "exportSession"
+        | "importSession"
+        | "readSubagentTranscript",
       args: object,
       historySessionId = defaultSessionId,
     ) => {
@@ -5675,6 +5692,24 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     return { format: CLAUDE_SESSION_EXPORT_FORMAT, data };
   });
 
+  const readAgentTranscript: NonNullable<ClaudeAdapterShape["readAgentTranscript"]> = Effect.fn(
+    "readAgentTranscript",
+  )(function* (input) {
+    const sessionId = readClaudeResumeState(input.resumeCursor)?.resume;
+    if (!sessionId) return undefined;
+    const method = "thread/agent-transcript";
+    const run = yield* makeScopedHistoryRunner(input.threadId, method, sessionId);
+    const options = { ...(input.cwd ? { dir: input.cwd } : {}), toolUseId: input.toolUseId };
+    const transcript = yield* Effect.tryPromise({
+      try: async () =>
+        claudeEnvironment.CLAUDE_CONFIG_DIR === process.env.CLAUDE_CONFIG_DIR
+          ? await readClaudeSubagentTranscript(sessionId, input.toolUseId, options)
+          : decodeAgentTranscript(await run("readSubagentTranscript", options)),
+      catch: (cause) => toRequestError(input.threadId, method, cause),
+    });
+    return transcript ?? undefined;
+  });
+
   const importConversation: NonNullable<ClaudeAdapterShape["importConversation"]> = Effect.fn(
     "importConversation",
   )(function* (input) {
@@ -5694,13 +5729,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           return importClaudeSession(exported, { dir: input.cwd });
         }
         // Sessions can be tens of megabytes, too large for an argument.
-        const dir = await NodeFs.mkdtemp(NodePath.join(NodeOs.tmpdir(), "t3-claude-import-"));
+        const dir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-claude-import-"));
         try {
           const inputFile = NodePath.join(dir, "session.json");
-          await NodeFs.writeFile(inputFile, encodeHistoryArgs(exported));
+          await NodeFSP.writeFile(inputFile, encodeHistoryArgs(exported));
           return decodeHistoryFork(await run("importSession", { dir: input.cwd, inputFile }));
         } finally {
-          await NodeFs.rm(dir, { recursive: true, force: true });
+          await NodeFSP.rm(dir, { recursive: true, force: true });
         }
       },
       catch: (cause) => toRequestError(input.threadId, method, cause),
@@ -5802,6 +5837,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     rollbackThread,
     forkThread,
     exportConversation,
+    readAgentTranscript,
     importConversation,
     respondToRequest,
     respondToUserInput,

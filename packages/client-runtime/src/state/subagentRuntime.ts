@@ -71,6 +71,8 @@ export interface RuntimeSubagent {
   readonly result: string | null;
   readonly error: string | null;
   readonly outputFile: string | null;
+  /** The tool call that spawned this agent; keys the provider's own transcript. */
+  readonly toolUseId: string | null;
   readonly parentAgentId: string | null;
   readonly agentIndex: number | null;
   readonly phaseIndex: number | null;
@@ -240,6 +242,7 @@ interface MutableAgent {
   result: string | null;
   error: string | null;
   outputFile: string | null;
+  toolUseId: string | null;
   parentAgentId: string | null;
   agentIndex: number | null;
   phaseIndex: number | null;
@@ -297,6 +300,7 @@ function getOrCreate(
     result: null,
     error: null,
     outputFile: null,
+    toolUseId: asString(payload.toolUseId) ?? null,
     parentAgentId: asString(payload.parentAgentId) ?? null,
     agentIndex: asCount(payload.agentIndex) ?? null,
     phaseIndex: asCount(payload.phaseIndex) ?? null,
@@ -356,6 +360,8 @@ function fillMetadata(agent: MutableAgent, payload: Record<string, unknown>): vo
   }
   const outputFile = asString(payload.outputFile);
   if (outputFile) agent.outputFile = outputFile;
+  const toolUseId = asString(payload.toolUseId);
+  if (toolUseId) agent.toolUseId = toolUseId;
   if (Array.isArray(payload.phases)) {
     const phases: SubagentWorkflowPhase[] = [];
     for (const entry of payload.phases) {

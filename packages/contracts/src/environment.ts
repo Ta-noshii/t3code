@@ -129,6 +129,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server implements `orchestration.exportThread` and `orchestration.importThread`, which
       clone a thread and its provider conversation onto another environment. */
   threadTransfer: Schema.optionalKey(Schema.Boolean),
+  /** Server implements `orchestration.getAgentTranscript`, which reads a subagent's own
+      conversation for the Agents panel. */
+  agentTranscripts: Schema.optionalKey(Schema.Boolean),
   /** Server streams themes an environment publishes. Absent on servers from
       before environment themes shipped, which never emit the events -- so a
       client reconnecting to one must drop published themes rather than keep

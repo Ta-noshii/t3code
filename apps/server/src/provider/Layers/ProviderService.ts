@@ -2324,6 +2324,26 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     return exported ? { driver: adapter.provider, ...exported } : null;
   });
 
+  const readAgentTranscript: ProviderServiceMethod<"readAgentTranscript"> = Effect.fn(
+    "readAgentTranscript",
+  )(function* (input) {
+    const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+    if (!binding?.resumeCursor) return null;
+    const instanceId = yield* requireBindingInstanceId(
+      "ProviderService.readAgentTranscript",
+      binding,
+    );
+    const adapter = yield* registry.getByInstance(instanceId);
+    if (!adapter.readAgentTranscript) return null;
+    const entries = yield* adapter.readAgentTranscript({
+      threadId: input.threadId,
+      resumeCursor: binding.resumeCursor,
+      cwd: readPersistedCwd(binding.runtimePayload),
+      toolUseId: input.toolUseId,
+    });
+    return entries ?? null;
+  });
+
   const importConversation: ProviderServiceMethod<"importConversation"> = Effect.fn(
     "importConversation",
   )(function* (input) {
@@ -2525,6 +2545,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     forkConversation,
     exportConversation,
     importConversation,
+    readAgentTranscript,
     uploadFeedback,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each

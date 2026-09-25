@@ -21,8 +21,16 @@ import type {
   ThreadId,
   ProviderTurnStartResult,
   TurnId,
+  OrchestrationAgentTranscriptEntry,
 } from "@t3tools/contracts";
+
 import type * as Effect from "effect/Effect";
+
+/** A subagent's own conversation, newest entries kept when it is long. */
+export interface AgentTranscript {
+  readonly entries: ReadonlyArray<OrchestrationAgentTranscriptEntry>;
+  readonly truncated: boolean;
+}
 import type * as Stream from "effect/Stream";
 
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
@@ -175,6 +183,17 @@ export interface ProviderAdapterShape<TError> {
     readonly format: string;
     readonly data: unknown;
   }) => Effect.Effect<{ readonly resumeCursor: unknown }, TError>;
+
+  /**
+   * Read the own conversation of a subagent the thread spawned, identified by the tool call
+   * that spawned it. Undefined when the provider keeps no transcript for it.
+   */
+  readonly readAgentTranscript?: (input: {
+    readonly threadId: ThreadId;
+    readonly resumeCursor: unknown;
+    readonly cwd: string | undefined;
+    readonly toolUseId: string;
+  }) => Effect.Effect<AgentTranscript | undefined, TError>;
 
   /**
    * Upload a thread to the provider when the adapter supports feedback.

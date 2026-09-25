@@ -10,7 +10,7 @@
  *   it settles; older collapsed runs can still be opened at run granularity.
  * - Static status dots, DOM-write elapsed timers, plain token counters.
  */
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type {
   AgentPanelModel,
   AgentPanelWorkflowGroup,
@@ -20,9 +20,15 @@ import {
   formatSubagentModelLabel,
   formatSubagentTokenCount,
 } from "@t3tools/client-runtime/state/subagentRuntime";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { Bot, Braces, Check, ChevronDown, ChevronRight, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import type {
+  EnvironmentId,
+  OrchestrationAgentTranscriptEntry,
+  ThreadId,
+} from "@t3tools/contracts";
+import { ArrowLeft, Bot, Braces, Check, ChevronDown, ChevronRight, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import ChatMarkdown from "./ChatMarkdown";
 
 import { cn } from "~/lib/utils";
 import { orchestrationEnvironment } from "~/state/orchestration";
@@ -136,12 +142,13 @@ function agentActivityText(agent: RuntimeSubagent): string | null {
   );
 }
 
-/** Flat, non-interactive agent status line. No unfold. */
-function AgentRow({ agent }: { agent: RuntimeSubagent }) {
+/** Agent status line. Opens the agent's detail view. */
+function AgentRow({ agent, onOpen }: { agent: RuntimeSubagent; onOpen: (id: string) => void }) {
   const visuals = STATUS_VISUALS[agent.status];
   const statusLabel =
     agent.kind === "subagent_batch" && agent.status === "idle" ? "Idle" : visuals.label;
   const activity = agentActivityText(agent);
+  const live = isLiveStatus(agent.status);
   const modelLabel = formatSubagentModelLabel(agent.model, agent.effort);
   const role =
     agent.role?.trim().toLocaleLowerCase() === agent.title.trim().toLocaleLowerCase()
@@ -155,7 +162,12 @@ function AgentRow({ agent }: { agent: RuntimeSubagent }) {
   ].filter((value): value is string => value !== null);
 
   return (
-    <div className="grid h-[3.875rem] grid-cols-[0.375rem_minmax(0,1fr)_auto] grid-rows-[1.25rem_1.125rem_1rem] items-center gap-x-2 rounded-md px-1.5 py-1">
+    <button
+      type="button"
+      onClick={() => onOpen(agent.id)}
+      aria-label={`${agent.title}, ${statusLabel}. Show details`}
+      className="group grid h-[3.875rem] w-full grid-cols-[0.375rem_minmax(0,1fr)_auto] grid-rows-[1.25rem_1.125rem_1rem] items-center gap-x-2 rounded-md px-1.5 py-1 text-left hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
+    >
       <span className="col-start-1 row-start-1 flex items-center">
         <StatusDot status={agent.status} />
       </span>
@@ -173,6 +185,10 @@ function AgentRow({ agent }: { agent: RuntimeSubagent }) {
           {agent.status === "completed" ? (
             <Check aria-hidden className="size-3 text-success" />
           ) : null}
+          <ChevronRight
+            aria-hidden
+            className="size-3 text-muted-foreground/40 group-hover:text-foreground"
+          />
         </span>
       </span>
       <span
@@ -181,12 +197,434 @@ function AgentRow({ agent }: { agent: RuntimeSubagent }) {
           agent.status === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
         )}
       >
-        {activity ?? statusLabel}
+        <span className={cn("font-medium", live ? "text-info-foreground" : "text-foreground/80")}>
+          {statusLabel}
+        </span>
+        {activity ? ` · ${activity}` : null}
       </span>
       <span className="col-start-2 col-end-4 row-start-3 truncate font-mono text-2xs tabular-nums text-muted-foreground/70">
         {metadata.join(" · ")}
       </span>
-      <span className="sr-only">{statusLabel}</span>
+    </button>
+  );
+}
+
+function isLiveStatus(status: RuntimeSubagent["status"]): boolean {
+  return status === "running" || status === "pending" || status === "waiting";
+}
+
+function formatClockTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? null
+    : date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function DetailFact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words font-mono text-foreground/90 tabular-nums">{children}</dd>
+    </>
+  );
+}
+
+/** Text that shows its first lines until the reader asks for the rest. */
+function ExpandableMarkdown({
+  text,
+  cwd,
+  collapsedChars = 700,
+}: {
+  text: string;
+  cwd: string | undefined;
+  collapsedChars?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const long = text.length > collapsedChars;
+  return (
+    <div className="min-w-0">
+      <div className={cn("relative min-w-0", long && !expanded && "max-h-40 overflow-hidden")}>
+        <ChatMarkdown text={text} cwd={cwd} className="text-xs" />
+        {long && !expanded ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent" />
+        ) : null}
+      </div>
+      {long ? (
+        <Button variant="link" size="xs" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "Show less" : "Show all"}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/** One tool call and the result the agent got back, which opens on click. */
+function ToolStep({
+  call,
+  result,
+}: {
+  call: OrchestrationAgentTranscriptEntry;
+  result: OrchestrationAgentTranscriptEntry | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        disabled={!result}
+        className="flex w-full min-w-0 items-start gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-accent/40 disabled:hover:bg-transparent"
+      >
+        {open ? (
+          <ChevronDown aria-hidden className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight
+            aria-hidden
+            className={cn("mt-0.5 size-3 shrink-0 text-muted-foreground", !result && "opacity-0")}
+          />
+        )}
+        <span
+          className={cn(
+            "shrink-0 rounded-sm border px-1 font-mono text-3xs",
+            result?.isError
+              ? "border-destructive/40 text-destructive-foreground"
+              : "border-border/60 text-muted-foreground",
+          )}
+        >
+          {call.toolName ?? "tool"}
+        </span>
+        <span className="line-clamp-2 min-w-0 break-all font-mono text-2xs text-foreground/85">
+          {call.text}
+        </span>
+      </button>
+      {open && result ? (
+        <pre className="mt-1 mb-1 ml-5 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border/50 bg-background/60 p-2 font-mono text-2xs text-foreground/80">
+          {result.text || "(no output)"}
+        </pre>
+      ) : null}
+    </li>
+  );
+}
+
+type TranscriptStep =
+  | { kind: "text"; entry: OrchestrationAgentTranscriptEntry }
+  | {
+      kind: "tool";
+      call: OrchestrationAgentTranscriptEntry;
+      result: OrchestrationAgentTranscriptEntry | undefined;
+    };
+
+/** Splits a transcript into its task, the steps in between, and the final answer. */
+function splitTranscript(
+  entries: ReadonlyArray<OrchestrationAgentTranscriptEntry>,
+  settled: boolean,
+) {
+  const prompt = entries[0]?.kind === "prompt" ? entries[0] : null;
+  const rest = prompt ? entries.slice(1) : entries;
+  const last = rest.at(-1);
+  const answer = settled && last?.kind === "text" ? last : null;
+  const body = answer ? rest.slice(0, -1) : rest;
+  const steps: TranscriptStep[] = [];
+  for (let index = 0; index < body.length; index += 1) {
+    const entry = body[index]!;
+    if (entry.kind === "tool_call") {
+      const next = body[index + 1];
+      const result = next?.kind === "tool_result" ? next : undefined;
+      if (result) index += 1;
+      steps.push({ kind: "tool", call: entry, result });
+    } else if (entry.kind === "text" || entry.kind === "prompt") {
+      steps.push({ kind: "text", entry });
+    }
+  }
+  return { prompt, steps, answer };
+}
+
+const TRANSCRIPT_POLL_MS = 4_000;
+
+/** The agent's own conversation, polled while it runs. */
+function AgentTranscript({
+  agent,
+  environmentId,
+  threadId,
+  toolUseId,
+  cwd,
+}: {
+  agent: RuntimeSubagent;
+  environmentId: EnvironmentId;
+  threadId: ThreadId;
+  toolUseId: string;
+  cwd: string | undefined;
+}) {
+  const atom = orchestrationEnvironment.agentTranscript({
+    environmentId,
+    input: { threadId, toolUseId },
+  });
+  const result = useAtomValue(atom);
+  const refresh = useAtomRefresh(atom);
+  const live = isLiveStatus(agent.status);
+
+  useEffect(() => {
+    if (!live) return;
+    const id = setInterval(refresh, TRANSCRIPT_POLL_MS);
+    return () => clearInterval(id);
+  }, [live, refresh]);
+
+  // One last read when the agent settles, so the final answer shows up.
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (wasLive.current && !live) refresh();
+    wasLive.current = live;
+  }, [live, refresh]);
+
+  const transcript = result._tag === "Success" ? result.value : null;
+  const parts = useMemo(
+    () => (transcript?.available ? splitTranscript(transcript.entries, !live) : null),
+    [transcript, live],
+  );
+
+  if (result._tag === "Failure") {
+    return <FallbackActivity agent={agent} note="Could not read this agent's transcript." />;
+  }
+  if (!transcript) {
+    return <p className="px-3 py-2 text-xs text-muted-foreground">Loading transcript…</p>;
+  }
+  if (!parts) {
+    return (
+      <FallbackActivity
+        agent={agent}
+        note="The transcript isn't on disk yet, or this provider doesn't keep one."
+      />
+    );
+  }
+  const toolCount = parts.steps.filter((step) => step.kind === "tool").length;
+  return (
+    <>
+      {parts.prompt ? (
+        <DetailSection title="Task">
+          <ExpandableMarkdown text={parts.prompt.text} cwd={cwd} />
+        </DetailSection>
+      ) : null}
+      {parts.answer || agent.error ? (
+        <DetailSection title={agent.status === "failed" ? "Error" : "Result"}>
+          {agent.status === "failed" && agent.error ? (
+            <p className="text-xs text-destructive-foreground">{agent.error}</p>
+          ) : null}
+          {parts.answer ? (
+            <ExpandableMarkdown text={parts.answer.text} cwd={cwd} collapsedChars={1_500} />
+          ) : null}
+        </DetailSection>
+      ) : null}
+      <DetailSection
+        title={live ? "Steps so far" : "Steps"}
+        aside={`${toolCount} tool ${toolCount === 1 ? "call" : "calls"}`}
+      >
+        {transcript.truncated ? (
+          <p className="mb-1 text-2xs text-muted-foreground">Older steps are not shown.</p>
+        ) : null}
+        {parts.steps.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {live ? "Nothing yet. Steps appear as the agent works." : "No steps recorded."}
+          </p>
+        ) : (
+          <ol className="flex flex-col gap-0.5">
+            {parts.steps.map((step, index) =>
+              step.kind === "tool" ? (
+                <ToolStep key={index} call={step.call} result={step.result} />
+              ) : (
+                <li key={index} className="my-1 border-l-2 border-border/60 pl-2">
+                  <ChatMarkdown text={step.entry.text} cwd={cwd} className="text-xs" />
+                </li>
+              ),
+            )}
+          </ol>
+        )}
+      </DetailSection>
+    </>
+  );
+}
+
+function DetailSection({
+  title,
+  aside,
+  children,
+}: {
+  title: string;
+  aside?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="border-t border-border/50 px-3 py-2.5">
+      <h3 className="mb-1.5 flex items-baseline gap-2 text-xs font-semibold text-foreground">
+        {title}
+        {aside ? (
+          <span className="font-normal text-muted-foreground tabular-nums">{aside}</span>
+        ) : null}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+/** What the activity stream alone says, for agents without a readable transcript. */
+function FallbackActivity({ agent, note }: { agent: RuntimeSubagent; note: string }) {
+  return (
+    <>
+      {agent.result || agent.error ? (
+        <DetailSection title={agent.error ? "Error" : "Result"}>
+          <p
+            className={cn(
+              "whitespace-pre-wrap text-xs",
+              agent.error ? "text-destructive-foreground" : "text-foreground/90",
+            )}
+          >
+            {agent.error ?? agent.result}
+          </p>
+        </DetailSection>
+      ) : null}
+      <DetailSection title="Recent activity">
+        {agent.recentActivity.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No activity reported.</p>
+        ) : (
+          <ol className="flex flex-col gap-1">
+            {agent.recentActivity.map((entry, index) => (
+              <li key={index} className="flex gap-2 text-xs">
+                <span className="shrink-0 font-mono text-2xs text-muted-foreground tabular-nums">
+                  {formatClockTime(entry.at)}
+                </span>
+                <span className="min-w-0 break-words text-foreground/85">{entry.summary}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+        <p className="mt-2 text-2xs text-muted-foreground">{note}</p>
+      </DetailSection>
+    </>
+  );
+}
+
+/** Everything known about one agent: what it was asked, what it did, what it cost. */
+function AgentDetail({
+  agent,
+  environmentId,
+  threadId,
+  cwd,
+  transcriptsSupported,
+  onBack,
+}: {
+  agent: RuntimeSubagent;
+  environmentId: EnvironmentId | null;
+  threadId: ThreadId | null;
+  cwd: string | undefined;
+  transcriptsSupported: boolean;
+  onBack: () => void;
+}) {
+  const visuals = STATUS_VISUALS[agent.status];
+  const live = isLiveStatus(agent.status);
+  const usage = agent.usage;
+  const breakdown = usage
+    ? [
+        usage.inputTokens !== undefined
+          ? `${formatSubagentTokenCount(usage.inputTokens)} in`
+          : null,
+        usage.cachedInputTokens !== undefined
+          ? `${formatSubagentTokenCount(usage.cachedInputTokens)} cached`
+          : null,
+        usage.outputTokens !== undefined
+          ? `${formatSubagentTokenCount(usage.outputTokens)} out`
+          : null,
+        usage.reasoningOutputTokens
+          ? `${formatSubagentTokenCount(usage.reasoningOutputTokens)} reasoning`
+          : null,
+      ].filter((value): value is string => value !== null)
+    : [];
+  const canReadTranscript =
+    transcriptsSupported && environmentId !== null && threadId !== null && agent.toolUseId !== null;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex items-center gap-1 border-b border-border/60 px-1.5 py-1">
+        <Button size="xs" variant="ghost-muted" onClick={onBack}>
+          <ArrowLeft aria-hidden className="size-3.5" />
+          All agents
+        </Button>
+      </header>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="px-3 pt-3 pb-2.5">
+          <div className="flex items-start gap-2">
+            <span className="mt-1.5">
+              <StatusDot status={agent.status} />
+            </span>
+            <h2 className="min-w-0 flex-1 text-sm font-semibold leading-snug">{agent.title}</h2>
+            {agent.role ? (
+              <span className="shrink-0 rounded-sm border border-border/60 px-1 font-mono text-3xs text-muted-foreground">
+                {agent.role}
+              </span>
+            ) : null}
+          </div>
+          <p
+            className={cn(
+              "mt-1 pl-3.5 text-xs",
+              live ? "text-info-foreground" : "text-muted-foreground",
+            )}
+          >
+            {visuals.label}
+            {agent.startedAt ? (
+              <>
+                {live ? " for " : " after "}
+                <AgentElapsed agent={agent} />
+              </>
+            ) : null}
+            {live && agent.progress ? ` · ${agent.progress}` : null}
+          </p>
+          <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">
+            {agent.model || agent.effort ? (
+              <DetailFact label="Model">
+                {formatSubagentModelLabel(agent.model, agent.effort)}
+              </DetailFact>
+            ) : null}
+            {agent.startedAt ? (
+              <DetailFact label="Started">{formatClockTime(agent.startedAt)}</DetailFact>
+            ) : null}
+            {agent.completedAt && !live ? (
+              <DetailFact label="Finished">{formatClockTime(agent.completedAt)}</DetailFact>
+            ) : null}
+            <DetailFact label="Tokens">
+              {usage ? formatSubagentTokenCount(usage.totalTokens) : "—"}
+              {breakdown.length > 0 ? (
+                <span className="text-muted-foreground"> ({breakdown.join(", ")})</span>
+              ) : null}
+            </DetailFact>
+            {usage?.toolUses !== undefined ? (
+              <DetailFact label="Tool calls">{usage.toolUses}</DetailFact>
+            ) : null}
+            {agent.activationCount > 1 ? (
+              <DetailFact label="Runs">{agent.activationCount}</DetailFact>
+            ) : null}
+            {agent.phaseTitle ? <DetailFact label="Phase">{agent.phaseTitle}</DetailFact> : null}
+            {agent.outputFile ? <DetailFact label="Output">{agent.outputFile}</DetailFact> : null}
+          </dl>
+        </div>
+        {canReadTranscript ? (
+          <AgentTranscript
+            agent={agent}
+            environmentId={environmentId}
+            threadId={threadId}
+            toolUseId={agent.toolUseId!}
+            cwd={cwd}
+          />
+        ) : (
+          <FallbackActivity
+            agent={agent}
+            note={
+              transcriptsSupported
+                ? "This agent has no transcript T3 can read."
+                : "Update this environment to see the agent's full transcript."
+            }
+          />
+        )}
+      </ScrollArea>
     </div>
   );
 }
@@ -318,9 +756,11 @@ function WorkflowScriptView({
 function PhaseSection({
   phase,
   defaultOpen = false,
+  onOpenAgent,
 }: {
   phase: AgentPanelWorkflowGroup["phases"][number];
   defaultOpen?: boolean;
+  onOpenAgent: (id: string) => void;
 }) {
   const [open, setOpen] = useState(defaultOpen || phase.state === "running");
   const previousState = useRef(phase.state);
@@ -369,7 +809,11 @@ function PhaseSection({
           </span>
         ) : null}
       </button>
-      {open ? phase.members.map((member) => <AgentRow key={member.id} agent={member} />) : null}
+      {open
+        ? phase.members.map((member) => (
+            <AgentRow key={member.id} agent={member} onOpen={onOpenAgent} />
+          ))
+        : null}
     </div>
   );
 }
@@ -380,11 +824,13 @@ function ExpandedWorkflowSection({
   environmentId,
   threadId,
   onCollapse,
+  onOpenAgent,
 }: {
   group: AgentPanelWorkflowGroup;
   environmentId: EnvironmentId | null;
   threadId: ThreadId | null;
   onCollapse: () => void;
+  onOpenAgent: (id: string) => void;
 }) {
   const [scriptOpen, setScriptOpen] = useState(false);
   const members = workflowMembers(group);
@@ -439,13 +885,18 @@ function ExpandedWorkflowSection({
         />
       ) : null}
       {group.phases.map((phase) => (
-        <PhaseSection key={phase.index} phase={phase} defaultOpen={!workflowIsLive(group)} />
+        <PhaseSection
+          key={phase.index}
+          phase={phase}
+          defaultOpen={!workflowIsLive(group)}
+          onOpenAgent={onOpenAgent}
+        />
       ))}
       {group.unphasedMembers.map((member) => (
-        <AgentRow key={member.id} agent={member} />
+        <AgentRow key={member.id} agent={member} onOpen={onOpenAgent} />
       ))}
       {group.phases.length === 0 && group.unphasedMembers.length === 0 ? (
-        <AgentRow agent={group.workflow} />
+        <AgentRow agent={group.workflow} onOpen={onOpenAgent} />
       ) : null}
     </section>
   );
@@ -503,10 +954,12 @@ function WorkflowSection({
   group,
   environmentId,
   threadId,
+  onOpenAgent,
 }: {
   group: AgentPanelWorkflowGroup;
   environmentId: EnvironmentId | null;
   threadId: ThreadId | null;
+  onOpenAgent: (id: string) => void;
 }) {
   const [open, setOpen] = useState(() => workflowIsLive(group));
   return open ? (
@@ -515,6 +968,7 @@ function WorkflowSection({
       environmentId={environmentId}
       threadId={threadId}
       onCollapse={() => setOpen(false)}
+      onOpenAgent={onOpenAgent}
     />
   ) : (
     <CollapsedWorkflowSection group={group} onExpand={() => setOpen(true)} />
@@ -525,11 +979,40 @@ export function AgentsPanel({
   model,
   environmentId = null,
   threadId = null,
+  cwd,
+  transcriptsSupported = false,
 }: {
   model: AgentPanelModel;
   environmentId?: EnvironmentId | null;
   threadId?: ThreadId | null;
+  /** Project root, for resolving file links in agent prompts and results. */
+  cwd?: string | undefined;
+  /** The environment serves `orchestration.getAgentTranscript`. */
+  transcriptsSupported?: boolean;
 }) {
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const selectedAgent = useMemo(() => {
+    if (selectedAgentId === null) return null;
+    const all = [
+      ...model.directAgents,
+      ...model.workflows.flatMap((group) => [group.workflow, ...workflowMembers(group)]),
+    ];
+    return all.find((agent) => agent.id === selectedAgentId) ?? null;
+  }, [model, selectedAgentId]);
+
+  if (selectedAgent) {
+    return (
+      <AgentDetail
+        agent={selectedAgent}
+        environmentId={environmentId}
+        threadId={threadId}
+        cwd={cwd}
+        transcriptsSupported={transcriptsSupported}
+        onBack={() => setSelectedAgentId(null)}
+      />
+    );
+  }
+
   if (!model.hasAgents) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
@@ -553,15 +1036,16 @@ export function AgentsPanel({
               group={group}
               environmentId={environmentId}
               threadId={threadId}
+              onOpenAgent={setSelectedAgentId}
             />
           ))}
           {model.directAgents.length > 0 ? (
             <section>
               <div className="px-1.5 pt-1 text-3xs font-medium uppercase tracking-wider text-muted-foreground">
-                Direct spawns
+                Spawned by this chat
               </div>
               {model.directAgents.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} />
+                <AgentRow key={agent.id} agent={agent} onOpen={setSelectedAgentId} />
               ))}
             </section>
           ) : null}

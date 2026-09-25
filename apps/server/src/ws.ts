@@ -45,6 +45,7 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
+  OrchestrationGetAgentTranscriptError,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   type ProjectEntriesFailure,
@@ -2036,6 +2037,25 @@ const makeWsRpcLayer = (
                 projectionSnapshotQuery,
               ),
               Effect.provideService(ProviderService.ProviderService, providerService),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getAgentTranscript]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getAgentTranscript,
+            providerService.readAgentTranscript(input).pipe(
+              Effect.map((transcript) =>
+                transcript
+                  ? { available: true, ...transcript }
+                  : { available: false, entries: [], truncated: false },
+              ),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetAgentTranscriptError({
+                    message: "Failed to read the agent's transcript.",
+                    cause,
+                  }),
+              ),
             ),
             { "rpc.aggregate": "orchestration" },
           ),

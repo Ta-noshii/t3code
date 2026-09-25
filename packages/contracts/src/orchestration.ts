@@ -41,6 +41,7 @@ export const ORCHESTRATION_WS_METHODS = {
   forkThread: "orchestration.forkThread",
   exportThread: "orchestration.exportThread",
   importThread: "orchestration.importThread",
+  getAgentTranscript: "orchestration.getAgentTranscript",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -2453,6 +2454,39 @@ export class OrchestrationTransferThreadError extends Schema.TaggedError<Orchest
   },
 ) {}
 
+export const OrchestrationGetAgentTranscriptInput = Schema.Struct({
+  threadId: ThreadId,
+  /** The tool call that spawned the agent, from its task activity's `toolUseId`. */
+  toolUseId: TrimmedNonEmptyString,
+});
+export type OrchestrationGetAgentTranscriptInput = typeof OrchestrationGetAgentTranscriptInput.Type;
+
+export const OrchestrationAgentTranscriptEntry = Schema.Struct({
+  kind: Schema.Literals(["prompt", "text", "tool_call", "tool_result"]),
+  text: Schema.String,
+  toolName: Schema.optionalKey(Schema.String),
+  isError: Schema.optionalKey(Schema.Boolean),
+});
+export type OrchestrationAgentTranscriptEntry = typeof OrchestrationAgentTranscriptEntry.Type;
+
+export const OrchestrationGetAgentTranscriptResult = Schema.Struct({
+  /** False when the provider keeps no transcript this server can read for the agent. */
+  available: Schema.Boolean,
+  entries: Schema.Array(OrchestrationAgentTranscriptEntry),
+  /** Older entries were left out to bound the response. */
+  truncated: Schema.Boolean,
+});
+export type OrchestrationGetAgentTranscriptResult =
+  typeof OrchestrationGetAgentTranscriptResult.Type;
+
+export class OrchestrationGetAgentTranscriptError extends Schema.TaggedError<OrchestrationGetAgentTranscriptError>()(
+  "OrchestrationGetAgentTranscriptError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -2477,6 +2511,10 @@ export const OrchestrationRpcSchemas = {
   forkThread: {
     input: OrchestrationForkThreadInput,
     output: OrchestrationForkThreadResult,
+  },
+  getAgentTranscript: {
+    input: OrchestrationGetAgentTranscriptInput,
+    output: OrchestrationGetAgentTranscriptResult,
   },
   exportThread: {
     input: OrchestrationExportThreadInput,

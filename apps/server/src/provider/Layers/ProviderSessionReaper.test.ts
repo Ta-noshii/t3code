@@ -217,6 +217,7 @@ describe("ProviderSessionReaper", () => {
       forkConversation: () => Effect.succeed(false),
       exportConversation: () => Effect.succeed(null),
       importConversation: () => Effect.succeed(false),
+      readAgentTranscript: () => Effect.succeed(null),
       uploadFeedback: () => unsupported(),
       streamEvents: Stream.empty,
     };
