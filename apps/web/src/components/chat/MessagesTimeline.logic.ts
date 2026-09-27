@@ -335,7 +335,7 @@ export type TimelineLatestTurn = Pick<
 
 const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 
-type ActivityEntry = Extract<TimelineEntry, { kind: "message" | "work" }>;
+export type ActivityEntry = Extract<TimelineEntry, { kind: "message" | "work" }>;
 
 function isActivityEntry(entry: TimelineEntry): entry is ActivityEntry {
   return entry.kind === "message"
@@ -345,6 +345,79 @@ function isActivityEntry(entry: TimelineEntry): entry is ActivityEntry {
         entry.entry.questionAnswer === undefined &&
         entry.entry.sourceActivityKind !== "context-compaction" &&
         entry.entry.tone !== "error";
+}
+
+/** One line of the collapsed activity trail: a stretch of thinking or one tool call. */
+export type ActivityTrailStep =
+  | { kind: "thought"; id: string; text: string; durationMs: number; live: boolean }
+  | { kind: "tool"; id: string; entry: WorkLogEntry; live: boolean };
+
+/**
+ * The steps a collapsed activity group lists under its header, in order. Consecutive
+ * reasoning messages form one thought; tools use the same visibility rules as the
+ * expanded view. Only the last step of an active group is live.
+ */
+export function buildActivityTrail(
+  entries: ReadonlyArray<ActivityEntry>,
+  active: boolean,
+): ActivityTrailStep[] {
+  const visibleWork = new Set(
+    omitSupersededLifecycleMarkers(
+      entries.filter(
+        (entry): entry is Extract<ActivityEntry, { kind: "work" }> =>
+          entry.kind === "work" && workEntryIsVisibleInGroup(entry.entry, active),
+      ),
+      (entry) => entry.entry,
+    ),
+  );
+  const steps: ActivityTrailStep[] = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    if (entry.kind === "work") {
+      if (visibleWork.has(entry)) {
+        steps.push({ kind: "tool", id: entry.id, entry: entry.entry, live: false });
+      }
+      continue;
+    }
+    const messages = [entry.message];
+    while (entries[index + 1]?.kind === "message") {
+      const next = entries[++index]!;
+      if (next.kind === "message") messages.push(next.message);
+    }
+    const first = messages[0]!;
+    const last = messages.at(-1)!;
+    steps.push({
+      kind: "thought",
+      id: entry.id,
+      text: messages
+        .map((message) => message.text.trim())
+        .filter(Boolean)
+        .join("\n\n"),
+      durationMs: Math.max(0, Date.parse(last.updatedAt) - Date.parse(first.createdAt)),
+      live: messages.some((message) => message.streaming),
+    });
+  }
+  return steps.flatMap((step, index) => {
+    const live = active && index === steps.length - 1 && (step.kind === "tool" || step.live);
+    if (step.kind === "thought" && step.text.length === 0 && !live) return [];
+    return [{ ...step, live }];
+  });
+}
+
+/** Reasoning markdown flattened to one line of plain text, for previews. */
+export function plainReasoningText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?(```|$)/g, " ")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`#>~|]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** A thought's bolded title when the provider gives one (Codex summaries do), else its text. */
+export function reasoningPreview(text: string): string {
+  const title = /^\s*\*\*([^*\n]+)\*\*/.exec(text)?.[1]?.trim();
+  return title || plainReasoningText(text);
 }
 
 export type MessagesTimelineRow =

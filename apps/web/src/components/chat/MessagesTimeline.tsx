@@ -176,11 +176,14 @@ import {
 } from "./AssistantCitationSource";
 import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
 import {
+  buildActivityTrail,
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
   deriveUnsettledTurnId,
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
+  plainReasoningText,
+  reasoningPreview,
   workEntryIsActiveTurnActivity,
   resolveAssistantMessageCopyState,
   resolveTimelineIsAtEnd,
@@ -200,6 +203,7 @@ import {
   workEntryIsVisibleInGroup,
   worktreeSetupAgentStarted,
   type StableMessagesTimelineRowsState,
+  type ActivityTrailStep,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestTurn,
@@ -2744,8 +2748,152 @@ function ActivityGroupTimelineRow({
           shimmer={thinking}
         />
       </button>
-      {row.expanded ? <div className="mt-2">{details}</div> : null}
+      {row.expanded ? <div className="mt-2">{details}</div> : <ActivityTrail row={row} />}
     </div>
+  );
+}
+
+/** Steps a collapsed group shows; the header's full view has the rest. */
+const ACTIVITY_TRAIL_MAX_STEPS = 6;
+/** Characters of live reasoning kept in the tail; about three lines at the trail's width. */
+const LIVE_THOUGHT_TAIL_CHARS = 360;
+
+/**
+ * The collapsed view of an activity group: the tools it called and what it was
+ * thinking, one line each, with the reasoning streaming in while the turn runs.
+ * Any line opens the full view.
+ */
+function ActivityTrail({ row }: { row: Extract<TimelineRow, { kind: "activity-group" }> }) {
+  const ctx = use(TimelineRowCtx);
+  const steps = useMemo(() => buildActivityTrail(row.entries, row.active), [row]);
+  if (steps.length === 0) return null;
+  const hidden = Math.max(0, steps.length - ACTIVITY_TRAIL_MAX_STEPS);
+  const expand = () => ctx.onToggleWorkGroup(row.groupId, row.id);
+  return (
+    <div className="ms-3.5 flex flex-col border-s border-border/70 ps-3 pb-0.5">
+      {hidden > 0 ? (
+        <button
+          type="button"
+          onClick={expand}
+          className="flex h-5.5 cursor-pointer items-center text-start text-muted-foreground text-xs hover:text-secondary-label"
+        >
+          {hidden} earlier step{hidden === 1 ? "" : "s"}
+        </button>
+      ) : null}
+      {steps
+        .slice(hidden)
+        .map((step) =>
+          step.kind === "tool" ? (
+            <ActivityTrailTool
+              key={step.id}
+              step={step}
+              workspaceRoot={ctx.workspaceRoot}
+              onClick={expand}
+            />
+          ) : (
+            <ActivityTrailThought key={step.id} step={step} onClick={expand} />
+          ),
+        )}
+    </div>
+  );
+}
+
+const activityTrailLineClassName =
+  "flex h-5.5 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-start text-xs hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70";
+
+function ActivityTrailTool({
+  step,
+  workspaceRoot,
+  onClick,
+}: {
+  step: Extract<ActivityTrailStep, { kind: "tool" }>;
+  workspaceRoot: string | undefined;
+  onClick: () => void;
+}) {
+  const { entry, live } = step;
+  const failed = workEntryDisplayIndicatesToolFailure(entry);
+  const action = liveWorkEntryLabel(entry, workspaceRoot, live);
+  const target = workEntryDisplayLabel(entry, workspaceRoot);
+  const showTarget = target.length > 0 && !action.includes(target) && target !== action;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={activityTrailLineClassName}
+      aria-label={failed ? `${action}, tool call failed` : undefined}
+    >
+      <span className={cn("flex shrink-0", failed ? failedToolIconClassName : "text-icon-muted")}>
+        <ToolActivityIconView
+          icon={entry.toolIcon ?? entry.toolSource?.icon}
+          fallbackName={workEntryIconName(entry)}
+          className="block size-3.5 shrink-0 stroke-2"
+          muted
+        />
+      </span>
+      <span
+        className={cn(
+          "shrink-0 text-secondary-label",
+          live && !failed && "live-tool-shine",
+          !showTarget && "min-w-0 truncate",
+        )}
+      >
+        {action}
+      </span>
+      {showTarget ? (
+        <span className="min-w-0 truncate font-mono text-2xs text-muted-foreground">{target}</span>
+      ) : null}
+      {failed && !toolIconAcceptsTint(workEntryIconName(entry), entry.toolIcon) ? (
+        <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
+      ) : null}
+    </button>
+  );
+}
+
+function ActivityTrailThought({
+  step,
+  onClick,
+}: {
+  step: Extract<ActivityTrailStep, { kind: "thought" }>;
+  onClick: () => void;
+}) {
+  if (step.live) {
+    const text = plainReasoningText(step.text);
+    const tail =
+      text.length > LIVE_THOUGHT_TAIL_CHARS
+        ? text.slice(text.indexOf(" ", text.length - LIVE_THOUGHT_TAIL_CHARS) + 1)
+        : text;
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-w-0 cursor-pointer gap-1.5 rounded-sm py-0.5 text-start text-xs hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      >
+        <span className="flex h-5 shrink-0 items-center text-icon-muted">
+          <BrainIcon aria-hidden className="block size-3.5 shrink-0 stroke-2 opacity-70" />
+        </span>
+        {/* Bottom-aligned so the newest words stay in view as older lines fade out. */}
+        <span
+          className={cn(
+            "flex max-h-15 min-w-0 flex-1 flex-col justify-end overflow-hidden leading-5 text-muted-foreground",
+            text.length > tail.length && "mask-t-from-50%",
+          )}
+        >
+          <span>{tail || "Thinking"}</span>
+        </span>
+      </button>
+    );
+  }
+  const preview = reasoningPreview(step.text);
+  return (
+    <button type="button" onClick={onClick} className={activityTrailLineClassName}>
+      <span className="flex shrink-0 text-icon-muted">
+        <BrainIcon aria-hidden className="block size-3.5 shrink-0 stroke-2 opacity-70" />
+      </span>
+      <span className="shrink-0 text-secondary-label">
+        {step.durationMs >= 1_000 ? `Thought for ${formatDuration(step.durationMs)}` : "Thought"}
+      </span>
+      {preview ? <span className="min-w-0 truncate text-muted-foreground">{preview}</span> : null}
+    </button>
   );
 }
 

@@ -20,12 +20,14 @@ import {
 import * as Option from "effect/Option";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import {
+  buildActivityTrail,
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
   liveWorkEntryLabel,
   normalizeCompactToolLabel,
+  reasoningPreview,
   resolveAssistantMessageCopyState,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
@@ -3893,5 +3895,86 @@ describe("computeStableMessagesTimelineRows", () => {
 
     expect(reordered).not.toBe(initial);
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
+  });
+});
+
+describe("buildActivityTrail", () => {
+  const thought = (
+    id: string,
+    text: string,
+    createdAt: string,
+    updatedAt: string,
+    streaming = false,
+  ) => ({
+    id,
+    kind: "message" as const,
+    createdAt,
+    message: {
+      id: MessageId.make(id),
+      role: "reasoning" as const,
+      text,
+      turnId: TurnId.make("turn-1"),
+      streaming,
+      createdAt,
+      updatedAt,
+    },
+  });
+  const tool = (id: string, at: string) => ({
+    id,
+    kind: "work" as const,
+    createdAt: at,
+    entry: {
+      id,
+      createdAt: at,
+      turnId: TurnId.make("turn-1"),
+      label: "Ran a command",
+      command: "bun run test",
+      tone: "tool" as const,
+    },
+  });
+
+  it("merges consecutive thoughts, keeps tools in order and times each thought", () => {
+    const steps = buildActivityTrail(
+      [
+        thought("a", "**Planning** the change", "2026-01-01T00:00:00Z", "2026-01-01T00:00:02Z"),
+        thought("b", "More detail", "2026-01-01T00:00:02Z", "2026-01-01T00:00:04Z"),
+        tool("t1", "2026-01-01T00:00:05Z"),
+        thought("c", "", "2026-01-01T00:00:06Z", "2026-01-01T00:00:06Z"),
+      ],
+      false,
+    );
+    expect(steps).toMatchObject([
+      {
+        kind: "thought",
+        id: "a",
+        text: "**Planning** the change\n\nMore detail",
+        durationMs: 4000,
+      },
+      { kind: "tool", id: "t1", live: false },
+    ]);
+    expect(steps.every((step) => !step.live)).toBe(true);
+  });
+
+  it("marks only the last step of an active group live", () => {
+    const steps = buildActivityTrail(
+      [
+        tool("t1", "2026-01-01T00:00:00Z"),
+        thought("a", "Checking the", "2026-01-01T00:00:01Z", "2026-01-01T00:00:02Z", true),
+      ],
+      true,
+    );
+    expect(steps.map((step) => [step.id, step.live])).toEqual([
+      ["t1", false],
+      ["a", true],
+    ]);
+  });
+
+  it("previews a thought by its bold title, else its plain text", () => {
+    expect(reasoningPreview("**Inspecting the repo**\n\nLooking at `src`")).toBe(
+      "Inspecting the repo",
+    );
+    expect(reasoningPreview("Looking at `src` and [docs](https://x.y)")).toBe(
+      "Looking at src and docs",
+    );
   });
 });
