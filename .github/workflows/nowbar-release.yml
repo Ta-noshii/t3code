@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   android:
-    if: github.repository == 'Ta-noshii/t3code-nowbar'
+    if: github.repository == 'Ta-noshii/t3code'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
