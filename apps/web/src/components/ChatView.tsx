@@ -751,6 +751,10 @@ function formatOutgoingPrompt(params: {
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
+function isCompactPrompt(prompt: string): boolean {
+  return prompt.trim() === "/compact";
+}
+
 function isCompactCommandMessage(message: ChatMessage): boolean {
   const text = message.text.trim().toLowerCase();
   return message.role === "user" && text === "/compact" && !message.attachments?.length;
@@ -6479,13 +6483,21 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.messages.some(
       (message) => message.role === "user" && !isCompactCommandMessage(message),
     ) ?? false;
+  // A running turn queues the compaction for after it instead of refusing it.
+  const compactQueued = useQueuedMessageStore(
+    (state) =>
+      activeThreadKey !== null &&
+      (state.queuesByThreadKey[activeThreadKey] ?? []).some((message) =>
+        isCompactPrompt(message.prompt),
+      ),
+  );
   const compactThreadUnavailable =
     !activeThread ||
     !activeThreadHasCompactableConversation ||
     !activeProject ||
     !isServerThread ||
     !manualCompactionProviderAvailable ||
-    isWorking ||
+    compactQueued ||
     threadDetailLoading ||
     isPreparingWorktree ||
     activeEnvironmentUnavailable ||
@@ -6499,8 +6511,11 @@ export default function ChatView(props: ChatViewProps) {
       ? "Choose a project before compacting"
       : !manualCompactionProviderAvailable
         ? "Compaction is unavailable for this provider"
-        : "Compacting is unavailable right now"
+        : compactQueued
+          ? "Compaction is queued for when the agent finishes"
+          : "Compacting is unavailable right now"
     : null;
+  const compactLabel = isWorking ? "Compact after this turn" : "Compact context";
   const resumeCompactionBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (
       !activeThread ||
@@ -7542,6 +7557,23 @@ export default function ChatView(props: ChatViewProps) {
     }
     const context = composerRef.current?.getSendContext();
     if (!context?.providerAvailable) return;
+    if (isWorking) {
+      if (!activeThreadKey) return;
+      // Compacting mid-turn would cut the agent off, so it waits for the turn to end.
+      useQueuedMessageStore.getState().enqueue(activeThreadKey, {
+        prompt: "/compact",
+        images: [],
+        files: [],
+        terminalContexts: [],
+        previewAnnotations: [],
+        reviewComments: [],
+        sendSettings: readComposerSendSettings(context),
+        queuedAfterToolActivityId: latestCompletedToolActivityId(threadActivities),
+        afterTurn: true,
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
 
     // Compaction is a standalone command; the draft and its attachments stay local.
     const threadId = activeThread.id;
@@ -10462,6 +10494,7 @@ export default function ChatView(props: ChatViewProps) {
                             compactThreadUnavailable={compactThreadUnavailable}
                             compactDisabled={compactDisabled}
                             compactDisabledReason={compactDisabledReason}
+                            compactLabel={compactLabel}
                             resolvedTheme={resolvedTheme}
                             settings={settings}
                             keybindings={keybindings}

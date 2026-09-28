@@ -21,8 +21,16 @@ export function ContextWindowMeter(props: {
   onCompact?: (() => void) | undefined;
   compactDisabled?: boolean | undefined;
   compactDisabledReason?: string | null | undefined;
+  compactLabel?: string | undefined;
 }) {
-  const { usage, modelDisplayName, onCompact, compactDisabled, compactDisabledReason } = props;
+  const {
+    usage,
+    modelDisplayName,
+    onCompact,
+    compactDisabled,
+    compactDisabledReason,
+    compactLabel = "Compact context",
+  } = props;
   const usedPercentage = formatPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
   const radius = 9.75;
@@ -148,7 +156,7 @@ export function ContextWindowMeter(props: {
                 onClick={onCompact}
               >
                 <Minimize2Icon aria-hidden="true" />
-                Compact context
+                {compactLabel}
               </Button>
               {compactDisabled && compactDisabledReason ? (
                 <div className="text-pretty text-secondary-label text-2xs">

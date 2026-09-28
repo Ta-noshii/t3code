@@ -1213,6 +1213,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onCompactContext?: (() => void) | undefined;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
+  compactLabel: string;
 }) {
   return (
     <>
@@ -1223,6 +1224,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           onCompact={props.onCompactContext}
           compactDisabled={props.compactDisabled}
           compactDisabledReason={props.compactDisabledReason}
+          compactLabel={props.compactLabel}
         />
       ) : props.reserveContextWindowMeter ? (
         <ContextWindowMeterPlaceholder />
@@ -1407,6 +1409,7 @@ export interface ChatComposerProps {
   compactThreadUnavailable: boolean;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
+  compactLabel: string;
 
   // Misc
   resolvedTheme: "light" | "dark";
@@ -1534,6 +1537,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     compactThreadUnavailable,
     compactDisabled,
     compactDisabledReason,
+    compactLabel,
     resolvedTheme,
     settings,
     keybindings,
@@ -3863,7 +3867,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       noProviderAvailable ||
       activePendingApproval !== null ||
       pendingUserInputs.length > 0 ||
-      phase === "running" ||
       isSendBusy ||
       isConnecting ||
       !activeThreadId
@@ -3880,7 +3883,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     noProviderAvailable,
     onCompactContext,
     pendingUserInputs.length,
-    phase,
   ]);
   const expandMobileComposer = useCallback(() => {
     if (composerBlurFrameRef.current !== null) {
@@ -7060,6 +7062,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       compactDisabled || noProviderAvailable || isSendBusy || isConnecting
                     }
                     compactDisabledReason={resolvedCompactDisabledReason}
+                    compactLabel={compactLabel}
                     {...(compactCommandAvailable ? { onCompactContext: compactThreadContext } : {})}
                   />
                 </div>
