@@ -38,6 +38,7 @@ env:
   PATCH_BRANCHES: >-
     patch/edit-fork
     fix/hyprland-snapshot-flight-sizing
+    fix/preview-viewport-main-zoom
 
 jobs:
   plan:

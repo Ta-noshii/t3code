@@ -36,6 +36,12 @@ Upstream PR [pingdotgg/t3code#11591](https://github.com/pingdotgg/t3code/pull/11
 
 When the PR merges, delete the branch. The workflow skips branches that no longer exist, and commits upstream already has drop out as empty cherry-picks.
 
+### `fix/preview-viewport-main-zoom`
+
+Upstream PR [pingdotgg/t3code#14039](https://github.com/pingdotgg/t3code/pull/14039), carried until it merges. With the main window zoomed (View → Zoom In), the Browser panel's freeform and preset viewports rendered at the zoomed size (1280 measured as 1403), so every freeform `preview_resize` timed out and `preview_overflow_check` could not run. The fix sizes the webview by the main window's zoom factor so the page measures the requested CSS size.
+
+When the PR merges, delete the branch, as with the SnapShots fix above.
+
 ## Android (on `nowbar`)
 
 - **Samsung Now Bar agent monitoring.** The Android app shows agents in Samsung's Now Bar, with a distinct state per agent status, and keeps unread results. It handles attention, privacy and notification settings, keeps the bar fresh when React Native timers pause, and stops monitoring once every environment disconnects.
