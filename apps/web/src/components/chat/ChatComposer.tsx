@@ -76,6 +76,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
+  latestPromptSuggestion,
   replaceTextRange,
 } from "../../composer-logic";
 import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
@@ -3920,6 +3921,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     promptHistoryPositionRef.current = null;
   }, [promptHistoryTargetKey]);
 
+  const promptSuggestion = useMemo(
+    () => latestPromptSuggestion(activeThread, phase),
+    [activeThread, phase],
+  );
+
   const replacePromptFromHistory = useCallback(
     (nextPrompt: string) => {
       promptRef.current = nextPrompt;
@@ -3991,6 +3997,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     event: KeyboardEvent,
     isTaskItem = false,
   ) => {
+    if (
+      key === "Tab" &&
+      !event.shiftKey &&
+      promptSuggestion !== null &&
+      promptRef.current.trim().length === 0
+    ) {
+      replacePromptFromHistory(promptSuggestion);
+      return true;
+    }
     if (key === "Tab" && event.shiftKey) {
       if (!planModeUiEnabled) return false;
       toggleInteractionMode();
@@ -6893,7 +6908,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 ? "Enable a provider in Settings to send a message"
                                 : phase === "disconnected"
                                   ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                  : promptSuggestion !== null
+                                    ? `${promptSuggestion}   Tab to use`
+                                    : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
                     disabled={
                       isConnecting ||

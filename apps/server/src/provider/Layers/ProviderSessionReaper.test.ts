@@ -218,6 +218,7 @@ describe("ProviderSessionReaper", () => {
       exportConversation: () => Effect.succeed(null),
       importConversation: () => Effect.succeed(false),
       readAgentTranscript: () => Effect.succeed(null),
+      readRecap: () => Effect.succeed(null),
       uploadFeedback: () => unsupported(),
       streamEvents: Stream.empty,
     };

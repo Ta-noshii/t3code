@@ -30,6 +30,7 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
@@ -6764,6 +6765,53 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(resetOptions?.resumeSessionAt, undefined);
       assert.equal(resetOptions?.forkSession, undefined);
       assert.ok(resetOptions?.sessionId);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("offers Claude's suggested next prompt for the turn that just ended", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+      assert.equal(harness.getLastCreateQueryInput()?.options.promptSuggestions, true);
+      const suggestionFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "turn.suggestion",
+      ).pipe(Stream.runHead, Effect.forkChild);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-1",
+        uuid: "result-1",
+      } as unknown as SDKMessage);
+      // Suggestions arrive after the result, once the turn has completed.
+      harness.query.emit({
+        type: "prompt_suggestion",
+        suggestion: "  run the tests  ",
+        uuid: "suggestion-1",
+        session_id: "sdk-session-1",
+      } as unknown as SDKMessage);
+
+      const event = Option.getOrThrow(yield* Fiber.join(suggestionFiber));
+      assert.equal(event.type, "turn.suggestion");
+      if (event.type !== "turn.suggestion") return;
+      assert.equal(String(event.turnId), String(turn.turnId));
+      assert.equal(event.payload.suggestion, "run the tests");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

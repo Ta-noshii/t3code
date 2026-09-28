@@ -598,6 +598,21 @@ export function runtimeEventToActivities(
       ];
     }
 
+    case "turn.suggestion": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "prompt.suggestion",
+          summary: "Suggested next prompt",
+          payload: { suggestion: event.payload.suggestion },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "runtime.warning": {
       return [
         {

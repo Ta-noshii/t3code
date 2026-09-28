@@ -3,6 +3,7 @@ import {
   ProviderDriverKind,
   RuntimeTaskId,
   ThreadId,
+  TurnId,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -140,5 +141,26 @@ describe("runtimeEventToActivities tool streaming persistence", () => {
     expect(activities).toHaveLength(1);
     const payload = activities[0]?.payload as Record<string, unknown>;
     expect(payload.data).toEqual(streamingData);
+  });
+});
+
+describe("runtimeEventToActivities prompt suggestions", () => {
+  it("records the suggestion against the turn it follows", () => {
+    const event = {
+      ...base,
+      type: "turn.suggestion",
+      eventId: EventId.make("evt-suggestion"),
+      turnId: TurnId.make("turn-3"),
+      payload: { suggestion: "run the tests" },
+    } satisfies ProviderRuntimeEvent;
+
+    expect(runtimeEventToActivities(event)).toMatchObject([
+      {
+        id: "evt-suggestion",
+        kind: "prompt.suggestion",
+        turnId: "turn-3",
+        payload: { suggestion: "run the tests" },
+      },
+    ]);
   });
 });

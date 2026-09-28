@@ -12,6 +12,7 @@ import {
   collapseExpandedComposerCursor,
   composerStateAtPromptEnd,
   composerSubmissionIntentForEnter,
+  latestPromptSuggestion,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
@@ -734,5 +735,48 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("Shift+Enter while the agent works", () => {
+  const enter = (isRunning: boolean, sendShortcut?: "enter" | "mod-enter") =>
+    composerSubmissionIntentForEnter({
+      isMobileViewport: false,
+      shiftKey: true,
+      modifierKey: false,
+      isDraftThread: false,
+      isRunning,
+      ...(sendShortcut ? { sendShortcut } : {}),
+    });
+
+  it("queues the message for after the turn, and stays a newline otherwise", () => {
+    expect(enter(true)).toBe("after-turn");
+    expect(enter(true, "mod-enter")).toBe("after-turn");
+    expect(enter(false)).toBeNull();
+  });
+});
+
+describe("latestPromptSuggestion", () => {
+  const thread = (
+    state: string,
+    activities: Array<{ kind: string; turnId: string | null; payload: unknown }>,
+  ) => ({
+    latestTurn: { turnId: "turn-2", state },
+    activities,
+  });
+  const suggestion = (turnId: string, text: string) => ({
+    kind: "prompt.suggestion",
+    turnId,
+    payload: { suggestion: text },
+  });
+
+  it("offers the latest completed turn's suggestion while the thread is ready", () => {
+    const activities = [suggestion("turn-1", "old idea"), suggestion("turn-2", "run the tests")];
+    expect(latestPromptSuggestion(thread("completed", activities), "ready")).toBe("run the tests");
+    expect(latestPromptSuggestion(thread("completed", activities), "running")).toBeNull();
+    expect(latestPromptSuggestion(thread("running", activities), "ready")).toBeNull();
+    expect(
+      latestPromptSuggestion(thread("completed", [suggestion("turn-1", "old idea")]), "ready"),
+    ).toBeNull();
   });
 });

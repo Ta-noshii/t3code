@@ -11,7 +11,7 @@ import {
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default";
-export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
+export type ComposerSubmissionIntent = "foreground" | "background" | "alternate" | "after-turn";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -36,12 +36,41 @@ export function composerSubmissionIntentForEnter(input: {
   const requiresModifier =
     input.sendShortcut === "mod-enter" ||
     (input.sendShortcut === "mod-enter-multiline" && /[\r\n]/.test(input.prompt ?? ""));
-  if (input.isMobileViewport || (requiresModifier && !input.modifierKey)) return null;
+  if (input.isMobileViewport) return null;
+  // Shift+Enter while the agent works queues a message for after its turn ends.
+  if (input.isRunning && input.shiftKey && !input.modifierKey) return "after-turn";
+  if (requiresModifier && !input.modifierKey) return null;
   if (input.shiftKey && !(requiresModifier && input.modifierKey && input.isRunning)) return null;
   if (input.isRunning && input.modifierKey && (!requiresModifier || input.shiftKey)) {
     return "alternate";
   }
   return input.modifierKey && input.isDraftThread ? "background" : "foreground";
+}
+
+/**
+ * The provider's guess at the next prompt, offered while the composer is empty. Only the
+ * suggestion for the thread's latest turn counts, and only once that turn has completed.
+ */
+export function latestPromptSuggestion(
+  thread:
+    | {
+        readonly latestTurn: { readonly turnId: string; readonly state: string } | null;
+        readonly activities: ReadonlyArray<{
+          readonly kind: string;
+          readonly turnId: string | null;
+          readonly payload: unknown;
+        }>;
+      }
+    | undefined,
+  phase: string,
+): string | null {
+  const turn = thread?.latestTurn;
+  if (!thread || !turn || turn.state !== "completed" || phase !== "ready") return null;
+  const activity = thread.activities.findLast(
+    (candidate) => candidate.kind === "prompt.suggestion" && candidate.turnId === turn.turnId,
+  );
+  const suggestion = (activity?.payload as { suggestion?: unknown } | undefined)?.suggestion;
+  return typeof suggestion === "string" && suggestion.trim().length > 0 ? suggestion.trim() : null;
 }
 
 const isInlineTokenSegment = (segment: ComposerPromptSegment): boolean => segment.type !== "text";

@@ -186,6 +186,7 @@ const HookProgressType = Schema.Literal("hook.progress");
 const HookCompletedType = Schema.Literal("hook.completed");
 const ToolProgressType = Schema.Literal("tool.progress");
 const ToolSummaryType = Schema.Literal("tool.summary");
+const TurnSuggestionType = Schema.Literal("turn.suggestion");
 const AuthStatusType = Schema.Literal("auth.status");
 const AccountUpdatedType = Schema.Literal("account.updated");
 const AccountRateLimitsUpdatedType = Schema.Literal("account.rate-limits.updated");
@@ -721,6 +722,12 @@ const ToolSummaryPayload = Schema.Struct({
 });
 export type ToolSummaryPayload = typeof ToolSummaryPayload.Type;
 
+/** The provider's guess at the user's next prompt, offered after a turn ends. */
+const TurnSuggestionPayload = Schema.Struct({
+  suggestion: TrimmedNonEmptyStringSchema,
+});
+export type TurnSuggestionPayload = typeof TurnSuggestionPayload.Type;
+
 const AuthStatusPayload = Schema.Struct({
   isAuthenticating: Schema.optional(Schema.Boolean),
   output: Schema.optional(Schema.Array(Schema.String)),
@@ -1087,6 +1094,13 @@ const ProviderRuntimeToolSummaryEvent = Schema.Struct({
 });
 export type ProviderRuntimeToolSummaryEvent = typeof ProviderRuntimeToolSummaryEvent.Type;
 
+const ProviderRuntimeTurnSuggestionEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: TurnSuggestionType,
+  payload: TurnSuggestionPayload,
+});
+export type ProviderRuntimeTurnSuggestionEvent = typeof ProviderRuntimeTurnSuggestionEvent.Type;
+
 const ProviderRuntimeAuthStatusEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: AuthStatusType,
@@ -1212,6 +1226,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeHookCompletedEvent,
   ProviderRuntimeToolProgressEvent,
   ProviderRuntimeToolSummaryEvent,
+  ProviderRuntimeTurnSuggestionEvent,
   ProviderRuntimeAuthStatusEvent,
   ProviderRuntimeAccountUpdatedEvent,
   ProviderRuntimeAccountRateLimitsUpdatedEvent,

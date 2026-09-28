@@ -192,3 +192,16 @@ describe("queued message dispatch timing", () => {
     );
   });
 });
+
+describe("after-turn messages", () => {
+  const message = { queuedAfterToolActivityId: "tool-1", afterTurn: true };
+
+  it("wait out tool calls and leave once the turn ends", () => {
+    expect(isQueuedMessageDue({ message, phase: "running", latestToolActivityId: "tool-2" })).toBe(
+      false,
+    );
+    expect(isQueuedMessageDue({ message, phase: "ready", latestToolActivityId: "tool-2" })).toBe(
+      true,
+    );
+  });
+});

@@ -174,6 +174,14 @@ export interface ProviderServiceShape {
   }) => Effect.Effect<AgentTranscript | null, ProviderServiceError>;
 
   /**
+   * A one-line recap of the thread for a user returning to it, or null when its provider
+   * can't produce one.
+   */
+  readonly readRecap: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<string | null, ProviderServiceError>;
+
+  /**
    * Upload a thread and return the provider's shareable feedback identifier.
    */
   readonly uploadFeedback: (

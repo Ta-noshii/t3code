@@ -1,4 +1,4 @@
-import { ArrowUpIcon, ClockIcon } from "lucide-react";
+import { ArrowUpIcon, ClockIcon, HourglassIcon } from "lucide-react";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
@@ -306,6 +306,7 @@ interface TimelineRowSharedState {
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
   onSteerQueuedMessage: (id: string) => void;
   steerQueuedMessageShortcutLabel: string | null;
+  onToggleQueuedMessageAfterTurn: (id: string) => void;
   onRemoveQueuedMessage: (id: string) => void;
 }
 
@@ -474,6 +475,7 @@ interface MessagesTimelineProps {
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
   onSteerQueuedMessage?: (id: string) => void;
   steerQueuedMessageShortcutLabel?: string | null;
+  onToggleQueuedMessageAfterTurn?: (id: string) => void;
   onRemoveQueuedMessage?: (id: string) => void;
 }
 
@@ -533,6 +535,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   queuedMessages = EMPTY_QUEUED_MESSAGES,
   onSteerQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   steerQueuedMessageShortcutLabel = null,
+  onToggleQueuedMessageAfterTurn = NOOP_QUEUED_MESSAGE_ACTION,
   onRemoveQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
 }: MessagesTimelineProps) {
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
@@ -1184,6 +1187,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
       onSteerQueuedMessage,
       steerQueuedMessageShortcutLabel,
+      onToggleQueuedMessageAfterTurn,
       onRemoveQueuedMessage,
     }),
     [
@@ -1221,6 +1225,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenWorktreeSetupTerminal,
       onSteerQueuedMessage,
       steerQueuedMessageShortcutLabel,
+      onToggleQueuedMessageAfterTurn,
       onRemoveQueuedMessage,
     ],
   );
@@ -1804,9 +1809,11 @@ function QueuedMessageTimelineRow({
     ? "Sending to the agent"
     : queuedMessage.holdUntilUserAction
       ? "Waits for Send now"
-      : row.isNext
-        ? "Sends after the next tool call or when the turn ends"
-        : "Sends after the messages above it";
+      : !row.isNext
+        ? "Sends after the messages above it"
+        : queuedMessage.afterTurn
+          ? "Sends once the agent finishes its turn"
+          : "Sends after the next tool call or when the turn ends";
   return (
     <div className="flex flex-col items-end" data-queued-message-id={queuedMessage.id}>
       <div className="max-w-[80%] rounded-2xl border border-dashed border-border p-3 text-message-foreground/80">
@@ -1836,12 +1843,38 @@ function QueuedMessageTimelineRow({
               render={<span className="inline-flex h-6 items-center gap-1" />}
               aria-label={`${sending ? "Sending" : "Queued"}. ${statusLabel}.`}
             >
-              <ClockIcon className="size-3.5" aria-hidden />
-              {sending ? "Sending" : "Queued"}
+              {queuedMessage.afterTurn && !sending ? (
+                <HourglassIcon className="size-3.5" aria-hidden />
+              ) : (
+                <ClockIcon className="size-3.5" aria-hidden />
+              )}
+              {sending ? "Sending" : queuedMessage.afterTurn ? "After this turn" : "Queued"}
             </TooltipTrigger>
             <TooltipPopup side="bottom">{statusLabel}</TooltipPopup>
           </Tooltip>
           <div className={cn("ml-auto flex items-center gap-0.5", sending && "invisible")}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant={queuedMessage.afterTurn ? "ghost" : "ghost-muted"}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => ctx.onToggleQueuedMessageAfterTurn(queuedMessage.id)}
+                    aria-pressed={queuedMessage.afterTurn === true}
+                    aria-label="Wait until the agent finishes"
+                  />
+                }
+              >
+                <HourglassIcon className="size-3.5" aria-hidden />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">
+                {queuedMessage.afterTurn
+                  ? "Waiting for the agent to finish. Click to send at the next tool call instead"
+                  : "Wait until the agent finishes (Shift+Enter)"}
+              </TooltipPopup>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={

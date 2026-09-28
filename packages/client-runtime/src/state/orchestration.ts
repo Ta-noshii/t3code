@@ -24,6 +24,13 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       tag: ORCHESTRATION_WS_METHODS.getAgentTranscript,
       idleTtlMs: 60_000,
     }),
+    // Keyed by the latest settled turn, so each turn gets one recap.
+    threadRecap: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:orchestration:thread-recap",
+      tag: ORCHESTRATION_WS_METHODS.getThreadRecap,
+      staleTimeMs: 3_600_000,
+      idleTtlMs: 3_600_000,
+    }),
     fullThreadDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:orchestration:full-thread-diff",
       tag: ORCHESTRATION_WS_METHODS.getFullThreadDiff,

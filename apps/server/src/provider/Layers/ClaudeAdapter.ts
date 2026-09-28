@@ -80,6 +80,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
@@ -4215,6 +4216,34 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
   });
 
+  // Claude's guess at the next prompt arrives after the turn's result, so it
+  // belongs to the turn that just completed; the composer offers it on Tab.
+  const handlePromptSuggestion = Effect.fn("handlePromptSuggestion")(function* (
+    context: ClaudeSessionContext,
+    message: Extract<SDKMessage, { type: "prompt_suggestion" }>,
+  ) {
+    const suggestion = message.suggestion.trim();
+    const turnId = context.turnState?.turnId ?? context.turns.at(-1)?.id;
+    if (suggestion.length === 0 || turnId === undefined) return;
+    const stamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      eventId: stamp.eventId,
+      provider: PROVIDER,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      turnId: asCanonicalTurnId(turnId),
+      providerRefs: nativeProviderRefs(context),
+      raw: {
+        source: "claude.sdk.message",
+        method: sdkNativeMethod(message),
+        messageType: message.type,
+        payload: message,
+      },
+      type: "turn.suggestion",
+      payload: { suggestion },
+    });
+  });
+
   const handleSdkMessage = Effect.fn("handleSdkMessage")(function* (
     context: ClaudeSessionContext,
     message: SDKMessage,
@@ -4249,10 +4278,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       case "rate_limit_event":
         yield* handleSdkTelemetryMessage(context, message);
         return;
-      // Composer prompt suggestions have no T3 surface; consumed deliberately.
+      case "prompt_suggestion":
+        yield* handlePromptSuggestion(context, message);
+        return;
       // `conversation_reset` announces a CLI-side conversation id swap
       // (e.g. /clear); T3 keeps its own thread identity and resume cursor.
-      case "prompt_suggestion":
       case "conversation_reset":
         return;
       default: {
@@ -5017,6 +5047,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
+        // Claude still honours the user's promptSuggestionEnabled setting.
+        promptSuggestions: true,
         canUseTool,
         onUserDialog,
         supportedDialogKinds: ["resume_return"],
@@ -5710,6 +5742,58 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     return transcript ?? undefined;
   });
 
+  // Claude Code's own `/recap` command, run in a fork of the session that is never
+  // written to disk, so the recap adds nothing to the conversation it describes.
+  // Settings sources stay empty: hooks and MCP servers have no part in a recap.
+  const readRecap: NonNullable<ClaudeAdapterShape["readRecap"]> = Effect.fn("readRecap")(
+    function* (input) {
+      const sessionId = readClaudeResumeState(input.resumeCursor)?.resume;
+      if (!sessionId) return undefined;
+      const recap = yield* Effect.tryPromise({
+        try: async () => {
+          async function* recapPrompt(): AsyncIterable<SDKUserMessage> {
+            yield {
+              type: "user",
+              message: { role: "user", content: "/recap" },
+              parent_tool_use_id: null,
+              session_id: sessionId!,
+            } as SDKUserMessage;
+          }
+          const runtime = createQuery({
+            prompt: recapPrompt(),
+            options: {
+              ...(input.cwd ? { cwd: input.cwd } : {}),
+              pathToClaudeCodeExecutable: claudeSdkExecutablePath,
+              env: claudeEnvironment,
+              resume: sessionId,
+              forkSession: true,
+              persistSession: false,
+              settingSources: [],
+            },
+          });
+          try {
+            for await (const message of runtime) {
+              const source = (message as { local_command_source?: unknown }).local_command_source;
+              if (message.type === "assistant" && typeof source === "string") {
+                const text = message.message.content
+                  .flatMap((block) => (block.type === "text" ? [block.text] : []))
+                  .join("")
+                  .trim();
+                if (text.length > 0) return text;
+              }
+              if (message.type === "result") break;
+            }
+            return undefined;
+          } finally {
+            runtime.close();
+          }
+        },
+        catch: (cause) => toRequestError(input.threadId, "thread/recap", cause),
+      }).pipe(Effect.timeoutOption("60 seconds"));
+      return Option.getOrUndefined(recap);
+    },
+  );
+
   const importConversation: NonNullable<ClaudeAdapterShape["importConversation"]> = Effect.fn(
     "importConversation",
   )(function* (input) {
@@ -5838,6 +5922,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     forkThread,
     exportConversation,
     readAgentTranscript,
+    readRecap,
     importConversation,
     respondToRequest,
     respondToUserInput,

@@ -51,6 +51,11 @@ export interface QueuedComposerMessage {
    */
   holdUntilUserAction?: boolean;
   /**
+   * Waits for the agent to finish its turn instead of steering it at the next
+   * tool call. Queued with Shift+Enter, or toggled on the queued message.
+   */
+  afterTurn?: boolean;
+  /**
    * Set while a send is under way; the row stays until it settles. Stop can
    * still take a "preparing" message back (uploads, thread settings), but not
    * a "dispatching" one, whose turn start is already on the wire.
@@ -96,6 +101,8 @@ interface QueuedMessageStoreState {
    * Stop already took the message back.
    */
   failSend: (threadKey: string, id: string) => boolean;
+  /** Switches a waiting message between steering at the next tool call and waiting for the turn to end. */
+  toggleAfterTurn: (threadKey: string, id: string) => void;
   /** Removes one message without touching the others' anchors. Null when gone or sending. */
   remove: (threadKey: string, id: string) => QueuedComposerMessage | null;
   /** Removes and returns every message for the thread that is not already on the wire. */
@@ -194,6 +201,16 @@ export const useQueuedMessageStore = create<QueuedMessageStoreState>()((set, get
       );
       return true;
     },
+    toggleAfterTurn: (threadKey, id) => {
+      const queue = queueOf(threadKey);
+      if (!queue.some((message) => message.id === id && !message.sending)) return;
+      update(
+        threadKey,
+        queue.map((message) =>
+          message.id === id ? { ...message, afterTurn: !message.afterTurn } : message,
+        ),
+      );
+    },
     remove: (threadKey, id) => {
       const queue = queueOf(threadKey);
       const entry = queue.find((message) => message.id === id);
@@ -247,17 +264,22 @@ export function latestCompletedToolActivityId(
 
 /**
  * A queued message is due mid-turn once a tool call finished after it was
- * queued, and as soon as the turn is over otherwise. "connecting" is the gap
- * between a send and the provider picking it up, so nothing is due there.
+ * queued, and as soon as the turn is over otherwise; an after-turn message only
+ * then. "connecting" is the gap between a send and the provider picking it up,
+ * so nothing is due there.
  */
 export function isQueuedMessageDue(input: {
-  message: Pick<QueuedComposerMessage, "queuedAfterToolActivityId" | "holdUntilUserAction">;
+  message: Pick<
+    QueuedComposerMessage,
+    "queuedAfterToolActivityId" | "holdUntilUserAction" | "afterTurn"
+  >;
   phase: "connecting" | "running" | "ready" | "disconnected";
   latestToolActivityId: string | null;
 }): boolean {
   if (input.message.holdUntilUserAction) return false;
   if (input.phase === "connecting") return false;
   if (input.phase !== "running") return true;
+  if (input.message.afterTurn) return false;
   return input.latestToolActivityId !== input.message.queuedAfterToolActivityId;
 }
 

@@ -401,6 +401,7 @@ describe("ProviderCommandReactor", () => {
       exportConversation: () => Effect.succeed(null),
       importConversation: () => Effect.succeed(false),
       readAgentTranscript: () => Effect.succeed(null),
+      readRecap: () => Effect.succeed(null),
       uploadFeedback: () => unsupported(),
       get streamEvents() {
         return Stream.fromPubSub(runtimeEventPubSub);

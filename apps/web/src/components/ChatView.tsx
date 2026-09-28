@@ -237,6 +237,7 @@ import { isEditableFocused } from "../lib/editableFocus";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
+  HistoryIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
   DownloadIcon,
@@ -406,6 +407,7 @@ import {
   ThreadErrorBanner,
 } from "./chat/ThreadErrorBanner";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { useThreadRecap } from "./chat/useThreadRecap";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import {
   hasAvailableCompactionProvider,
@@ -6405,6 +6407,25 @@ export default function ChatView(props: ChatViewProps) {
       onDismiss: acknowledgeActiveThreadWoke,
     };
   }, [acknowledgeActiveThreadWoke, activeThread?.id, activeThreadWokeVisible]);
+  const threadRecap = useThreadRecap({
+    environmentId: activeThread ? environmentId : null,
+    threadId: activeThread?.id ?? null,
+    latestTurn: activeLatestTurn,
+    idle: phase !== "running" && pendingApprovals.length === 0 && pendingUserInputs.length === 0,
+    supported: serverConfig?.environment.capabilities.threadRecap === true,
+  });
+  const threadRecapBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (threadRecap.recap === null) return null;
+    return {
+      id: `thread-recap:${activeThread?.id ?? "unknown"}`,
+      variant: "info",
+      icon: <HistoryIcon />,
+      title: "While you were away",
+      description: threadRecap.recap,
+      dismissLabel: "Dismiss recap",
+      onDismiss: threadRecap.dismiss,
+    };
+  }, [activeThread?.id, threadRecap.dismiss, threadRecap.recap]);
   const parkedThreadBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (!activeThreadSnoozed && !activeThreadSettled) {
       return null;
@@ -6575,6 +6596,7 @@ export default function ChatView(props: ChatViewProps) {
     const resumeCompactionItems =
       resumeCompactionBannerItem === null ? [] : [resumeCompactionBannerItem];
     const wokeThreadItems = wokeThreadBannerItem === null ? [] : [wokeThreadBannerItem];
+    const threadRecapItems = threadRecapBannerItem === null ? [] : [threadRecapBannerItem];
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];
     // The user asked for this one, so it leads the notice tier instead of trailing it.
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
@@ -6588,6 +6610,7 @@ export default function ChatView(props: ChatViewProps) {
         ...backgroundLivenessItems,
         ...resumeCompactionItems,
         ...wokeThreadItems,
+        ...threadRecapItems,
         ...parkedThreadItems,
       ];
     }
@@ -6599,6 +6622,7 @@ export default function ChatView(props: ChatViewProps) {
       ...backgroundLivenessItems,
       ...resumeCompactionItems,
       ...wokeThreadItems,
+      ...threadRecapItems,
       {
         id: `branch-mismatch:${activeBranchMismatchKey}`,
         variant: "info",
@@ -6653,6 +6677,7 @@ export default function ChatView(props: ChatViewProps) {
     systemComposerBannerItems,
     usageLimitsBanner,
     wokeThreadBannerItem,
+    threadRecapBannerItem,
   ]);
   useEffect(() => {
     setPendingServerThreadEnvMode(null);
@@ -8029,6 +8054,7 @@ export default function ChatView(props: ChatViewProps) {
       !directAnnotation &&
       activeThreadKey &&
       (queueStillSending ||
+        submissionIntent === "after-turn" ||
         (phase === "running" &&
           (settings.followUpBehavior === "queue") !== (submissionIntent === "alternate")))
     ) {
@@ -8049,6 +8075,7 @@ export default function ChatView(props: ChatViewProps) {
         reviewComments: [...composerReviewComments],
         sendSettings,
         queuedAfterToolActivityId: latestCompletedToolActivityId(threadActivities),
+        ...(submissionIntent === "after-turn" ? { afterTurn: true } : {}),
         createdAt: new Date().toISOString(),
       });
       promptRef.current = "";
@@ -8970,6 +8997,12 @@ export default function ChatView(props: ChatViewProps) {
   const onSteerQueuedMessage = useCallback((id: string) => {
     queuedMessageActionsRef.current.steer(id);
   }, []);
+  const onToggleQueuedMessageAfterTurn = useCallback(
+    (id: string) => {
+      if (activeThreadKey) useQueuedMessageStore.getState().toggleAfterTurn(activeThreadKey, id);
+    },
+    [activeThreadKey],
+  );
   const onRemoveQueuedMessage = useCallback((id: string) => {
     queuedMessageActionsRef.current.remove(id);
   }, []);
@@ -10268,6 +10301,7 @@ export default function ChatView(props: ChatViewProps) {
                 loadEarlier={paintOnlyDisplayedTimeline ? null : loadEarlierTurns}
                 queuedMessages={paintOnlyDisplayedTimeline ? EMPTY_QUEUED_MESSAGES : queuedMessages}
                 onSteerQueuedMessage={onSteerQueuedMessage}
+                onToggleQueuedMessageAfterTurn={onToggleQueuedMessageAfterTurn}
                 steerQueuedMessageShortcutLabel={shortcutLabelForCommand(
                   keybindings,
                   "thread.steerQueuedMessage",

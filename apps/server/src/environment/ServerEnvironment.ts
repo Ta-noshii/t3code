@@ -232,6 +232,7 @@ export const make = Effect.gen(function* () {
       threadFork: true,
       threadTransfer: true,
       agentTranscripts: true,
+      threadRecap: true,
       environmentThemes: true,
       usageLimitSources: true,
       usagePriceOverrides: true,

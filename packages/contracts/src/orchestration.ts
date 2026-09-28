@@ -42,6 +42,7 @@ export const ORCHESTRATION_WS_METHODS = {
   exportThread: "orchestration.exportThread",
   importThread: "orchestration.importThread",
   getAgentTranscript: "orchestration.getAgentTranscript",
+  getThreadRecap: "orchestration.getThreadRecap",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -2487,6 +2488,28 @@ export class OrchestrationGetAgentTranscriptError extends Schema.TaggedError<Orc
   },
 ) {}
 
+export const OrchestrationGetThreadRecapInput = Schema.Struct({
+  threadId: ThreadId,
+  /** The latest settled turn. A new turn means a new recap. */
+  turnId: TurnId,
+});
+export type OrchestrationGetThreadRecapInput = typeof OrchestrationGetThreadRecapInput.Type;
+
+export const OrchestrationGetThreadRecapResult = Schema.Struct({
+  /** False when the thread's provider can't summarise it. */
+  available: Schema.Boolean,
+  recap: Schema.NullOr(Schema.String),
+});
+export type OrchestrationGetThreadRecapResult = typeof OrchestrationGetThreadRecapResult.Type;
+
+export class OrchestrationGetThreadRecapError extends Schema.TaggedError<OrchestrationGetThreadRecapError>()(
+  "OrchestrationGetThreadRecapError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -2515,6 +2538,10 @@ export const OrchestrationRpcSchemas = {
   getAgentTranscript: {
     input: OrchestrationGetAgentTranscriptInput,
     output: OrchestrationGetAgentTranscriptResult,
+  },
+  getThreadRecap: {
+    input: OrchestrationGetThreadRecapInput,
+    output: OrchestrationGetThreadRecapResult,
   },
   exportThread: {
     input: OrchestrationExportThreadInput,

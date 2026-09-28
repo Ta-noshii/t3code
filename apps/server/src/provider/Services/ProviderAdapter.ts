@@ -196,6 +196,16 @@ export interface ProviderAdapterShape<TError> {
   }) => Effect.Effect<AgentTranscript | undefined, TError>;
 
   /**
+   * A one-line summary of where the thread's conversation stands, generated without adding
+   * to it. Undefined when the provider has no conversation to summarise.
+   */
+  readonly readRecap?: (input: {
+    readonly threadId: ThreadId;
+    readonly resumeCursor: unknown;
+    readonly cwd: string | undefined;
+  }) => Effect.Effect<string | undefined, TError>;
+
+  /**
    * Upload a thread to the provider when the adapter supports feedback.
    */
   readonly uploadFeedback?: (

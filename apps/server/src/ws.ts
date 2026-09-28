@@ -46,6 +46,7 @@ import {
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   OrchestrationGetAgentTranscriptError,
+  OrchestrationGetThreadRecapError,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   type ProjectEntriesFailure,
@@ -2053,6 +2054,21 @@ const makeWsRpcLayer = (
                 (cause) =>
                   new OrchestrationGetAgentTranscriptError({
                     message: "Failed to read the agent's transcript.",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getThreadRecap]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadRecap,
+            providerService.readRecap({ threadId: input.threadId }).pipe(
+              Effect.map((recap) => ({ available: recap !== null, recap })),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetThreadRecapError({
+                    message: "Failed to recap the thread.",
                     cause,
                   }),
               ),

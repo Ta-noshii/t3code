@@ -2344,6 +2344,20 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     return entries ?? null;
   });
 
+  const readRecap: ProviderServiceMethod<"readRecap"> = Effect.fn("readRecap")(function* (input) {
+    const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+    if (!binding?.resumeCursor) return null;
+    const instanceId = yield* requireBindingInstanceId("ProviderService.readRecap", binding);
+    const adapter = yield* registry.getByInstance(instanceId);
+    if (!adapter.readRecap) return null;
+    const recap = yield* adapter.readRecap({
+      threadId: input.threadId,
+      resumeCursor: binding.resumeCursor,
+      cwd: readPersistedCwd(binding.runtimePayload),
+    });
+    return recap ?? null;
+  });
+
   const importConversation: ProviderServiceMethod<"importConversation"> = Effect.fn(
     "importConversation",
   )(function* (input) {
@@ -2546,6 +2560,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     exportConversation,
     importConversation,
     readAgentTranscript,
+    readRecap,
     uploadFeedback,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each

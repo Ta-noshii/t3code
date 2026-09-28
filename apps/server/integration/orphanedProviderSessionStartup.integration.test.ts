@@ -128,6 +128,7 @@ const startupDependencies = Layer.mergeAll(
     exportConversation: () => Effect.succeed(null),
     importConversation: () => Effect.succeed(false),
     readAgentTranscript: () => Effect.succeed(null),
+    readRecap: () => Effect.succeed(null),
     uploadFeedback: () => Effect.die("unused"),
     streamEvents: Stream.empty,
   }),
