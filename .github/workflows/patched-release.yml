@@ -174,19 +174,171 @@ jobs:
             --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" --output-dir release-cli
           node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "$VERSION"
 
+      # The Windows job rebuilds from this exact tree (patches plus any agent fixes) and
+      # embeds the Linux CLI archive as its WSL runtime, as upstream's Windows build does.
+      - name: Collect Linux assets and the patched tree
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/linux-assets"
+          handoff="$RUNNER_TEMP/handoff"
+          mkdir -p "$out" "$handoff"
+          cp release/*.AppImage release-cli/*.tar.gz "$out/"
+          cp release/*.yml "$out/" 2>/dev/null || true
+          rm -f "$out/builder-debug.yml"
+          if [ -s "$RUNNER_TEMP/ai-notes.md" ]; then
+            git diff "upstream-v$VERSION" HEAD > "$out/ai-reconciliation.patch"
+            cp "$RUNNER_TEMP/ai-notes.md" "$handoff/"
+            cat "$RUNNER_TEMP/ai-notes.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          git diff --binary "upstream-v$VERSION" HEAD > "$handoff/patched-tree.patch"
+          cp release-cli/*.tar.gz "$handoff/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.version }}
+          path: ${{ runner.temp }}/linux-assets/*
+          if-no-files-found: error
+          retention-days: 3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: handoff-${{ matrix.version }}
+          path: ${{ runner.temp }}/handoff/*
+          if-no-files-found: error
+          retention-days: 3
+
+  windows:
+    needs: [plan, build]
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        version: ${{ fromJson(needs.plan.outputs.versions) }}
+    name: Windows ${{ matrix.version }}
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ matrix.version }}
+      T3CODE_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsudDMuY29kZXMk
+      T3CODE_CLERK_JWT_TEMPLATE: t3-relay
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: hzxSgY2cH10sDU2r
+      T3CODE_RELAY_URL: https://relay.t3.codes
+    steps:
+      - name: Check out the upstream release
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init -q .
+          # The patch is LF; a CRLF checkout would make it fail to apply.
+          git config core.autocrlf false
+          git remote add upstream "https://github.com/$UPSTREAM.git"
+          git fetch -q --filter=blob:none upstream "refs/tags/v$VERSION:refs/tags/upstream-v$VERSION"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git checkout -q --detach "upstream-v$VERSION"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: handoff-${{ matrix.version }}
+          path: handoff
+
+      - name: Apply the patched tree from the Linux build
+        run: git apply --binary handoff/patched-tree.patch
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Install Spectre-mitigated MSVC libs
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $proc = Start-Process -FilePath $setupExe `
+            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
+            "Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre", "--quiet", "--norestart" `
+            -Wait -PassThru -NoNewWindow
+          if ($null -eq $proc -or $proc.ExitCode -ne 0) { exit 1 }
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install dependencies
+        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts... --filter=@t3tools/web...
+
+      - name: Align package versions to the upstream release
+        run: node scripts/update-release-package-versions.ts "$VERSION"
+
+      # Unsigned: upstream signs with Azure Trusted Signing, which this repository lacks,
+      # so Windows SmartScreen warns on first install.
+      - name: Build desktop installer
+        env:
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+        run: |
+          vp run dist:desktop:artifact --platform win --target nsis --arch x64 --build-version "$VERSION" \
+            --wsl-runtime "$GITHUB_WORKSPACE"/handoff/t3-*-linux-x64.tar.gz --verbose
+
+      - name: Collect Windows assets
+        run: |
+          set -euo pipefail
+          mkdir -p windows-assets
+          cp release/*.exe release/*.blockmap windows-assets/
+          cp release/*.yml windows-assets/
+          rm -f windows-assets/builder-debug.yml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.version }}
+          path: windows-assets/*
+          if-no-files-found: error
+          retention-days: 3
+
+  # Publishes once both builds finish. A failed Windows build still publishes Linux, so
+  # the desktop and servers keep updating; the notes say Windows is missing.
+  publish:
+    needs: [plan, build, windows]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        version: ${{ fromJson(needs.plan.outputs.versions) }}
+    name: Publish ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ matrix.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-${{ matrix.version }}
+          path: assets
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: windows-${{ matrix.version }}
+          path: assets
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: handoff-${{ matrix.version }}
+          path: handoff
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           REBUILD: ${{ inputs.rebuild }}
         run: |
           set -euo pipefail
-          out="$RUNNER_TEMP/release-assets"
-          mkdir -p "$out"
-          cp release/*.AppImage release-cli/*.tar.gz "$out/"
-          cp release/*.yml "$out/" 2>/dev/null || true
-          rm -f "$out/builder-debug.yml"
           # Servers verify their archive against SHA256SUMS before installing it.
-          (cd "$out" && sha256sum *.tar.gz > SHA256SUMS)
+          (cd assets && sha256sum *.tar.gz > SHA256SUMS)
           tag="v$VERSION"
           if [ "$REBUILD" = true ]; then gh release delete "$tag" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag || true; fi
           # The patched tree can't be pushed as a tag: once upstream edits its workflow files,
@@ -198,18 +350,18 @@ jobs:
             echo "Upstream [v$VERSION](https://github.com/$UPSTREAM/releases/tag/v$VERSION) with these fork branches applied: $(printf '\`%s\` ' $PATCH_BRANCHES)"
             echo
             echo 'Servers: set `T3CODE_RELEASE_BASE_URL=https://github.com/'"$GITHUB_REPOSITORY"'/releases/download` on the T3 Code service.'
-            if [ -s "$RUNNER_TEMP/ai-notes.md" ]; then
+            if ! ls assets/*.exe >/dev/null 2>&1; then
+              echo
+              echo '**No Windows installer:** the Windows build failed for this version.'
+            fi
+            if [ -s handoff/ai-notes.md ]; then
               echo
               echo '**The Cursor agent reconciled the patches with this upstream version.** Fold `ai-reconciliation.patch` into the patch branches so later builds apply cleanly.'
               echo
-              cat "$RUNNER_TEMP/ai-notes.md"
+              cat handoff/ai-notes.md
             fi
           } > notes.md
-          if [ -s "$RUNNER_TEMP/ai-notes.md" ]; then
-            git diff "upstream-v$VERSION" HEAD > "$out/ai-reconciliation.patch"
-            cat "$RUNNER_TEMP/ai-notes.md" >> "$GITHUB_STEP_SUMMARY"
-          fi
-          gh release create "$tag" "$out"/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "T3 Code $VERSION (patched)" --notes-file notes.md "${flags[@]}"
+          gh release create "$tag" assets/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "T3 Code $VERSION (patched)" --notes-file notes.md "${flags[@]}"
 
       - name: Prune older patched nightlies
         env:

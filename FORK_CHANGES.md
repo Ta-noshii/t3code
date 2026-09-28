@@ -6,7 +6,7 @@ This repository is a fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3c
 
 - `nowbar` (default branch) carries the Android Now Bar work and the fork's CI. It merges `upstream/main` by hand.
 - Desktop and server changes live on patch branches based on `upstream/main`. The patched-release workflow cherry-picks them, in the order below, onto every upstream nightly and publishes the result here under the same version number.
-  - The Linux desktop AppImage updates itself from this repository's releases.
+  - The Linux AppImage and the Windows installer update themselves from this repository's releases.
   - Servers whose service sets `T3CODE_RELEASE_BASE_URL=https://github.com/Ta-noshii/t3code-nowbar/releases/download` install the patched runtime through the normal in-app Update.
 
 ## Patch branches (desktop and server)
@@ -55,7 +55,9 @@ When the PR merges, delete the branch, as with the SnapShots fix above.
   1. installs dependencies on the upstream tree,
   2. cherry-picks the patch branches, asking the Cursor CLI agent to resolve any conflict,
   3. typechecks the server and web apps and runs the tests above, asking the agent to fix failures (up to two rounds),
-  4. builds the Linux AppImage and the server archive and publishes release `v<version>`, keeping the newest five.
+  4. builds the Linux AppImage and the server archive,
+  5. applies the same patched tree on a Windows runner and builds the unsigned x64 NSIS installer, embedding the Linux server archive as the WSL runtime,
+  6. publishes release `v<version>` and keeps the newest five. If the Windows build fails, the release ships without it and the notes say so.
 
   When the agent changed anything, the release notes say so and the release carries `ai-reconciliation.patch`. Fold that diff into the patch branch so later builds apply cleanly. The agent needs the repository secret `CURSOR_API_KEY`; without it, a conflict or failed check stops the build as before.
 - The release tags the `nowbar` commit the workflow ran from, not the patched tree. The workflow token may not push a commit that edits upstream's `.github/workflows` files.
