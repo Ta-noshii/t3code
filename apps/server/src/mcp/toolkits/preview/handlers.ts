@@ -29,6 +29,7 @@ import { resolveAttachmentRelativePath } from "../../../attachmentPaths.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
+import { runOverflowCheck } from "./overflowCheck.ts";
 import { PreviewSnapshotToolkit, PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
 
 /**
@@ -213,6 +214,21 @@ const handlers = {
         ...(toolIcon ? { toolIcon } : {}),
       })),
     ),
+  preview_overflow_check: ({ tabId, ...input }) =>
+    Effect.gen(function* () {
+      let toolIcon: ToolActivityIcon | undefined;
+      const result = yield* runOverflowCheck(
+        (operation, operationInput) =>
+          invoke<unknown>(operation, operationInput, undefined, tabId).pipe(
+            Effect.map((response) => {
+              toolIcon = response.toolIcon ?? toolIcon;
+              return response.result;
+            }),
+          ),
+        input,
+      );
+      return { ...result, ...(toolIcon ? { toolIcon } : {}) };
+    }),
   preview_wait_for: (input) => invokeTargeted<object>("waitFor", input, input.timeoutMs),
   preview_recording_start: (input) =>
     invokeTargeted<PreviewAutomationRecordingStatus>("recordingStart", input ?? {}),

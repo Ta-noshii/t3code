@@ -18,6 +18,7 @@ import {
   PreviewAutomationTabTargetInput,
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
+  PreviewViewportSize,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
@@ -208,6 +209,68 @@ const PreviewEvaluateTool = browserTool(
   }).annotate(Tool.Title, "Evaluate JavaScript in preview"),
 );
 
+export const OVERFLOW_CHECK_DEFAULT_WIDTHS = [375, 768, 1440] as const;
+
+export const PreviewOverflowCheckResult = Schema.Struct({
+  ...presentationFields,
+  report: Schema.String.annotate({
+    description: "The text report, one block per width, ending with a one-line verdict.",
+  }),
+  overflows: Schema.Int.annotate({
+    description: "Findings that count as bugs across all widths (spill, clip, page, ringclip).",
+  }),
+}).annotate({ description: "The overflow report for the page." });
+
+const PreviewOverflowCheckTool = safeBrowserTool(
+  Tool.make("preview_overflow_check", {
+    description: `Scan the current page for layout overflow at several viewport widths and return a short text report. Run it after any change to layout, text, or component sizing, before taking screenshots: it finds what a screenshot hides (a few px of spill, a ring cut by a scroll container, a page that scrolls sideways on phones).
+
+What it reports, per width:
+  spill     a normal-flow child sticks out of a parent that does not clip (visible overflow)
+  clip      content is cut off by an overflow:hidden box with no ellipsis
+  page      the document scrolls horizontally (the classic phone bug)
+  ringclip  a hard ring-* / outline drawn outside the box is cut by a clipping or scrolling ancestor (selected rows, card borders in lists)
+  truncate  info only: ellipsis or line-clamp is cutting text; decide whether that is intended
+  scroll    info only: a horizontal scroller that is scrolling; fine for tables on phones, a bug for a tab strip or rail that outgrew its slot
+Each line gives the selector, the parent, how many px, the direction, and "← cause": the deepest box that will not fit (a long word, a fixed width, an image). Fix the cause, not the wrapper. A clean width prints "<w>px: clean".
+
+What it skips on purpose: hidden / aria-hidden / sr-only elements, off-canvas drawers, absolutely positioned layers (glows, badges), negative-margin bleeds, translated elements (hover lifts), still-running animations, and anything under [data-overflow-ok]. Finished animations are settled first, so entrances do not show up. Scaled elements are checked at rest, so a hover zoom that escapes its strip is caught if the page is in that state when you run it.
+
+Reading the result: "clean" at every width means no geometric overflow; it does not judge cramped or ugly. Info lines do not fail the check. If it flags something intentional, add data-overflow-ok to that element rather than ignoring the report. Vertical page height, sibling overlap, blend/corner-radius artifacts and SVG text are outside what it detects; check those by eye.
+
+The tab is resized through each width and left at the last one (pass restore=true to put the viewport setting back). Wait for the page to finish loading first (preview_wait_for) or dynamic content will not be measured. Pass tabId to check a specific tab; omit it to use this agent session's current tab.`,
+    parameters: Schema.Struct({
+      ...PreviewAutomationTabTargetInput.fields,
+      widths: Schema.optional(
+        Schema.Array(PreviewViewportSize.fields.width).annotate({
+          description: `Viewport widths to test, in CSS pixels. Default ${JSON.stringify(OVERFLOW_CHECK_DEFAULT_WIDTHS)}. Use [375] for a quick phone check, or the current width after setting up a hover or open state.`,
+        }),
+      ),
+      height: Schema.optional(
+        PreviewViewportSize.fields.height.annotate({
+          description: "Viewport height while testing, in CSS pixels. Default 900.",
+        }),
+      ),
+      max: Schema.optional(
+        Schema.Int.check(Schema.isGreaterThan(0)).annotate({
+          description: "Maximum findings listed per width. Default 10.",
+        }),
+      ),
+      restore: Schema.optional(
+        Schema.Boolean.annotate({
+          description:
+            "Put the viewport setting back to what it was before the check. Default false.",
+        }),
+      ),
+    }),
+    success: PreviewOverflowCheckResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  })
+    .annotate(Tool.Title, "Check preview page for overflow")
+    .annotate(Tool.Idempotent, true),
+);
+
 const PreviewWaitForTool = readonlyBrowserTool(
   Tool.make("preview_wait_for", {
     description:
@@ -253,6 +316,7 @@ export const PreviewToolkit = Toolkit.make(
   PreviewPressTool,
   PreviewScrollTool,
   PreviewEvaluateTool,
+  PreviewOverflowCheckTool,
   PreviewWaitForTool,
   PreviewRecordingStartTool,
   PreviewRecordingStopTool,
@@ -269,6 +333,7 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewPressTool,
   PreviewScrollTool,
   PreviewEvaluateTool,
+  PreviewOverflowCheckTool,
   PreviewWaitForTool,
   PreviewRecordingStartTool,
   PreviewRecordingStopTool,
