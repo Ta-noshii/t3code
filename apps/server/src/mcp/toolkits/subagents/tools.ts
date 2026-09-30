@@ -143,8 +143,17 @@ const ListSubagentModelsTool = Tool.make("list_subagent_models", {
   .annotate(Tool.OpenWorld, false);
 
 const StartSubagentTool = Tool.make("start_subagent", {
-  description:
-    "Hand a task to an agent on any provider T3 Code runs, not only your own: for example a Codex model from a Claude thread. The subagent gets its own T3 Code thread in this project, on the same checkout and branch as you, where the user can watch it. It sees none of your conversation, so the prompt must carry all the context it needs. Waits for its turn to end and returns its final message; continue the conversation with message_subagent.",
+  description: [
+    'Hand a task to an agent on any provider T3 Code runs, not only your own: for example a Codex model from a Claude thread. The subagent gets its own T3 Code thread in this project, titled "Subagent · …", where the user can watch it. The call waits for its turn to end and returns its final message; continue the conversation with message_subagent.',
+    "What to know before using it:",
+    "- It sees none of your conversation. The prompt must carry every file path, decision and constraint it needs.",
+    "- It works on your checkout and branch. Its edits land in your working tree, so don't edit the same files while it runs, and review its changes before building on them.",
+    "- You get back only its last message. Ask it to put its whole answer, with file paths and findings, in that final message.",
+    '- Approvals and questions it raises go to the user in its thread; you see status "needs_user" until they answer.',
+    "- It runs on the user's own account for that provider and counts against its limits.",
+    "- It cannot start subagents of its own.",
+    "- To run several at once, start each with waitSeconds 0, then call wait_for_subagent on each.",
+  ].join("\n"),
   parameters: Schema.Struct({
     prompt: TrimmedNonEmptyString.annotate({
       description: "The complete task. The subagent starts with no other context.",

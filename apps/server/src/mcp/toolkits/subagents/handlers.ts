@@ -14,7 +14,14 @@ import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+
+import { writeFileStringAtomically } from "../../../atomicWrite.ts";
+import * as ServerConfig from "../../../config.ts";
 
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -33,10 +40,7 @@ import {
   SubagentThreadNotFoundError,
 } from "./tools.ts";
 
-/**
- * Marks subagent threads in the sidebar, and tells the server after a restart
- * which threads are subagents (the parent links live in memory only).
- */
+/** Marks subagent threads in the sidebar. */
 export const SUBAGENT_TITLE_PREFIX = "Subagent · ";
 const MAX_TITLE_CHARS = 60;
 const MAX_REPLY_CHARS = 40_000;
@@ -84,7 +88,12 @@ export type ModelResolution =
     }
   | { readonly _tag: "NotFound"; readonly detail: string };
 
-const lower = (value: string) => value.trim().toLowerCase();
+/** Case-insensitive, and "muse spark", "muse-spark" and "muse_spark" compare equal. */
+const lower = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "-");
 
 /**
  * Finds the one model the agent means. Exact slug, name or alias matches win;
@@ -229,21 +238,75 @@ interface SubagentRecord {
   pending: PendingTurn | null;
 }
 
+/**
+ * Which thread started each subagent, kept in the state directory so a parent
+ * can still reach its subagents, and only its own, after a server restart.
+ */
+export const SUBAGENT_PARENTS_FILE = "subagents.json";
+const SubagentParentsFile = Schema.fromJsonString(
+  Schema.Struct({ parents: Schema.Record(Schema.String, Schema.String) }),
+);
+const decodeParentsFile = Schema.decodeUnknownEffect(SubagentParentsFile);
+const encodeParentsFile = Schema.encodeSync(SubagentParentsFile);
+
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const registry = yield* ProviderRegistry.ProviderRegistry;
   const crypto = yield* Crypto.Crypto;
-  const records = new Map<ThreadId, SubagentRecord>();
-
-  const uuid = crypto.randomUUIDv4.pipe(Effect.orDie);
-  const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+  const config = yield* ServerConfig.ServerConfig;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const parentsPath = path.join(config.stateDir, SUBAGENT_PARENTS_FILE);
+  const saveLock = yield* Semaphore.make(1);
   const failed =
     (operation: string) =>
     <E>(cause: Cause.Cause<E>): Effect.Effect<never, SubagentOperationFailedError> =>
       Cause.hasInterruptsOnly(cause)
         ? Effect.failCause(cause as Cause.Cause<never>)
         : Effect.fail(new SubagentOperationFailedError({ operation, cause }));
+
+  const records = new Map<ThreadId, SubagentRecord>();
+  const saved = yield* fileSystem.readFileString(parentsPath).pipe(
+    Effect.flatMap(decodeParentsFile),
+    Effect.map((file) => file.parents),
+    Effect.catch((cause) =>
+      fileSystem.exists(parentsPath).pipe(
+        Effect.orElseSucceed(() => false),
+        Effect.tap((exists) =>
+          exists
+            ? Effect.logWarning("could not read subagent parents; starting without them", {
+                cause,
+              })
+            : Effect.void,
+        ),
+        Effect.as({} as Record<string, string>),
+      ),
+    ),
+  );
+  for (const [child, parent] of Object.entries(saved)) {
+    records.set(ThreadId.make(child), { parentThreadId: ThreadId.make(parent), pending: null });
+  }
+
+  const saveParents = saveLock.withPermits(1)(
+    Effect.suspend(() =>
+      writeFileStringAtomically({
+        filePath: parentsPath,
+        contents: encodeParentsFile({
+          parents: Object.fromEntries(
+            [...records].map(([child, record]) => [child, record.parentThreadId]),
+          ),
+        }),
+      }),
+    ).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.catchCause(failed("save the subagent's parent")),
+    ),
+  );
+
+  const uuid = crypto.randomUUIDv4.pipe(Effect.orDie);
+  const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
   const readShell = (threadId: ThreadId, operation: string) =>
     snapshots.getThreadShellById(threadId).pipe(Effect.catchCause(failed(operation)));
@@ -257,25 +320,16 @@ const make = Effect.gen(function* () {
     return caller.value;
   });
 
-  /** A child of the calling thread; after a restart, any subagent thread in its project. */
+  /** A subagent the calling thread started. */
   const requireChild = Effect.fn("SubagentsToolkit.requireChild")(function* (rawThreadId: string) {
     const caller = yield* requireCaller;
     const threadId = ThreadId.make(rawThreadId);
-    const child = yield* readShell(threadId, "read the subagent's thread");
-    if (Option.isNone(child)) {
+    const record = records.get(threadId);
+    if (record === undefined || record.parentThreadId !== caller.id) {
       return yield* new SubagentThreadNotFoundError({ threadId: rawThreadId });
     }
-    let record = records.get(threadId);
-    if (record === undefined) {
-      if (
-        child.value.projectId !== caller.projectId ||
-        !child.value.title.startsWith(SUBAGENT_TITLE_PREFIX)
-      ) {
-        return yield* new SubagentThreadNotFoundError({ threadId: rawThreadId });
-      }
-      record = { parentThreadId: caller.id, pending: null };
-      records.set(threadId, record);
-    } else if (record.parentThreadId !== caller.id) {
+    const child = yield* readShell(threadId, "read the subagent's thread");
+    if (Option.isNone(child)) {
       return yield* new SubagentThreadNotFoundError({ threadId: rawThreadId });
     }
     return { caller, child: child.value, record };
@@ -364,7 +418,7 @@ const make = Effect.gen(function* () {
     start_subagent: (input) =>
       Effect.gen(function* () {
         const caller = yield* requireCaller;
-        if (records.has(caller.id) || caller.title.startsWith(SUBAGENT_TITLE_PREFIX)) {
+        if (records.has(caller.id)) {
           return yield* new SubagentNestingError({});
         }
         const resolution = resolveSubagentModel(
@@ -403,6 +457,7 @@ const make = Effect.gen(function* () {
           .pipe(Effect.catchCause(failed("create the subagent's thread")));
         const record: SubagentRecord = { parentThreadId: caller.id, pending: null };
         records.set(threadId, record);
+        yield* saveParents;
         const child = yield* readShell(threadId, "read the subagent's thread");
         if (Option.isNone(child)) {
           return yield* new SubagentThreadNotFoundError({ threadId });
