@@ -42,6 +42,15 @@ Upstream PR [pingdotgg/t3code#14039](https://github.com/pingdotgg/t3code/pull/14
 
 When the PR merges, delete the branch, as with the SnapShots fix above.
 
+### `patch/subagents`
+
+Agents can hand work to a model on another provider, for example GPT-6 Luna (Codex) from a Claude thread. The user wanted Opus to be able to start subagents on any provider T3 Code runs, not only Claude's own.
+
+- New `t3-code` MCP toolkit in `apps/server/src/mcp/toolkits/subagents`: `list_subagent_models`, `start_subagent`, `message_subagent`, `wait_for_subagent`, `stop_subagent`. Capability `subagents`, granted to every session in `ProviderService.agentAccessCapabilities`.
+- `start_subagent` resolves the model by slug, name, alias or unique partial match ("luna"), creates a thread in the caller's project on the caller's branch and worktree, titled `Subagent · …`, and dispatches `thread.turn.start`. It polls the thread shell until the new turn ends, then returns the turn's last assistant message. Approvals the subagent hits come back as `needs_user`; the user answers them in its thread.
+- Parent links live in memory. After a server restart a thread still counts as a subagent of any thread in its project through the title prefix, and that prefix also stops subagents from starting their own.
+- `CodexAdapter` sets `mcp_servers.t3-code.tool_timeout_sec=1800`, since Codex's 60-second default would cut off a wait.
+
 ## Android (on `nowbar`)
 
 - **Samsung Now Bar agent monitoring.** The Android app shows agents in Samsung's Now Bar, with a distinct state per agent status, and keeps unread results. It handles attention, privacy and notification settings, keeps the bar fresh when React Native timers pause, and stops monitoring once every environment disconnects.
