@@ -52,7 +52,7 @@ export interface QueuedComposerMessage {
   holdUntilUserAction?: boolean;
   /**
    * Waits for the agent to finish its turn instead of steering it at the next
-   * tool call. Queued with Shift+Enter, or toggled on the queued message.
+   * tool call. Toggled on the queued message.
    */
   afterTurn?: boolean;
   /**

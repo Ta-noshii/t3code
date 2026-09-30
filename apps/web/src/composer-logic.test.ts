@@ -749,9 +749,9 @@ describe("Shift+Enter while the agent works", () => {
       ...(sendShortcut ? { sendShortcut } : {}),
     });
 
-  it("queues the message for after the turn, and stays a newline otherwise", () => {
-    expect(enter(true)).toBe("after-turn");
-    expect(enter(true, "mod-enter")).toBe("after-turn");
+  it("stays a newline", () => {
+    expect(enter(true)).toBeNull();
+    expect(enter(true, "mod-enter")).toBeNull();
     expect(enter(false)).toBeNull();
   });
 });

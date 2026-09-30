@@ -11,7 +11,7 @@ import {
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default";
-export type ComposerSubmissionIntent = "foreground" | "background" | "alternate" | "after-turn";
+export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -37,8 +37,6 @@ export function composerSubmissionIntentForEnter(input: {
     input.sendShortcut === "mod-enter" ||
     (input.sendShortcut === "mod-enter-multiline" && /[\r\n]/.test(input.prompt ?? ""));
   if (input.isMobileViewport) return null;
-  // Shift+Enter while the agent works queues a message for after its turn ends.
-  if (input.isRunning && input.shiftKey && !input.modifierKey) return "after-turn";
   if (requiresModifier && !input.modifierKey) return null;
   if (input.shiftKey && !(requiresModifier && input.modifierKey && input.isRunning)) return null;
   if (input.isRunning && input.modifierKey && (!requiresModifier || input.shiftKey)) {

@@ -8086,7 +8086,6 @@ export default function ChatView(props: ChatViewProps) {
       !directAnnotation &&
       activeThreadKey &&
       (queueStillSending ||
-        submissionIntent === "after-turn" ||
         (phase === "running" &&
           (settings.followUpBehavior === "queue") !== (submissionIntent === "alternate")))
     ) {
@@ -8107,7 +8106,6 @@ export default function ChatView(props: ChatViewProps) {
         reviewComments: [...composerReviewComments],
         sendSettings,
         queuedAfterToolActivityId: latestCompletedToolActivityId(threadActivities),
-        ...(submissionIntent === "after-turn" ? { afterTurn: true } : {}),
         createdAt: new Date().toISOString(),
       });
       promptRef.current = "";

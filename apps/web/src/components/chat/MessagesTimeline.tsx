@@ -1872,7 +1872,7 @@ function QueuedMessageTimelineRow({
               <TooltipPopup side="bottom">
                 {queuedMessage.afterTurn
                   ? "Waiting for the agent to finish. Click to send at the next tool call instead"
-                  : "Wait until the agent finishes (Shift+Enter)"}
+                  : "Wait until the agent finishes"}
               </TooltipPopup>
             </Tooltip>
             <Tooltip>
