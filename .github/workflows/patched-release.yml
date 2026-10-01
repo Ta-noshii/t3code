@@ -214,8 +214,10 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  # Runs after the Linux release is out and adds its installer to it, so Linux
+  # updates never wait on the slower Windows build.
   windows:
-    needs: [plan, build]
+    needs: [plan, publish]
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -298,26 +300,27 @@ jobs:
           vp run dist:desktop:artifact --platform win --target nsis --arch x64 --build-version "$VERSION" \
             --wsl-runtime "$GITHUB_WORKSPACE"/handoff/t3-*-linux-x64.tar.gz --verbose
 
-      - name: Collect Windows assets
+      - name: Add the installer to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p windows-assets
-          cp release/*.exe release/*.blockmap windows-assets/
-          cp release/*.yml windows-assets/
-          rm -f windows-assets/builder-debug.yml
+          rm -f release/builder-debug.yml
+          gh release upload "v$VERSION" release/*.exe release/*.blockmap release/*.yml -R "$GITHUB_REPOSITORY" --clobber
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-${{ matrix.version }}
-          path: windows-assets/*
-          if-no-files-found: error
-          retention-days: 3
+      # Until a Windows build lands, the newest release has no nightly.yml and the
+      # Windows app finds no update; the notes say so.
+      - name: Note the missing installer
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          printf '\n\n**No Windows installer:** the Windows build failed for this version.\n' >> notes.md
+          gh release edit "v$VERSION" -R "$GITHUB_REPOSITORY" --notes-file notes.md
 
-  # Publishes once both builds finish. A failed Windows build still publishes Linux, so
-  # the desktop and servers keep updating; the notes say Windows is missing.
   publish:
-    needs: [plan, build, windows]
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    needs: [plan, build]
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -331,12 +334,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: linux-${{ matrix.version }}
-          path: assets
-
-      - uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: windows-${{ matrix.version }}
           path: assets
 
       - uses: actions/download-artifact@v4
@@ -363,10 +360,6 @@ jobs:
             echo "Upstream [v$VERSION](https://github.com/$UPSTREAM/releases/tag/v$VERSION) with these fork branches applied: $(printf '\`%s\` ' $PATCH_BRANCHES)"
             echo
             echo 'Servers: set `T3CODE_RELEASE_BASE_URL=https://github.com/'"$GITHUB_REPOSITORY"'/releases/download` on the T3 Code service.'
-            if ! ls assets/*.exe >/dev/null 2>&1; then
-              echo
-              echo '**No Windows installer:** the Windows build failed for this version.'
-            fi
             if [ -s handoff/ai-notes.md ]; then
               echo
               echo '**The Cursor agent reconciled the patches with this upstream version.** Fold `ai-reconciliation.patch` into the patch branches so later builds apply cleanly.'

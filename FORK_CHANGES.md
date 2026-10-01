@@ -67,8 +67,8 @@ Agents can hand work to a model on another provider, for example GPT-6 Luna (Cod
   2. cherry-picks the patch branches, asking the Cursor CLI agent to resolve any conflict,
   3. typechecks the server and web apps and runs the tests above, asking the agent to fix failures (up to two rounds),
   4. builds the Linux AppImage and the server archive,
-  5. applies the same patched tree on a Windows runner and builds the unsigned x64 NSIS installer, embedding the Linux server archive as the WSL runtime,
-  6. publishes release `v<version>` and keeps the newest five. If the Windows build fails, the release ships without it and the notes say so.
+  5. publishes release `v<version>` with the Linux assets and keeps the newest five,
+  6. then applies the same patched tree on a Windows runner, builds the unsigned x64 NSIS installer (embedding the Linux server archive as the WSL runtime) and adds it to that release about 12 minutes later. If the Windows build fails, the notes say so, and the Windows app sees no update until a later release has one.
 
   When the agent changed anything, the release notes say so and the release carries `ai-reconciliation.patch`. Fold that diff into the patch branch so later builds apply cleanly. The agent needs the repository secret `CURSOR_API_KEY`; without it, a conflict or failed check stops the build as before.
 - The release tags the `nowbar` commit the workflow ran from, not the patched tree. The workflow token may not push a commit that edits upstream's `.github/workflows` files.
