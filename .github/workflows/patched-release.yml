@@ -109,7 +109,13 @@ jobs:
           git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
           git fetch -q --filter=blob:none upstream "refs/tags/v$VERSION:refs/tags/upstream-v$VERSION"
           git sparse-checkout set --no-cone '/*' '!/.repos/'
-          git checkout -q --detach "upstream-v$VERSION"
+          # The partial clone fetches blobs during checkout, and the runner's connection to
+          # GitHub sometimes resets mid-fetch.
+          for attempt in 1 2 3 4; do
+            git checkout -q --detach "upstream-v$VERSION" && break
+            [ "$attempt" = 4 ] && exit 1
+            echo "Checkout failed (attempt $attempt), retrying in 20s"; sleep 20
+          done
           # The reconcile script and the change list live on this branch, not in the upstream tree.
           git fetch -q --filter=blob:none origin "$GITHUB_REF"
           git show "FETCH_HEAD:.github/scripts/patch-reconcile.sh" > "$RUNNER_TEMP/patch-reconcile.sh"
@@ -239,7 +245,13 @@ jobs:
           git remote add upstream "https://github.com/$UPSTREAM.git"
           git fetch -q --filter=blob:none upstream "refs/tags/v$VERSION:refs/tags/upstream-v$VERSION"
           git sparse-checkout set --no-cone '/*' '!/.repos/'
-          git checkout -q --detach "upstream-v$VERSION"
+          # The partial clone fetches blobs during checkout, and the runner's connection to
+          # GitHub sometimes resets mid-fetch.
+          for attempt in 1 2 3 4; do
+            git checkout -q --detach "upstream-v$VERSION" && break
+            [ "$attempt" = 4 ] && exit 1
+            echo "Checkout failed (attempt $attempt), retrying in 20s"; sleep 20
+          done
 
       - uses: actions/download-artifact@v4
         with:
