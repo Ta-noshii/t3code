@@ -214,10 +214,12 @@ export const OVERFLOW_CHECK_DEFAULT_WIDTHS = [375, 768, 1440] as const;
 export const PreviewOverflowCheckResult = Schema.Struct({
   ...presentationFields,
   report: Schema.String.annotate({
-    description: "The text report, one block per width, ending with a one-line verdict.",
+    description:
+      "The text report, one block per width (grouped by page when urls is given), ending with a one-line verdict.",
   }),
   overflows: Schema.Int.annotate({
-    description: "Findings that count as bugs across all widths (spill, clip, page, ringclip).",
+    description:
+      "Findings that count as bugs across all pages and widths (spill, clip, page, ringclip).",
   }),
 }).annotate({ description: "The overflow report for the page." });
 
@@ -238,9 +240,23 @@ What it skips on purpose: hidden / aria-hidden / sr-only elements, off-canvas dr
 
 Reading the result: "clean" at every width means no geometric overflow; it does not judge cramped or ugly. Info lines do not fail the check. If it flags something intentional, add data-overflow-ok to that element rather than ignoring the report. Vertical page height, sibling overlap, blend/corner-radius artifacts and SVG text are outside what it detects; check those by eye.
 
-The tab is resized through each width and left at the last one (pass restore=true to put the viewport setting back). Wait for the page to finish loading first (preview_wait_for) or dynamic content will not be measured. Pass tabId to check a specific tab; omit it to use this agent session's current tab.`,
+Several pages at once: pass urls=[...] and the tool navigates the tab to each one in turn, waits settle ms, and scans it, all in this one call. Use it whenever a change touches more than one page instead of calling the tool once per page. Clean pages print one line ("<url>: clean"), the others print their report indented under the URL, and the last line counts the pages that need work. A page that answers HTTP 400+ or fails to navigate is reported as "did not load" and counts as a failure, never as clean. The tab is left on the last URL. States that need clicks first (an open modal, a filled form) are not reachable this way: set the state up, then call the tool without urls.
+
+The tab is resized through each width and left at the last one (pass restore=true to put the viewport setting back). Without urls, wait for the page to finish loading first (preview_wait_for) or dynamic content will not be measured. Pass tabId to check a specific tab; omit it to use this agent session's current tab.`,
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
+      urls: Schema.optional(
+        Schema.Array(Schema.String).annotate({
+          description:
+            "Pages to scan in this one call, as absolute URLs. Each is opened in the tab, settled, and scanned at every width. Omit to scan the page that is already open.",
+        }),
+      ),
+      settle: Schema.optional(
+        Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).annotate({
+          description:
+            "With urls: milliseconds to wait after each navigation before scanning, for data fetches and client rendering. Default 1500.",
+        }),
+      ),
       widths: Schema.optional(
         Schema.Array(PreviewViewportSize.fields.width).annotate({
           description: `Viewport widths to test, in CSS pixels. Default ${JSON.stringify(OVERFLOW_CHECK_DEFAULT_WIDTHS)}. Use [375] for a quick phone check, or the current width after setting up a hover or open state.`,

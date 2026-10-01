@@ -10,10 +10,13 @@ import {
 const fakeBroker = (scans: ReadonlyArray<unknown>, viewportSetting?: unknown) => {
   const calls: Array<{ operation: string; input: Record<string, unknown> }> = [];
   const pending = [...scans];
-  const call: OverflowCheckCall<never, never> = (operation, input) => {
+  const call: OverflowCheckCall<{ message: string }, never> = (operation, input) => {
     calls.push({ operation, input });
     if (operation === "status") return Effect.succeed({ viewportSetting });
     if (operation === "evaluate") return Effect.succeed(pending.shift());
+    if (operation === "navigate" && String(input.url).includes("unreachable")) {
+      return Effect.fail({ message: "net::ERR_CONNECTION_REFUSED\nmore detail" });
+    }
     return Effect.succeed({});
   };
   return { call, calls };
@@ -112,6 +115,81 @@ describe("runOverflowCheck", () => {
       expect(result.report).toContain("768px: clean");
       expect(result.report.endsWith("The check did not complete at every width; see above.")).toBe(
         true,
+      );
+    }),
+  );
+
+  it.effect("visits each url, collapses clean pages and groups the rest under their url", () =>
+    Effect.gen(function* () {
+      const { call, calls } = fakeBroker(
+        [
+          {
+            report: "375px: 1 overflow\n  spill    span in p  +257px right",
+            overflows: 1,
+            status: 200,
+          },
+          { report: "1440px: clean", overflows: 0, status: 200 },
+          { report: "375px: clean", overflows: 0, status: 200 },
+          { report: "1440px: clean", overflows: 0, status: 200 },
+          { report: "375px: clean", overflows: 0, status: 404 },
+          { report: "1440px: clean", overflows: 0, status: 404 },
+        ],
+        { _tag: "fill" },
+      );
+      const result = yield* runOverflowCheck(call, {
+        urls: ["http://a/bad", "http://a/ok", "http://a/missing", "http://unreachable/"],
+        widths: [375, 1440],
+        settle: 250,
+        restore: true,
+      });
+      expect(calls.filter((c) => c.operation === "navigate").map((c) => c.input.url)).toEqual([
+        "http://a/bad",
+        "http://a/ok",
+        "http://a/missing",
+        "http://unreachable/",
+      ]);
+      // The settle wait is spent once per page, on its first width.
+      const waits = calls
+        .filter((c) => c.operation === "evaluate")
+        .map((c) => c.input.expression === overflowScanExpression(10, 650));
+      expect(waits).toEqual([true, false, true, false, true, false]);
+      expect(calls.at(-1)).toEqual({ operation: "resize", input: { mode: "fill" } });
+      expect(result.overflows).toBe(1);
+      expect(result.report).toBe(
+        [
+          "http://a/bad",
+          "  375px: 1 overflow",
+          "    spill    span in p  +257px right",
+          "  1440px: clean",
+          "http://a/ok: clean",
+          "http://a/missing: did not load (HTTP 404)",
+          "http://unreachable/: did not load (net::ERR_CONNECTION_REFUSED)",
+          "",
+          '3 of 4 pages need work: 1 overflow, 2 did not load. Fix the "← cause" elements, re-run, then screenshot.',
+        ].join("\n"),
+      );
+    }),
+  );
+
+  it.effect("says so when every page in the batch is clean", () =>
+    Effect.gen(function* () {
+      const { call } = fakeBroker([
+        { report: "375px: clean", overflows: 0, status: 200 },
+        { report: "375px: 0 overflows (+1 info)\n  truncate p  +20px right", overflows: 0 },
+      ]);
+      const result = yield* runOverflowCheck(call, {
+        urls: ["http://a/1", "http://a/2"],
+        widths: [375],
+      });
+      expect(result.report).toBe(
+        [
+          "http://a/1: clean",
+          "http://a/2",
+          "  375px: 0 overflows (+1 info)",
+          "    truncate p  +20px right",
+          "",
+          "No overflow on 2 pages. Info lines, if any, are for you to judge.",
+        ].join("\n"),
       );
     }),
   );
