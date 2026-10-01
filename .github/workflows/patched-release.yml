@@ -367,7 +367,17 @@ jobs:
               cat handoff/ai-notes.md
             fi
           } > notes.md
-          gh release create "$tag" assets/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "T3 Code $VERSION (patched)" --notes-file notes.md "${flags[@]}"
+          # Creating the tag on a commit that changed .github/workflows can be refused with a 403
+          # (0.0.45-nightly.20261001.2539), so on failure fall back to older commits of this branch.
+          # The tag only marks which workflow built the release; the patched tree is not in it.
+          for target in $(gh api "repos/$GITHUB_REPOSITORY/commits?sha=$GITHUB_SHA&per_page=10" --jq '.[].sha'); do
+            if gh release create "$tag" assets/* -R "$GITHUB_REPOSITORY" --target "$target" --title "T3 Code $VERSION (patched)" --notes-file notes.md "${flags[@]}"; then
+              exit 0
+            fi
+            # A half-created release would make the next attempt fail on the existing tag.
+            gh release delete "$tag" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          done
+          exit 1
 
       - name: Prune older patched nightlies
         env:
