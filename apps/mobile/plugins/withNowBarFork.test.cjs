@@ -48,3 +48,26 @@ test("host Firebase tokens stay separate from official relay registration", () =
   }
   delete process.env.NOWBAR_PUSH_TRANSPORT;
 });
+
+test("OAuth redirects use the upstream package Clerk allowlists and return to the fork", async () => {
+  process.env.NOWBAR_REQUIRE_CLOUD_CONFIG = "0";
+  const result = plugin({ version: "1.1.1", android: { package: "com.t3tools.t3code" } });
+  assert.equal(result.android.package, "com.tanoshii.t3code.nowbar");
+  const mod = result.mods.android.manifest;
+  const manifest = { manifest: { application: [{ $: {} }] } };
+  const out = await mod({ ...result, modResults: manifest, modRequest: { nextMod: (c) => c } });
+  const application = out.modResults.manifest.application[0];
+  assert.deepEqual(application["meta-data"], [
+    {
+      $: {
+        "android:name": "com.clerk.expo.REDIRECT_APPLICATION_ID",
+        "android:value": "com.t3tools.t3code",
+      },
+    },
+  ]);
+  const receiver = application.activity[0];
+  assert.equal(receiver.$["android:name"], "com.clerk.api.sso.SSOReceiverActivity");
+  assert.deepEqual(receiver["intent-filter"][0].data, [
+    { $: { "android:scheme": "clerk", "android:host": "com.t3tools.t3code.callback" } },
+  ]);
+});
