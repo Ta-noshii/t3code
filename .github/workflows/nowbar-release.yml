@@ -150,7 +150,7 @@ jobs:
         working-directory: apps/mobile/android
         run: |
           chmod +x gradlew
-          ./gradlew :t3-nowbar:testReleaseUnitTest :t3-agent-notifications:testReleaseUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=2
+          ./gradlew :t3-nowbar:testDebugUnitTest :t3-agent-notifications:testDebugUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=2
 
       - name: Sign and verify the APK
         if: steps.source.outputs.build == 'true'
