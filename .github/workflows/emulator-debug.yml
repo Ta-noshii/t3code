@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   build:
+    if: hashFiles('.github/emulator/apk-run') == ''
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -70,6 +71,7 @@ jobs:
 
   emulator:
     needs: build
+    if: always() && needs.build.result != 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -80,8 +82,14 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - uses: actions/download-artifact@v4
+        if: hashFiles('.github/emulator/apk-run') == ''
         with:
           name: x86-apk
+      - name: Reuse an earlier APK build
+        if: hashFiles('.github/emulator/apk-run') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$(cat .github/emulator/apk-run)" -R "$GITHUB_REPOSITORY" -n x86-apk
       - name: Run app in emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:

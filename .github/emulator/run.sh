@@ -12,7 +12,8 @@ import re,sys,xml.etree.ElementTree as ET
 pat=re.compile(sys.argv[1],re.I)
 for e in ET.parse('/tmp/ui.xml').iter('node'):
   if pat.search(e.get('text','')) or pat.search(e.get('content-desc','')) or pat.search(e.get('hint','') or ''):
-    a,b,c,d=map(int,re.findall(r'\d+',e.get('bounds')));print((a+c)//2,(b+d)//2);break
+    a,b,c,d=map(int,re.findall(r'\d+',e.get('bounds')));hit=((a+c)//2,(b+d)//2)
+print(*hit) if 'hit' in dir() else None
 PY
 }
 adb shell getprop ro.product.cpu.abilist > "$OUT/abilist.txt"
@@ -25,10 +26,14 @@ adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null
 adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 25; shot launch
 adb shell am start -a android.intent.action.VIEW -d "t3code-nowbar://connections/new" $PKG >/dev/null; sleep 8; shot connections-new
-tap_text '192\.168|^Host$'; sleep 1; adb shell input text "$T3_DEBUG_HOST"; sleep 1
-tap_text 'abc-123|Pairing code'; sleep 1; adb shell input text "$T3_DEBUG_TOKEN"; sleep 1
-adb shell input keyevent 111; sleep 1; shot filled
+tap_text '^Host$'; sleep 3; adb shell input text "$T3_DEBUG_HOST"; sleep 2
+tap_text '^Pairing code$'; sleep 3; adb shell input text "$T3_DEBUG_TOKEN"; sleep 2
+adb shell input keyevent 111; sleep 2; shot filled
 tap_text '^Add environment$'; sleep 20; shot paired
+adb shell input keyevent 4; sleep 3; shot home
+tap_text 'Community Department'; sleep 8; shot tapped-thread-8s; sleep 15; shot tapped-thread-23s
+adb shell input keyevent 4; sleep 4; shot tapped-after-back
+adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 8
 adb shell am start -a android.intent.action.VIEW -d "t3code-nowbar://threads/fd7edc01-e675-4e31-8684-22927ce054ee/02cb7b2f-ac62-4636-90ac-e812e9c01ac4" $PKG >/dev/null
 sleep 6; shot thread-6s; sleep 20; shot thread-26s
 adb shell input keyevent 4; sleep 4; shot after-back
