@@ -30,12 +30,14 @@ tap_text '^Host$'; sleep 3; adb shell input text "$T3_DEBUG_HOST"; sleep 2
 tap_text '^Pairing code$'; sleep 3; adb shell input text "$T3_DEBUG_TOKEN"; sleep 2
 adb shell input keyevent 111; sleep 2; shot filled
 tap_text '^Add environment$'; sleep 20; shot paired
-adb shell input keyevent 4; sleep 3; shot home
+shot home
 tap_text 'Community Department'; sleep 8; shot tapped-thread-8s; sleep 15; shot tapped-thread-23s
 adb shell input keyevent 4; sleep 4; shot tapped-after-back
 adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 8
 adb shell am start -a android.intent.action.VIEW -d "t3code-nowbar://threads/fd7edc01-e675-4e31-8684-22927ce054ee/02cb7b2f-ac62-4636-90ac-e812e9c01ac4" $PKG >/dev/null
 sleep 6; shot thread-6s; sleep 20; shot thread-26s
+tap_text 'message|ask|follow'; sleep 6; shot composer-focused
+adb shell input keyevent 111; sleep 4; shot composer-dismissed
 adb shell input keyevent 4; sleep 4; shot after-back
 adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" > "$OUT/activity.txt"
 adb shell pidof $PKG >> "$OUT/activity.txt"
