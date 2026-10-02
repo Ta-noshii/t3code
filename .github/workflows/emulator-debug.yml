@@ -8,7 +8,68 @@ permissions:
   contents: read
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      APP_VARIANT: production
+      CI: "1"
+      NODE_OPTIONS: --max-old-space-size=6144
+      T3CODE_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsudDMuY29kZXMk
+      T3CODE_CLERK_JWT_TEMPLATE: t3-relay
+      T3CODE_RELAY_URL: https://relay.t3.codes
+      NOWBAR_PUSH_TRANSPORT: host
+      NOWBAR_VERSION_CODE: "999"
+    steps:
+      - uses: actions/checkout@v6
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            17
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/mobile...
+              - --frozen-lockfile
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Configure Firebase
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.NOWBAR_GOOGLE_SERVICES_JSON }}
+        run: |
+          printf '%s' "$GOOGLE_SERVICES_JSON" > "$RUNNER_TEMP/gs.json"
+          echo "T3CODE_ANDROID_GOOGLE_SERVICES_FILE=$RUNNER_TEMP/gs.json" >> "$GITHUB_ENV"
+      - name: Prebuild Android
+        working-directory: apps/mobile
+        run: ../../node_modules/.bin/vp exec expo prebuild --platform android --no-install
+      - name: Build x86_64 APK
+        working-directory: apps/mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2
+      - name: Sign
+        env:
+          NOWBAR_KEYSTORE_BASE64: ${{ secrets.NOWBAR_KEYSTORE_BASE64 }}
+          NOWBAR_KEYSTORE_PASSWORD: ${{ secrets.NOWBAR_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$NOWBAR_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/nowbar.p12"
+          tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$tools/apksigner" sign --ks "$RUNNER_TEMP/nowbar.p12" --ks-type PKCS12 --ks-key-alias nowbar --ks-pass env:NOWBAR_KEYSTORE_PASSWORD --key-pass env:NOWBAR_KEYSTORE_PASSWORD --out app.apk apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          rm "$RUNNER_TEMP/nowbar.p12"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x86-apk
+          path: app.apk
+          retention-days: 1
+
   emulator:
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -18,10 +79,9 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Download APK
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download "$(cat .github/emulator/apk-tag)" -R "$GITHUB_REPOSITORY" -p t3code-nowbar.apk -O app.apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86-apk
       - name: Run app in emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:
