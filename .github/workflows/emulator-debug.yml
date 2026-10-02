@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   build:
-    if: hashFiles('.github/emulator/apk-run') == ''
+    if: ${{ !contains(github.event.head_commit.message, '[reuse-apk]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
