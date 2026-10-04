@@ -1,10 +1,17 @@
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  DEFAULT_UNIFIED_SETTINGS,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ProviderInstanceConfig,
+} from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import { describe, expect, it } from "vite-plus/test";
 import {
   backgroundActivitySharedPolicySettings,
   getChangedBrowserSettingLabels,
   hasChangedBackgroundActivitySettings,
+  resolveEditableProviderInstance,
 } from "./SettingsPanels.logic";
 
 describe("background activity settings restore", () => {
@@ -75,6 +82,49 @@ describe("background activity settings restore", () => {
         automaticGitFetchInterval,
       },
     });
+  });
+});
+
+describe("resolveEditableProviderInstance", () => {
+  const claude = ProviderDriverKind.make("claudeAgent");
+
+  it("gives an unconfigured default slot the driver's default config", () => {
+    expect(
+      resolveEditableProviderInstance({
+        settings: DEFAULT_SERVER_SETTINGS,
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        driver: claude,
+        isDefault: true,
+      }),
+    ).toEqual({ driver: claude });
+  });
+
+  it("prefers an explicit instance and never synthesizes a custom one", () => {
+    const explicit = {
+      driver: claude,
+      config: { autoCompactWindow: "500000" },
+    } satisfies ProviderInstanceConfig;
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: { [ProviderInstanceId.make("claudeAgent")]: explicit },
+    };
+
+    expect(
+      resolveEditableProviderInstance({
+        settings,
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        driver: claude,
+        isDefault: true,
+      }),
+    ).toBe(explicit);
+    expect(
+      resolveEditableProviderInstance({
+        settings,
+        instanceId: ProviderInstanceId.make("claude_work"),
+        driver: claude,
+        isDefault: false,
+      }),
+    ).toBeUndefined();
   });
 });
 
