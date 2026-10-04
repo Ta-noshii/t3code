@@ -9,7 +9,12 @@ import {
   resolveWorktreeSetupProgress,
 } from "./ChatView.logic";
 import * as DateTime from "effect/DateTime";
-import { restorePlanFollowUpComposer } from "./ChatView.logic";
+import {
+  hasQueuedCompactCommand,
+  isCompactCommandMessage,
+  isCompactCommandText,
+  restorePlanFollowUpComposer,
+} from "./ChatView.logic";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { prepareQueuedEditAttachments, recoverQueuedMessageEdit } from "./chat/queuedMessageEdit";
 import {
@@ -822,11 +827,6 @@ function formatOutgoingPrompt(params: {
 }
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
-
-function isCompactCommandMessage(message: ChatMessage): boolean {
-  const text = message.text.trim().toLowerCase();
-  return message.role === "user" && text === "/compact" && !message.attachments?.length;
-}
 
 type ChatViewProps =
   | {
@@ -7489,7 +7489,8 @@ export default function ChatView(props: ChatViewProps) {
   // Commands such as /compact and /goal clear run as their own turn. The draft
   // and its attachments stay local.
   const sendStandaloneCommand = useCallback(
-    async (text: string, failureMessage: string) => {
+    async (text: string, failureMessage: string, options?: { readonly queue?: boolean }) => {
+      const queue = options?.queue === true;
       if (!activeThread || !clientSettingsHydrated || sendInFlightRef.current) return;
       const context = composerRef.current?.getSendContext();
       if (!context?.providerAvailable) return;
@@ -7510,9 +7511,10 @@ export default function ChatView(props: ChatViewProps) {
           createdAt,
           updatedAt: createdAt,
           streaming: false,
+          ...(queue ? { inputIntent: "queued_turn" as const } : {}),
         },
       ]);
-      scrollToEnd();
+      if (!queue) scrollToEnd();
       try {
         const settingsResult = await persistThreadSettingsForNextTurn({
           threadId,
@@ -7534,6 +7536,7 @@ export default function ChatView(props: ChatViewProps) {
                   modelSelection: context.selectedModelSelection,
                   runtimeMode,
                   interactionMode: context.interactionMode,
+                  ...(queue ? { dispatchMode: "queue" as const } : {}),
                   createdAt,
                 },
               });
@@ -7733,6 +7736,13 @@ export default function ChatView(props: ChatViewProps) {
       item.type === "user_message" &&
       (item.text.trim().toLowerCase() !== "/compact" || item.attachments.length > 0),
   );
+  // A running turn does not block compacting: the request queues behind it (see
+  // onCompactContext). One queued /compact is enough.
+  const compactQueued = hasQueuedCompactCommand({
+    runs: serverProjection?.runs ?? [],
+    messages: serverProjection?.messages ?? [],
+    optimisticMessages: optimisticUserMessages,
+  });
   const compactThreadUnavailable =
     !canOperateThread ||
     !activeThread ||
@@ -7740,7 +7750,8 @@ export default function ChatView(props: ChatViewProps) {
     !activeProject ||
     !isServerThread ||
     !manualCompactionProviderAvailable ||
-    isWorking ||
+    isCompacting ||
+    compactQueued ||
     isRevertingCheckpoint ||
     threadDetailLoading ||
     isPreparingWorktree ||
@@ -7757,6 +7768,8 @@ export default function ChatView(props: ChatViewProps) {
         ? "Choose a project before compacting"
         : !manualCompactionProviderAvailable
           ? "Compaction is unavailable for this provider"
+          : compactQueued
+            ? "Compaction is queued for when the agent finishes"
           : "Compacting is unavailable right now"
     : null;
   // Tokens a stale Claude session would re-read on its next turn. While set,
@@ -8721,7 +8734,9 @@ export default function ChatView(props: ChatViewProps) {
   );
   const onCompactContext = () => {
     if (compactDisabled) return;
-    void sendStandaloneCommand("/compact", "Failed to compact context.");
+    // Mid-turn /compact queues as its own turn, since the server refuses to steer
+    // it into a running one. The queued row's remove button takes it back.
+    void sendStandaloneCommand("/compact", "Failed to compact context.", { queue: isWorking });
   };
 
   const onResume = async () => {
@@ -9344,10 +9359,18 @@ export default function ChatView(props: ChatViewProps) {
       resumeCompactionTokens !== null &&
       !keepFullHistory &&
       messageTextForSend.toLowerCase() !== "/compact";
-    const turnDispatchMode = compactBeforeSend || sendQueuesBehindSetup ? "queue" : dispatchMode;
+    // The server refuses to steer /compact into a running turn, so a typed one
+    // always queues as its own turn.
+    const queueCompactCommand =
+      phase === "running" &&
+      isCompactCommandText(messageTextForSend) &&
+      composerAttachmentsSnapshot.length === 0;
+    const turnDispatchMode =
+      compactBeforeSend || sendQueuesBehindSetup || queueCompactCommand ? "queue" : dispatchMode;
     const shouldQueueBehindActiveRun =
       compactBeforeSend ||
       sendQueuesBehindSetup ||
+      queueCompactCommand ||
       (phase === "running" && dispatchMode === "queue");
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
