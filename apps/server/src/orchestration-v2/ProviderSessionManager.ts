@@ -247,10 +247,14 @@ function sessionKey(providerSessionId: ProviderSessionId): string {
 /**
  * Runtime requests with no provider turn belong to the live session itself.
  * Their node and transcript item are runless too, so they bypass the normal
- * per-run subscriber and are persisted by the session event pump.
+ * per-run subscriber and are persisted by the session event pump. A prompt
+ * suggestion arrives after its turn ended, when the run's subscriber may be
+ * gone, so the session pump persists it as well.
  */
 function sessionScopedRuntimeRequestThreadId(event: ProviderAdapterV2Event): ThreadId | undefined {
   switch (event.type) {
+    case "provider_turn.updated":
+      return event.providerTurn.promptSuggestion === undefined ? undefined : event.threadId;
     case "runtime_request.updated":
       return event.runtimeRequest.providerTurnId === null ? event.threadId : undefined;
     case "node.updated":

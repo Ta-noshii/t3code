@@ -1,5 +1,9 @@
 import type { ClientSettings } from "@t3tools/contracts/settings";
-import type { AssistantCitation, ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import type {
+  AssistantCitation,
+  OrchestrationV2ThreadProjection,
+  ResolvedKeybindingsConfig,
+} from "@t3tools/contracts";
 import {
   serializeAssistantCitation,
   withAssistantCitationComment,
@@ -68,6 +72,32 @@ export function composerSubmissionIntentForKey(input: {
   )
     return null;
   return "foreground";
+}
+
+/**
+ * The provider's guess at the next prompt, for an empty composer. Only the
+ * latest run counts, and only once it completed: a newer run, or one still
+ * working, makes the suggestion stale.
+ */
+export function latestPromptSuggestion(
+  projection: Pick<OrchestrationV2ThreadProjection, "runs" | "providerTurns"> | null,
+): string | null {
+  const latestRun = projection?.runs.reduce<
+    OrchestrationV2ThreadProjection["runs"][number] | undefined
+  >(
+    (latest, run) => (latest === undefined || run.ordinal > latest.ordinal ? run : latest),
+    undefined,
+  );
+  if (!projection || latestRun?.status !== "completed" || latestRun.activeAttemptId === null) {
+    return null;
+  }
+  const latestTurn = projection.providerTurns
+    .filter((turn) => turn.runAttemptId === latestRun.activeAttemptId)
+    .reduce<OrchestrationV2ThreadProjection["providerTurns"][number] | undefined>(
+      (latest, turn) => (latest === undefined || turn.ordinal > latest.ordinal ? turn : latest),
+      undefined,
+    );
+  return latestTurn?.status === "completed" ? (latestTurn.promptSuggestion ?? null) : null;
 }
 
 const isInlineTokenSegment = (segment: ComposerPromptSegment): boolean => segment.type !== "text";

@@ -186,6 +186,7 @@ import { useDiffPanelStore } from "../diffPanelStore";
 import {
   type ComposerSubmissionIntent,
   collapseExpandedComposerCursor,
+  latestPromptSuggestion,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
 import {
@@ -299,6 +300,7 @@ import { isEditableFocused } from "../lib/editableFocus";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
+  HistoryIcon,
   CheckCircle2Icon,
   PaperclipIcon,
   ChevronDownIcon,
@@ -485,6 +487,7 @@ import {
 } from "./chat/QueuedRunsControl";
 import { useLinkedThreadPullRequest } from "./ThreadStatusIndicators";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { useThreadRecap } from "./chat/useThreadRecap";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
 import {
@@ -1712,6 +1715,15 @@ export default function ChatView(props: ChatViewProps) {
     }
     return null;
   }, [serverProjection?.providerTurns]);
+  const projectionRuns = serverProjection?.runs;
+  const projectionProviderTurns = serverProjection?.providerTurns;
+  const promptSuggestion = useMemo(
+    () =>
+      projectionRuns && projectionProviderTurns
+        ? latestPromptSuggestion({ runs: projectionRuns, providerTurns: projectionProviderTurns })
+        : null,
+    [projectionRuns, projectionProviderTurns],
+  );
   const serverVisibleTurnItems = useThreadVisibleTurnItems(routeThreadDetailRef);
   const serverThreadHistory = useThreadHistory(routeThreadDetailRef);
   const threadHistoryControls = useMemo<MessagesTimelineHistoryControls | undefined>(() => {
@@ -7277,6 +7289,38 @@ export default function ChatView(props: ChatViewProps) {
       onDismiss: acknowledgeActiveThreadWoke,
     };
   }, [acknowledgeActiveThreadWoke, activeThread?.id, activeThreadWokeVisible]);
+  const latestCompletedRun = useMemo(() => {
+    const latest = projectionRuns?.reduce<(typeof projectionRuns)[number] | undefined>(
+      (current, run) => (current === undefined || run.ordinal > current.ordinal ? run : current),
+      undefined,
+    );
+    return latest?.status === "completed"
+      ? {
+          runId: latest.id,
+          completedAt: latest.completedAt === null ? null : DateTime.formatIso(latest.completedAt),
+        }
+      : null;
+  }, [projectionRuns]);
+  const threadRecap = useThreadRecap({
+    environmentId: isServerThread ? environmentId : null,
+    threadId: isServerThread ? (activeThread?.id ?? null) : null,
+    ready: serverProjection !== null,
+    completedRun: latestCompletedRun,
+    idle: phase === "ready" && pendingApprovals.length === 0 && pendingUserInputs.length === 0,
+    supported: serverConfig?.environment.capabilities.threadRecap === true,
+  });
+  const threadRecapBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (threadRecap.recap === null) return null;
+    return {
+      id: `thread-recap:${activeThread?.id ?? "unknown"}`,
+      variant: "info",
+      icon: <HistoryIcon />,
+      title: "While you were away",
+      description: threadRecap.recap,
+      dismissLabel: "Dismiss recap",
+      onDismiss: threadRecap.dismiss,
+    };
+  }, [activeThread?.id, threadRecap.dismiss, threadRecap.recap]);
   const parkedThreadBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (!activeThreadSnoozed && !activeThreadSettled) {
       return null;
@@ -7478,6 +7522,7 @@ export default function ChatView(props: ChatViewProps) {
     const resumeCompactionItems =
       resumeCompactionBannerItem === null ? [] : [resumeCompactionBannerItem];
     const wokeThreadItems = wokeThreadBannerItem === null ? [] : [wokeThreadBannerItem];
+    const threadRecapItems = threadRecapBannerItem === null ? [] : [threadRecapBannerItem];
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];
     // The user asked for this one, so it leads the notice tier instead of trailing it.
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
@@ -7492,6 +7537,7 @@ export default function ChatView(props: ChatViewProps) {
         ...backgroundWorkItems,
         ...resumeCompactionItems,
         ...wokeThreadItems,
+        ...threadRecapItems,
         ...parkedThreadItems,
       ];
     }
@@ -7504,6 +7550,7 @@ export default function ChatView(props: ChatViewProps) {
       ...backgroundWorkItems,
       ...resumeCompactionItems,
       ...wokeThreadItems,
+      ...threadRecapItems,
       {
         id: `branch-mismatch:${activeBranchMismatchKey}`,
         variant: "info",
@@ -7561,6 +7608,7 @@ export default function ChatView(props: ChatViewProps) {
     systemComposerBannerItems,
     usageLimitsBanner,
     wokeThreadBannerItem,
+    threadRecapBannerItem,
   ]);
 
   useEffect(() => {
@@ -11666,6 +11714,7 @@ export default function ChatView(props: ChatViewProps) {
                               activeTasksProgress={activeComposerTasksProgress}
                               activeTaskSteps={activeComposerTaskSteps}
                               compactThreadUnavailable={compactThreadUnavailable}
+                              promptSuggestion={promptSuggestion}
                               compactDisabled={compactDisabled}
                               compactDisabledReason={compactDisabledReason}
                               resolvedTheme={resolvedTheme}

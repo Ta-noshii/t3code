@@ -23,6 +23,7 @@ import {
   ProviderInstanceId,
   type ProviderApprovalDecision,
   ProviderSessionId,
+  ProviderThreadId,
   ProviderTurnId,
   RunAttemptId,
   RunId,
@@ -1162,6 +1163,104 @@ describe("ClaudeAdapterV2 executable path", () => {
   );
 });
 
+describe("ClaudeAdapterV2 thread recap", () => {
+  const recapAdapter = (frames: ReadonlyArray<unknown>) =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const opened: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOptions> = [];
+      const offered: Array<SDKUserMessage> = [];
+      let closed = 0;
+      const adapter = ClaudeAdapterV2.makeClaudeAdapterV2({
+        instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+        settings: DEFAULT_CLAUDE_SETTINGS,
+        environment: {},
+        attachmentsDir: yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-recap-" }),
+        fileSystem,
+        path: yield* Path.Path,
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        queryRunner: {
+          allocateSessionId: Effect.succeed("unused"),
+          open: (input) =>
+            Effect.sync(() => {
+              opened.push(input.options);
+              return {
+                messages: Stream.fromIterable(frames as ReadonlyArray<SDKMessage>),
+                offer: (message) => Effect.sync(() => void offered.push(message)),
+                setModel: () => Effect.void,
+                setPermissionMode: () => Effect.void,
+                interrupt: Effect.void,
+                close: Effect.sync(() => void (closed += 1)),
+              };
+            }),
+          forkSession: () => Effect.die("unused"),
+          subagentLaunchToolUseId: () => Effect.succeed(null),
+          assertComplete: Effect.void,
+        },
+      });
+      return { adapter, opened, offered, closed: () => closed };
+    });
+  const recapInput = (nativeId: string | null) => {
+    const driver = ClaudeAdapterV2.CLAUDE_PROVIDER;
+    return {
+      threadId: ThreadId.make("thread-claude-recap"),
+      providerThread: {
+        id: ProviderThreadId.make("provider-thread-claude-recap"),
+        driver,
+        providerInstanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+        providerSessionId: null,
+        appThreadId: ThreadId.make("thread-claude-recap"),
+        ownerNodeId: null,
+        nativeThreadRef: nativeId === null ? null : { driver, nativeId, strength: "strong" },
+      } as unknown as OrchestrationV2ProviderThread,
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      cwd: "/workspace",
+    } as const;
+  };
+
+  it.effect("runs /recap in an unpersisted fork of the session and returns its reply", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* recapAdapter([
+          { type: "system", subtype: "init", session_id: "fork" },
+          {
+            type: "assistant",
+            local_command_source: "recap",
+            parent_tool_use_id: null,
+            session_id: "fork",
+            message: { content: [{ type: "text", text: "  Fixed the login bug; tests pass.  " }] },
+          },
+          { type: "result", subtype: "success", session_id: "fork" },
+        ]);
+        const recap = yield* harness.adapter.readThreadRecap!(recapInput("native-recap"));
+        assert.equal(recap, "Fixed the login bug; tests pass.");
+        const options = harness.opened[0];
+        assert.equal(options?.resume, "native-recap");
+        assert.equal(options?.forkSession, true);
+        assert.equal(options?.persistSession, false);
+        assert.deepEqual(options?.settingSources, []);
+        assert.equal(options?.promptSuggestions, false);
+        assert.equal(options?.cwd, "/workspace");
+        assert.deepEqual(
+          harness.offered.map((message) => message.message.content),
+          ["/recap"],
+        );
+        assert.equal(harness.closed(), 1);
+      }),
+    ).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect("returns no recap for a thread without a Claude session or a reply", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const silent = yield* recapAdapter([{ type: "result", subtype: "success" }]);
+        assert.isNull(yield* silent.adapter.readThreadRecap!(recapInput("native-recap")));
+        assert.isNull(yield* silent.adapter.readThreadRecap!(recapInput(null)));
+        assert.lengthOf(silent.opened, 1);
+      }),
+    ).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+});
+
 describe("ClaudeAdapterV2 resume compaction", () => {
   it.effect("resolves and cancels the SDK resume dialog through structured runtime input", () =>
     Effect.scoped(
@@ -2071,6 +2170,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         yield* Queue.unbounded<Extract<ProviderAdapterV2Event, { type: "turn.terminal" }>>();
       const systemNoticeReceipts =
         yield* Queue.unbounded<Extract<ProviderAdapterV2Event, { type: "turn_item.updated" }>>();
+      const promptSuggestionReceipts =
+        yield* Queue.unbounded<
+          Extract<ProviderAdapterV2Event, { type: "provider_turn.updated" }>
+        >();
       let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
       const adapter = ClaudeAdapterV2.makeClaudeAdapterV2({
         instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
@@ -2150,6 +2253,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             if (event.type === "turn_item.updated" && event.turnItem.type === "system_notice") {
               yield* Queue.offer(systemNoticeReceipts, event);
             }
+            if (
+              event.type === "provider_turn.updated" &&
+              event.providerTurn.promptSuggestion !== undefined
+            ) {
+              yield* Queue.offer(promptSuggestionReceipts, event);
+            }
           }),
         ),
         Effect.forkScoped,
@@ -2175,6 +2284,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         events,
         terminalReceipts,
         systemNoticeReceipts,
+        promptSuggestionReceipts,
         getOpenedOptions: () => openedOptions,
         terminalEvents,
         hasPendingBackgroundWork,
@@ -2480,6 +2590,113 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       assert.isFalse(
         harness.events.some(
           (event) => event.type === "turn_item.updated" && event.turnItem.type === "system_notice",
+        ),
+      );
+    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect("records Claude's next-prompt suggestion on the turn it follows", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness;
+      const now = yield* DateTime.now;
+      const suggestion = (text: string, uuid: string) =>
+        claudeSdkFrame({
+          type: "prompt_suggestion",
+          suggestion: text,
+          uuid,
+          session_id: WAKE_NATIVE_SESSION,
+        });
+      const suggestedTurns = () =>
+        harness.events.flatMap((event) =>
+          event.type === "provider_turn.updated" && event.providerTurn.promptSuggestion
+            ? [event]
+            : [],
+        );
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make("attempt-claude-suggestion"),
+          text: "Fix the bug.",
+          attachments: [],
+        }),
+      );
+      assert.equal(harness.getOpenedOptions()?.promptSuggestions, true);
+      yield* Queue.offer(
+        harness.sdkMessages,
+        makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000701", result: "Fixed." }),
+      );
+      const terminal = yield* Queue.take(harness.terminalReceipts);
+      yield* Queue.offerAll(harness.sdkMessages, [
+        suggestion("  run the tests  ", "00000000-0000-4000-8000-000000000702"),
+        // A second guess for the same turn has no turn behind it any more.
+        suggestion("again", "00000000-0000-4000-8000-000000000703"),
+      ]);
+      const suggested = yield* Queue.take(harness.promptSuggestionReceipts);
+      assert.equal(suggested.threadId, harness.threadId);
+      assert.equal(suggested.providerTurn.id, terminal.providerTurnId);
+      assert.equal(suggested.providerTurn.status, "completed");
+      assert.equal(suggested.providerTurn.promptSuggestion, "run the tests");
+      // The next turn's terminal proves the second guess was handled and dropped.
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make("attempt-claude-suggestion-2"),
+          providerTurnOrdinal: 2,
+          text: "Thanks.",
+          attachments: [],
+        }),
+      );
+      yield* Queue.offer(
+        harness.sdkMessages,
+        makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000704", result: "Ok." }),
+      );
+      yield* Queue.take(harness.terminalReceipts);
+      assert.lengthOf(suggestedTurns(), 1);
+    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect("drops a suggestion that arrives after the next turn started", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness;
+      const now = yield* DateTime.now;
+      const start = (ordinal: number) =>
+        harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make(`attempt-claude-stale-suggestion-${ordinal}`),
+            providerTurnOrdinal: ordinal,
+            text: "Continue.",
+            attachments: [],
+          }),
+        );
+      yield* start(1);
+      yield* Queue.offer(
+        harness.sdkMessages,
+        makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000711", result: "Done." }),
+      );
+      yield* Queue.take(harness.terminalReceipts);
+      yield* start(2);
+      yield* Queue.offerAll(harness.sdkMessages, [
+        claudeSdkFrame({
+          type: "prompt_suggestion",
+          suggestion: "stale idea",
+          uuid: "00000000-0000-4000-8000-000000000712",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+        makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000713", result: "Done." }),
+      ]);
+      yield* Queue.take(harness.terminalReceipts);
+      assert.isFalse(
+        harness.events.some(
+          (event) =>
+            event.type === "provider_turn.updated" &&
+            event.providerTurn.promptSuggestion !== undefined,
         ),
       );
     }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),

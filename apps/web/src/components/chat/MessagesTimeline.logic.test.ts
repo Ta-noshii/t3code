@@ -19,12 +19,14 @@ import type { TurnDiffSummary } from "../../types";
 import { describe, expect, it } from "vite-plus/test";
 import { MessageId, RunId } from "@t3tools/contracts";
 import {
+  buildActivityTrail,
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
   liveWorkEntryLabel,
   normalizeCompactToolLabel,
+  reasoningPreview,
   resolveAssistantMessageCopyState,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
@@ -4888,4 +4890,171 @@ describe("failed turn transcript", () => {
       });
     },
   );
+});
+
+describe("activity trail", () => {
+  const runId = RunId.make("trail-run");
+  const at = (second: number) => `2026-01-01T00:00:${String(second).padStart(2, "0")}.000Z`;
+  const thought = (
+    id: string,
+    text: string,
+    start: number,
+    end: number,
+    status: "inProgress" | "completed" = "completed",
+  ): WorkLogEntry => ({
+    id,
+    runId,
+    createdAt: at(start),
+    label: "Thinking",
+    tone: "thinking",
+    itemType: "reasoning",
+    detail: text,
+    toolLifecycleStatus: status,
+    structuredPayload: {
+      type: "reasoning",
+      id: TurnItemId.make(id),
+      threadId: ThreadId.make("thread"),
+      runId,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: start,
+      status: status === "inProgress" ? "running" : "completed",
+      title: null,
+      startedAt: DateTime.makeUnsafe(at(start)),
+      completedAt: status === "inProgress" ? null : DateTime.makeUnsafe(at(end)),
+      updatedAt: DateTime.makeUnsafe(at(end)),
+      text,
+      streaming: status === "inProgress",
+    },
+  });
+  const tool = (
+    id: string,
+    second: number,
+    status: "inProgress" | "completed" = "completed",
+  ): WorkLogEntry => ({
+    id,
+    runId,
+    createdAt: at(second),
+    label: "Ran command",
+    tone: "tool",
+    command: "bun run test",
+    toolLifecycleStatus: status,
+  });
+  const work = (entry: WorkLogEntry): TimelineEntry => ({
+    kind: "work",
+    id: entry.id,
+    createdAt: entry.createdAt,
+    entry,
+  });
+
+  it("merges consecutive thoughts, keeps tools in order and times each thought", () => {
+    const steps = buildActivityTrail(
+      [
+        thought("a", "**Planning** the change", 0, 2),
+        thought("b", "More detail", 2, 4),
+        tool("t1", 5),
+        thought("c", "Checking", 6, 7),
+      ],
+      false,
+    );
+    expect(steps).toMatchObject([
+      {
+        kind: "thought",
+        id: "a",
+        text: "**Planning** the change\n\nMore detail",
+        durationMs: 4000,
+      },
+      { kind: "tool", id: "t1" },
+      { kind: "thought", id: "c", durationMs: 1000 },
+    ]);
+    expect(steps.every((step) => !step.live)).toBe(true);
+  });
+
+  it("marks only a running last step of an active group live", () => {
+    const steps = buildActivityTrail(
+      [tool("t1", 0), thought("a", "Checking the", 1, 2, "inProgress")],
+      true,
+    );
+    expect(steps.map((step) => [step.id, step.live])).toEqual([
+      ["t1", false],
+      ["a", true],
+    ]);
+    expect(buildActivityTrail([tool("t1", 0), thought("a", "Done", 1, 2)], true).at(-1)?.live).toBe(
+      false,
+    );
+  });
+
+  it("previews a thought by its bold title, else its plain text", () => {
+    expect(reasoningPreview("**Inspecting the repo**\n\nLooking at `src`")).toBe(
+      "Inspecting the repo",
+    );
+    expect(reasoningPreview("Looking at `src` and [docs](https://x.y)")).toBe(
+      "Looking at src and docs",
+    );
+  });
+
+  it("lists the last six steps under a collapsed settled group and none once expanded", () => {
+    const entries = [
+      thought("think-0", "First", 0, 1),
+      ...Array.from({ length: 7 }, (_, index) => tool(`tool-${index}`, index + 2)),
+    ].map(work);
+    const derive = (expandedWorkGroupIds?: ReadonlySet<string>) =>
+      deriveMessagesTimelineRows({
+        timelineEntries: entries,
+        isWorking: false,
+        expandedRunIds: new Set([runId]),
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+        ...(expandedWorkGroupIds ? { expandedWorkGroupIds } : {}),
+      }).find((row) => row.kind === "work-toggle");
+    const collapsed = derive();
+    expect(collapsed?.kind === "work-toggle" && collapsed.trail).toMatchObject({
+      hiddenCount: 2,
+      steps: [
+        { id: "tool-1" },
+        { id: "tool-2" },
+        { id: "tool-3" },
+        { id: "tool-4" },
+        { id: "tool-5" },
+        { id: "tool-6" },
+      ],
+    });
+    const expanded = derive(new Set([collapsed!.kind === "work-toggle" ? collapsed!.groupId : ""]));
+    expect(expanded?.kind === "work-toggle" && expanded.trail).toBeUndefined();
+  });
+
+  it("streams the live thought under an active group", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        tool("t1", 0),
+        thought("live", "Weighing the options", 1, 2, "inProgress"),
+      ].map(work),
+      runningRunId: runId,
+      isWorking: true,
+      activeTurnStartedAt: at(0),
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    const live = rows.find((row) => row.kind === "work-live");
+    expect(live?.kind === "work-live" && live.trail?.steps).toMatchObject([
+      { kind: "tool", id: "t1", live: false },
+      { kind: "thought", id: "live", text: "Weighing the options", live: true },
+    ]);
+  });
+
+  it("adds no trail when it would only repeat a lone tool", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [work(tool("t1", 0, "inProgress"))],
+      runningRunId: runId,
+      isWorking: true,
+      activeTurnStartedAt: at(0),
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    const live = rows.find((row) => row.kind === "work-live");
+    expect(live?.kind === "work-live" && live.trail).toBeUndefined();
+  });
 });

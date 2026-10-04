@@ -64,6 +64,7 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
   type ProviderRequestKind,
+  ProviderSessionId,
   type ProviderUserInputAnswers,
   type ProviderThreadId,
   type ThreadId,
@@ -875,6 +876,9 @@ export function makeClaudeQueryOptions(input: {
         ? "bypassPermissions"
         : (input.permissionMode ?? "default")),
     includePartialMessages: true,
+    // The composer offers Claude's guess at the next prompt. Claude still
+    // honours the user's promptSuggestionEnabled setting.
+    promptSuggestions: true,
     ...(compiledSelection.effort === undefined
       ? {}
       : {
@@ -2947,6 +2951,32 @@ export function claudeProposedPlan(input: unknown): string | null {
   return typeof plan === "string" && plan.trim().length > 0 ? plan.trim() : null;
 }
 
+/** How long a recap may take before the user gets none. */
+const CLAUDE_RECAP_TIMEOUT = "60 seconds";
+
+/**
+ * The text Claude Code's `/recap` answers with. The CLI reports a local
+ * command's reply as an assistant message tagged with its source, or as a
+ * local_command_output system message.
+ */
+export function claudeRecapText(message: SDKMessage): string | null {
+  if (
+    message.type === "assistant" &&
+    typeof Reflect.get(message, "local_command_source") === "string"
+  ) {
+    const text = message.message.content
+      .flatMap((block) => (block.type === "text" ? [block.text] : []))
+      .join("")
+      .trim();
+    return text.length > 0 ? text : null;
+  }
+  if (message.type === "system" && message.subtype === "local_command_output") {
+    const text = message.content.trim();
+    return text.length > 0 ? text : null;
+  }
+  return null;
+}
+
 export interface ClaudeAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
   readonly settings: ClaudeSettings;
@@ -3048,6 +3078,66 @@ export function makeClaudeAdapterV2(
       });
       return { nativeThreadId: imported.sessionId, conversationHeadId: imported.headMessageId };
     }),
+    // Claude Code's own `/recap`, run in a fork of the session that is never
+    // written to disk, so the recap adds nothing to the conversation it
+    // describes. Settings sources stay empty: hooks have no part in a recap.
+    readThreadRecap: Effect.fn("ClaudeAdapterV2.readThreadRecap")(function* (input) {
+      const nativeThreadId = input.providerThread.nativeThreadRef?.nativeId ?? null;
+      if (nativeThreadId === null) return null;
+      const options: ClaudeAgentSdkQueryOptions = {
+        ...makeClaudeQueryOptions({
+          modelSelection: input.modelSelection,
+          nativeThreadId,
+          resume: true,
+          cwd: input.cwd,
+          settings: adapterOptions.settings,
+          environment: adapterOptions.environment,
+          permissionMode: "default",
+        }),
+        forkSession: true,
+        persistSession: false,
+        settingSources: [],
+        promptSuggestions: false,
+      };
+      const recap = yield* Effect.acquireUseRelease(
+        queryRunner.open({
+          threadId: input.threadId,
+          providerSessionId:
+            input.providerThread.providerSessionId ??
+            ProviderSessionId.make(`recap:${input.providerThread.id}`),
+          options,
+        }),
+        (session) =>
+          session
+            .offer({
+              type: "user",
+              message: { role: "user", content: "/recap" },
+              parent_tool_use_id: null,
+            })
+            .pipe(
+              Effect.andThen(
+                session.messages.pipe(
+                  Stream.takeUntil((message) => message.type === "result"),
+                  Stream.map(claudeRecapText),
+                  Stream.filter((text): text is string => text !== null),
+                  Stream.runHead,
+                ),
+              ),
+            ),
+        (session) => session.close.pipe(Effect.ignore),
+      ).pipe(
+        Effect.timeoutOption(CLAUDE_RECAP_TIMEOUT),
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapter.ProviderAdapterReadThreadRecapError({
+              driver: CLAUDE_PROVIDER,
+              providerThreadId: input.providerThread.id,
+              cause,
+            }),
+        ),
+      );
+      return Option.getOrNull(Option.flatten(recap));
+    }),
     openSession: Effect.fn("ClaudeAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
@@ -3064,6 +3154,13 @@ export function makeClaudeAdapterV2(
         const interruptedTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const steeredTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
+        // The provider turn that last completed, until Claude's guess at the
+        // next prompt arrives for it (after the turn's result) or a new turn
+        // starts.
+        const lastCompletedTurn = yield* Ref.make<{
+          readonly threadId: ThreadId;
+          readonly providerTurn: OrchestrationV2ProviderTurn;
+        } | null>(null);
         const openedNativeThreads = yield* Ref.make(new Set<string>());
         const latestPlanByKind = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact>());
         const planIdsByNativeItem = yield* Ref.make(
@@ -4983,24 +5080,31 @@ export function makeClaudeAdapterV2(
                   failure: null,
                   threadDisposition,
                 };
+          const finalProviderTurn: OrchestrationV2ProviderTurn = {
+            ...providerTurnPayload({
+              context: input.context,
+              status: input.status,
+              completedAt: input.completedAt,
+            }),
+            turnTokenUsage: normalizeClaudeTurnTokenUsage(
+              input.result,
+              input.context.subagentsByTaskId.size > 0 ||
+                input.context.subagentsByToolUseId.size > 0,
+              input.status,
+            ),
+          };
+          yield* Ref.set(
+            lastCompletedTurn,
+            input.status === "completed"
+              ? { threadId: input.context.input.threadId, providerTurn: finalProviderTurn }
+              : null,
+          );
           yield* Effect.all(
             [
               emitProviderEvent({
                 type: "provider_turn.updated",
                 driver: CLAUDE_PROVIDER,
-                providerTurn: {
-                  ...providerTurnPayload({
-                    context: input.context,
-                    status: input.status,
-                    completedAt: input.completedAt,
-                  }),
-                  turnTokenUsage: normalizeClaudeTurnTokenUsage(
-                    input.result,
-                    input.context.subagentsByTaskId.size > 0 ||
-                      input.context.subagentsByToolUseId.size > 0,
-                    input.status,
-                  ),
-                },
+                providerTurn: finalProviderTurn,
               }),
               // Surface this native thread's roster before the root turn
               // terminals so writeFinalRunEvents preserves it. Failed or
@@ -5491,6 +5595,24 @@ export function makeClaudeAdapterV2(
             yield* Ref.update(nestedSubagentTaskIds, (current) =>
               current.has(message.task_id) ? current : new Set(current).add(message.task_id),
             );
+          }
+          if (message.type === "prompt_suggestion") {
+            // Claude's guess at the next prompt follows the turn's result, so
+            // it belongs to the turn that just completed. A turn that already
+            // started makes it stale. The event carries the app thread so the
+            // session ingests it after the run's own event stream has closed.
+            const suggestion = message.suggestion.trim();
+            const completed = yield* Ref.getAndSet(lastCompletedTurn, null);
+            if (suggestion.length === 0 || completed === null || (yield* Ref.get(activeTurn))) {
+              return;
+            }
+            yield* emitProviderEvent({
+              type: "provider_turn.updated",
+              driver: CLAUDE_PROVIDER,
+              threadId: completed.threadId,
+              providerTurn: { ...completed.providerTurn, promptSuggestion: suggestion },
+            });
+            return;
           }
           if (message.type === "rate_limit_event") {
             const rateLimitInfo = message.rate_limit_info;

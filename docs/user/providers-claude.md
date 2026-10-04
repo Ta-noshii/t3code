@@ -61,6 +61,20 @@ Claude Code holds the turn until that window reopens, so it can keep showing as
 working. Wait for the reset, or stop the turn and continue later. The warning's
 timestamp shows when the displayed wait started.
 
+## Next-prompt suggestions
+
+After a Claude turn finishes, an empty composer shows Claude Code's guess at your
+next message. Press `Tab` to fill it in, then edit or send it. Claude skips the
+first turn of a conversation and plan mode. To turn suggestions off, set
+`promptSuggestionEnabled` to `false` in Claude's `settings.json`.
+
+## Recaps when you return
+
+When you come back to a finished Claude thread after five minutes or more away,
+web and desktop show a one-line "While you were away" summary above the composer.
+It comes from Claude Code's `/recap`, run on a copy of the conversation, so it
+adds nothing to the thread. Each turn gets one recap; dismiss it to hide it.
+
 ## Skills
 
 Claude skills come from the config directory's `skills` folder and the project's

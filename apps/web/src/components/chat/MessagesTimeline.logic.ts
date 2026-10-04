@@ -1,5 +1,6 @@
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 export { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
+import * as DateTime from "effect/DateTime";
 import * as Equal from "effect/Equal";
 import { shallow } from "zustand/vanilla/shallow";
 import { renderCodexDirectivesForCopy } from "@t3tools/client-runtime/codex-markdown-directives";
@@ -239,6 +240,115 @@ export function workEntryIsVisibleInGroup(
     entry.toolLifecycleStatus === "stopped" ||
     !workEntryIndicatesToolNeutralStatus(entry)
   );
+}
+
+/** One line of a collapsed group's trail: a stretch of thinking or one tool call. */
+export type ActivityTrailStep =
+  | {
+      readonly kind: "thought";
+      readonly id: string;
+      readonly text: string;
+      readonly durationMs: number;
+      readonly live: boolean;
+    }
+  | {
+      readonly kind: "tool";
+      readonly id: string;
+      readonly entry: WorkLogEntry;
+      readonly live: boolean;
+    };
+
+/** The newest steps a collapsed group lists under its header; the full view has the rest. */
+export interface ActivityTrail {
+  readonly steps: ReadonlyArray<ActivityTrailStep>;
+  readonly hiddenCount: number;
+}
+
+const ACTIVITY_TRAIL_MAX_STEPS = 6;
+
+function workEntryStartMs(entry: WorkLogEntry): number {
+  const item = entry.structuredPayload;
+  return item?.startedAt ? DateTime.toEpochMillis(item.startedAt) : Date.parse(entry.createdAt);
+}
+
+function workEntryEndMs(entry: WorkLogEntry): number {
+  const item = entry.structuredPayload;
+  const end = item?.completedAt ?? item?.updatedAt;
+  return end ? DateTime.toEpochMillis(end) : Date.parse(entry.createdAt);
+}
+
+/**
+ * The steps of a group's visible entries, in order. Consecutive reasoning items
+ * form one thought, timed from the first one's start to the last one's end. Only
+ * the last step of an active group is live, and only while it is still running.
+ */
+export function buildActivityTrail(
+  entries: ReadonlyArray<WorkLogEntry>,
+  active: boolean,
+): ActivityTrailStep[] {
+  const steps: ActivityTrailStep[] = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    if (entry.itemType !== "reasoning") {
+      steps.push({ kind: "tool", id: entry.id, entry, live: false });
+      continue;
+    }
+    const thoughts = [entry];
+    while (entries[index + 1]?.itemType === "reasoning") {
+      thoughts.push(entries[++index]!);
+    }
+    const last = thoughts.at(-1)!;
+    steps.push({
+      kind: "thought",
+      id: entry.id,
+      text: thoughts
+        .map((thought) => thought.detail?.trim() ?? "")
+        .filter(Boolean)
+        .join("\n\n"),
+      durationMs: Math.max(0, workEntryEndMs(last) - workEntryStartMs(entry)),
+      live: false,
+    });
+  }
+  const last = steps.at(-1);
+  if (last && active) {
+    const lastEntry = entries.at(-1)!;
+    const running =
+      last.kind === "thought"
+        ? lastEntry.toolLifecycleStatus === "inProgress"
+        : workEntryIsActiveTurnActivity(lastEntry);
+    if (running) steps[steps.length - 1] = { ...last, live: true };
+  }
+  return steps;
+}
+
+/**
+ * The trail a collapsed group shows, or nothing when it would repeat the header:
+ * a lone tool call is already the header's label.
+ */
+function collapsedActivityTrail(
+  entries: ReadonlyArray<WorkLogEntry>,
+  active: boolean,
+): ActivityTrail | undefined {
+  const steps = buildActivityTrail(entries, active);
+  if (steps.length === 0 || (steps.length === 1 && steps[0]!.kind === "tool")) return undefined;
+  const hiddenCount = Math.max(0, steps.length - ACTIVITY_TRAIL_MAX_STEPS);
+  return { steps: steps.slice(hiddenCount), hiddenCount };
+}
+
+/** Reasoning markdown flattened to one line of plain text, for previews. */
+export function plainReasoningText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?(```|$)/g, " ")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`#>~|]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** A thought's bold title when the provider gives one (Codex summaries do), else its text. */
+export function reasoningPreview(text: string): string {
+  const title = /^\s*\*\*([^*\n]+)\*\*/.exec(text)?.[1]?.trim();
+  return title || plainReasoningText(text);
 }
 const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
@@ -499,6 +609,8 @@ type MessagesTimelineRowContent =
       groupId: string;
       expanded: boolean;
       active: boolean;
+      /** Steps listed under the collapsed row. */
+      trail?: ActivityTrail;
     }
   | {
       kind: "working";
@@ -527,6 +639,8 @@ type MessagesTimelineRowContent =
       toolIcon?: WorkLogEntry["toolIcon"];
       summaryToolIcon?: "browser" | "device" | "t3-code" | "pull-request";
       hasFailure: boolean;
+      /** Steps listed under the collapsed row. */
+      trail?: ActivityTrail;
     }
   | {
       kind: "turn-fold";
@@ -1333,6 +1447,11 @@ export function deriveMessagesTimelineRows(input: {
     activeWorkAnchor && latestVisibleToolEntry && !latestToolFailed
       ? (() => {
           const groupId = workGroupId(activeWorkAnchor.id);
+          const groupedEntries = visibleActiveToolEntries.map((entry) => entry.entry);
+          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+          const trail = expanded
+            ? undefined
+            : collapsedActivityTrail(groupedEntries, latestToolKeepsActivityLive);
           return {
             kind: "work-live" as const,
             id: latestToolKeepsActivityLive
@@ -1340,10 +1459,11 @@ export function deriveMessagesTimelineRows(input: {
               : `work-live:${activeWorkAnchor.id}`,
             createdAt: activeWorkAnchor.createdAt,
             entry: (latestRunningToolEntry ?? latestVisibleToolEntry).entry,
-            groupedEntries: visibleActiveToolEntries.map((entry) => entry.entry),
+            groupedEntries,
             groupId,
-            expanded: input.expandedWorkGroupIds?.has(groupId) ?? false,
+            expanded,
             active: latestToolKeepsActivityLive,
+            ...(trail ? { trail } : {}),
           };
         })()
       : null;
@@ -1502,6 +1622,7 @@ export function deriveMessagesTimelineRows(input: {
           const groupId = workGroupId(timelineEntry.id);
           const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
           const latestActiveToolEntry = activeInProgressToolEntries.at(-1)!;
+          const trail = expanded ? undefined : collapsedActivityTrail(visibleGroupedEntries, true);
           nextRows.push({
             kind: "work-live",
             id: `work-live:${timelineEntry.id}`,
@@ -1511,6 +1632,7 @@ export function deriveMessagesTimelineRows(input: {
             groupId,
             expanded,
             active: true,
+            ...(trail ? { trail } : {}),
           });
           hasActivityRow = true;
           if (expanded) {
@@ -1564,6 +1686,7 @@ export function deriveMessagesTimelineRows(input: {
           const summaryToolIcon = usesSingleToolCallLabel
             ? resolveWorkEntryToolPresentation(singleEntry, "completed")?.icon
             : undefined;
+          const trail = expanded ? undefined : collapsedActivityTrail(visibleGroupedEntries, false);
           nextRows.push({
             kind: "work-toggle",
             id: `work-toggle:${timelineEntry.id}`,
@@ -1584,6 +1707,7 @@ export function deriveMessagesTimelineRows(input: {
             hasFailure:
               latestToolEntry !== undefined &&
               workEntryDisplayIndicatesToolFailure(latestToolEntry),
+            ...(trail ? { trail } : {}),
           });
           if (expanded) {
             nextRows.push(
@@ -2040,7 +2164,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.expanded === bw.expanded &&
         a.active === bw.active &&
         Equal.equals(a.entry, bw.entry) &&
-        Equal.equals(a.groupedEntries, bw.groupedEntries)
+        Equal.equals(a.groupedEntries, bw.groupedEntries) &&
+        Equal.equals(a.trail, bw.trail)
       );
     }
 
@@ -2056,7 +2181,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.summaryKind === bw.summaryKind &&
         a.toolSurface === bw.toolSurface &&
         Equal.equals(a.toolIcon, bw.toolIcon) &&
-        a.hasFailure === bw.hasFailure
+        a.hasFailure === bw.hasFailure &&
+        Equal.equals(a.trail, bw.trail)
       );
     }
 

@@ -14,6 +14,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderSessionId,
+  ProviderTurnId,
+  NodeId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -2799,6 +2801,78 @@ it.effect("ProviderSessionManagerV2 persists session-scoped runtime requests wit
 
     yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000 })));
   }),
+);
+
+it.effect(
+  "ProviderSessionManagerV2 persists a prompt suggestion after its run stopped listening",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const effect = Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+        const now = yield* DateTime.now;
+        const projectId = yield* idAllocator.allocate.project({
+          fixtureName: "provider-session-manager-prompt-suggestion",
+        });
+        const threadId = yield* idAllocator.allocate.thread({
+          fixtureName: "provider-session-manager-prompt-suggestion",
+          projectId,
+        });
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        const providerThread = makeProviderThread({
+          idAllocator,
+          threadId,
+          providerSessionId,
+          now,
+        });
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+        const afterSequence = yield* eventSink.latestSequence({ threadId });
+        const persistedFiber = yield* eventSink.stream({ threadId, afterSequence }).pipe(
+          Stream.filter((stored) => stored.event.type === "provider-turn.updated"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkScoped,
+        );
+        const adapterEvents = (yield* Ref.get(state)).eventQueues.get(String(providerSessionId));
+        assert.isDefined(adapterEvents);
+        const providerTurnId = ProviderTurnId.make("provider-turn-suggested");
+        yield* Queue.offer(adapterEvents!, {
+          type: "provider_turn.updated",
+          driver: CODEX_DRIVER,
+          threadId,
+          providerTurn: {
+            id: providerTurnId,
+            providerThreadId: providerThread.id,
+            nodeId: NodeId.make("node-suggested"),
+            runAttemptId: null,
+            nativeTurnRef: null,
+            ordinal: 1,
+            status: "completed",
+            startedAt: now,
+            completedAt: now,
+            promptSuggestion: "run the tests",
+          },
+        });
+        yield* Fiber.join(persistedFiber);
+
+        const projection = yield* projectionStore.getThreadProjection(threadId);
+        assert.equal(
+          projection.providerTurns.find((turn) => turn.id === providerTurnId)?.promptSuggestion,
+          "run the tests",
+        );
+      });
+
+      yield* effect.pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 1000 })));
+    }),
 );
 
 it.effect(

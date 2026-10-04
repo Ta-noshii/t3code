@@ -232,6 +232,19 @@ export class ProviderAdapterReadThreadSnapshotError extends Schema.TaggedError<P
   }
 }
 
+export class ProviderAdapterReadThreadRecapError extends Schema.TaggedError<ProviderAdapterReadThreadRecapError>()(
+  "ProviderAdapterReadThreadRecapError",
+  {
+    driver: ProviderDriverKind,
+    providerThreadId: ProviderThreadId,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Failed to recap ${this.driver} provider thread ${this.providerThreadId}.`;
+  }
+}
+
 export class ProviderAdapterRollbackThreadError extends Schema.TaggedError<ProviderAdapterRollbackThreadError>()(
   "ProviderAdapterRollbackThreadError",
   {
@@ -375,6 +388,7 @@ export const ProviderAdapterV2Error = Schema.Union([
   ProviderAdapterResumeThreadError,
   ProviderAdapterEnsureThreadError,
   ProviderAdapterReadThreadSnapshotError,
+  ProviderAdapterReadThreadRecapError,
   ProviderAdapterRollbackThreadError,
   ProviderAdapterForkThreadError,
   ProviderAdapterTurnStartError,
@@ -634,6 +648,22 @@ export interface ProviderAdapterV2Shape {
     { readonly nativeThreadId: string; readonly conversationHeadId?: string },
     ProviderAdapterTransferThreadError
   >;
+  /**
+   * A one-line summary of where a provider thread's conversation stands, for a
+   * user returning to it. It must not add to the conversation, and needs no
+   * live session. Null when the thread has nothing to summarise. Absent when
+   * the provider cannot recap.
+   */
+  readonly readThreadRecap?: (
+    input: ProviderAdapterV2ReadThreadRecapInput,
+  ) => Effect.Effect<string | null, ProviderAdapterV2Error>;
+}
+
+export interface ProviderAdapterV2ReadThreadRecapInput {
+  readonly threadId: ThreadId;
+  readonly providerThread: OrchestrationV2ProviderThread;
+  readonly modelSelection: ModelSelection;
+  readonly cwd: string | null;
 }
 
 export class ProviderAdapterV2 extends Context.Service<ProviderAdapterV2, ProviderAdapterV2Shape>()(

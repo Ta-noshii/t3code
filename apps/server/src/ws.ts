@@ -58,6 +58,7 @@ import {
   OrchestrationV2DispatchCommandError,
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2GetThreadProjectionError,
+  OrchestrationV2GetThreadRecapError,
   OrchestrationV2ThreadLaunchError,
   type OrchestrationProjectShell,
   type OrchestrationV2ShellSnapshot,
@@ -115,6 +116,7 @@ import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as ThreadManagementService from "./orchestration-v2/ThreadManagementService.ts";
+import * as ThreadRecapService from "./orchestration-v2/ThreadRecapService.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
@@ -1188,6 +1190,7 @@ const makeWsRpcLayer = (
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+      const threadRecap = yield* ThreadRecapService.ThreadRecapServiceV2;
       const intakeContext = yield* Effect.context<
         | ThreadManagementService.ThreadManagementService
         | ThreadLaunchService.ThreadLaunchService
@@ -1859,6 +1862,21 @@ const makeWsRpcLayer = (
                   new OrchestrationV2GetThreadProjectionError({
                     threadId: input.threadId,
                     message: "Failed to load turn item",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_V2_WS_METHODS.getThreadRecap]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_V2_WS_METHODS.getThreadRecap,
+            threadRecap.getThreadRecap(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationV2GetThreadRecapError({
+                    threadId: input.threadId,
+                    message: "Failed to recap the thread",
                     cause,
                   }),
               ),

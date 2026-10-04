@@ -50,6 +50,7 @@ import { layer as threadLaunchServiceLayer } from "./ThreadLaunchService.ts";
 import { layer as threadLifecycleServiceLayer } from "./ThreadLifecycleService.ts";
 import { layer as threadForkServiceLayer } from "./ThreadForkService.ts";
 import { layer as threadTransferServiceLayer } from "./ThreadTransferService.ts";
+import { layer as threadRecapServiceLayer } from "./ThreadRecapService.ts";
 import { layer as turnItemPositionStoreLayer } from "./TurnItemPositionStore.ts";
 import { layer as scheduledTaskServiceLayer } from "../scheduledTasks/ScheduledTaskService.ts";
 
@@ -245,6 +246,12 @@ const threadTransferProvided = threadTransferServiceLayer.pipe(
   ),
 );
 
+const threadRecapProvided = threadRecapServiceLayer.pipe(
+  Layer.provide(
+    Layer.mergeAll(projectionStoreLayer, providerAdapterRegistryProvided, runtimePolicyProvided),
+  ),
+);
+
 const threadManagementProvided = threadManagementServiceLayer.pipe(
   Layer.provide(Layer.merge(orchestratorProvided, legacyV1ThreadImporterProvided)),
 );
@@ -312,6 +319,7 @@ const providerRuntimeRecoveryProvided = providerRuntimeRecoveryLayer.pipe(
 export const OrchestrationV2LayerLive = Layer.mergeAll(
   orchestratorProvided,
   threadManagementProvided,
+  threadRecapProvided,
   effectWorkerProvided,
   providerSessionManagerProvided,
   providerAuthServiceProvided,

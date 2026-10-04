@@ -215,6 +215,10 @@ import {
   workEntryReadOutput,
   workEntryIsVisibleInGroup,
   worktreeSetupAgentStarted,
+  type ActivityTrail,
+  type ActivityTrailStep,
+  plainReasoningText,
+  reasoningPreview,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
@@ -3680,43 +3684,49 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
     : "";
   const label = questionHeading || liveWorkEntryLabel(row.entry, ctx.workspaceRoot, row.active);
   const failed = workEntryDisplayIndicatesToolFailure(row.entry);
+  const toggle = () => ctx.onToggleWorkGroup(row.groupId, row.id);
 
   return (
-    <button
-      type="button"
-      className="group/live-work flex min-h-6 w-full max-w-full cursor-pointer items-center rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-      aria-label={failed ? `${label}, tool call failed` : undefined}
-      aria-expanded={row.expanded}
-      onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
-    >
-      <LiveActivityRow
-        label={
-          row.entry.questionAnswer && hasQuestionAnswer(row.entry.questionAnswer) ? (
-            <span className="flex min-w-0 gap-1.5">
-              <span className="min-w-0 truncate">{label}</span>
-              <span className="min-w-0 truncate text-foreground">
-                {getQuestionAnswerPreview(row.entry.questionAnswer)}
+    <>
+      <button
+        type="button"
+        className="group/live-work flex min-h-6 w-full max-w-full cursor-pointer items-center rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        aria-label={failed ? `${label}, tool call failed` : undefined}
+        aria-expanded={row.expanded}
+        onClick={toggle}
+      >
+        <LiveActivityRow
+          label={
+            row.entry.questionAnswer && hasQuestionAnswer(row.entry.questionAnswer) ? (
+              <span className="flex min-w-0 gap-1.5">
+                <span className="min-w-0 truncate">{label}</span>
+                <span className="min-w-0 truncate text-foreground">
+                  {getQuestionAnswerPreview(row.entry.questionAnswer)}
+                </span>
               </span>
-            </span>
-          ) : row.entry.itemType === "reasoning" ? (
-            <ReactMarkdown
-              remarkPlugins={[
-                remarkGfm,
-                [remarkThoughtPreview, row.active ? "Thinking" : "Thought"],
-              ]}
-            >
-              {row.entry.detail ?? label}
-            </ReactMarkdown>
-          ) : (
-            label
-          )
-        }
-        iconName={workEntryIconName(row.entry)}
-        toolIcon={row.entry.toolIcon ?? row.entry.toolSource?.icon}
-        failed={failed}
-        active={row.active}
-      />
-    </button>
+            ) : row.entry.itemType === "reasoning" ? (
+              <ReactMarkdown
+                remarkPlugins={[
+                  remarkGfm,
+                  [remarkThoughtPreview, row.active ? "Thinking" : "Thought"],
+                ]}
+              >
+                {row.entry.detail ?? label}
+              </ReactMarkdown>
+            ) : (
+              label
+            )
+          }
+          iconName={workEntryIconName(row.entry)}
+          toolIcon={row.entry.toolIcon ?? row.entry.toolSource?.icon}
+          failed={failed}
+          active={row.active}
+        />
+      </button>
+      {row.trail ? (
+        <ActivityTrailList trail={row.trail} workspaceRoot={ctx.workspaceRoot} onOpen={toggle} />
+      ) : null}
+    </>
   );
 }
 
@@ -3769,17 +3779,170 @@ function WorkGroupToggleTimelineRow({
   row: Extract<TimelineRow, { kind: "work-toggle" }>;
 }) {
   const ctx = use(TimelineRowCtx);
+  const toggle = () => ctx.onToggleWorkGroup(row.groupId, row.id);
   return (
-    <WorkGroupHeader
-      label={row.summary}
-      iconName={row.summaryToolIcon ?? row.toolSurface ?? toolGroupSummaryIconName(row.summaryKind)}
-      toolIcon={row.toolIcon}
-      failed={row.hasFailure}
-      expanded={row.expanded}
-      createdAt={row.createdAt}
-      timestampFormat={ctx.timestampFormat}
-      onToggle={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
-    />
+    <>
+      <WorkGroupHeader
+        label={row.summary}
+        iconName={
+          row.summaryToolIcon ?? row.toolSurface ?? toolGroupSummaryIconName(row.summaryKind)
+        }
+        toolIcon={row.toolIcon}
+        failed={row.hasFailure}
+        expanded={row.expanded}
+        createdAt={row.createdAt}
+        timestampFormat={ctx.timestampFormat}
+        onToggle={toggle}
+      />
+      {row.trail ? (
+        <ActivityTrailList trail={row.trail} workspaceRoot={ctx.workspaceRoot} onOpen={toggle} />
+      ) : null}
+    </>
+  );
+}
+
+/** Characters of live reasoning kept in the tail; about three lines at the trail's width. */
+const LIVE_THOUGHT_TAIL_CHARS = 360;
+
+const activityTrailLineClassName =
+  "flex h-5.5 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-start text-xs hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70";
+
+/**
+ * The collapsed view of a work group: the tools it called and what it was
+ * thinking, one line each, with the reasoning streaming in while the turn runs.
+ * Any line opens the full view.
+ */
+function ActivityTrailList({
+  trail,
+  workspaceRoot,
+  onOpen,
+}: {
+  trail: ActivityTrail;
+  workspaceRoot: string | undefined;
+  onOpen: () => void;
+}) {
+  const { hiddenCount } = trail;
+  return (
+    <div className="ms-3.5 flex flex-col border-s border-border/70 ps-3 pb-0.5">
+      {hiddenCount > 0 ? (
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex h-5.5 cursor-pointer items-center text-start text-muted-foreground text-xs hover:text-secondary-label"
+        >
+          {hiddenCount} earlier step{hiddenCount === 1 ? "" : "s"}
+        </button>
+      ) : null}
+      {trail.steps.map((step) =>
+        step.kind === "tool" ? (
+          <ActivityTrailTool
+            key={step.id}
+            step={step}
+            workspaceRoot={workspaceRoot}
+            onClick={onOpen}
+          />
+        ) : (
+          <ActivityTrailThought key={step.id} step={step} onClick={onOpen} />
+        ),
+      )}
+    </div>
+  );
+}
+
+function ActivityTrailTool({
+  step,
+  workspaceRoot,
+  onClick,
+}: {
+  step: Extract<ActivityTrailStep, { kind: "tool" }>;
+  workspaceRoot: string | undefined;
+  onClick: () => void;
+}) {
+  const { entry, live } = step;
+  const failed = workEntryDisplayIndicatesToolFailure(entry);
+  const iconName = workEntryIconName(entry);
+  const action = liveWorkEntryLabel(entry, workspaceRoot, live);
+  const target = workEntryDisplayLabel(entry, workspaceRoot);
+  const showTarget = target.length > 0 && target !== action && !action.includes(target);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={activityTrailLineClassName}
+      aria-label={failed ? `${action}, tool call failed` : undefined}
+    >
+      <span className={cn("flex shrink-0", failed ? failedToolIconClassName : "text-icon-muted")}>
+        <ToolActivityIconView
+          icon={entry.toolIcon ?? entry.toolSource?.icon}
+          fallbackName={iconName}
+          className="block size-3.5 shrink-0 stroke-2"
+          muted
+        />
+      </span>
+      <span
+        className={cn(
+          "shrink-0 text-secondary-label",
+          live && !failed && "live-tool-shine",
+          !showTarget && "min-w-0 truncate",
+        )}
+      >
+        {action}
+      </span>
+      {showTarget ? (
+        <span className="min-w-0 truncate font-mono text-2xs text-muted-foreground">{target}</span>
+      ) : null}
+      {failed && !toolIconAcceptsTint(iconName, entry.toolIcon) ? (
+        <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
+      ) : null}
+    </button>
+  );
+}
+
+function ActivityTrailThought({
+  step,
+  onClick,
+}: {
+  step: Extract<ActivityTrailStep, { kind: "thought" }>;
+  onClick: () => void;
+}) {
+  if (step.live) {
+    const text = plainReasoningText(step.text);
+    const tail =
+      text.length > LIVE_THOUGHT_TAIL_CHARS
+        ? text.slice(text.indexOf(" ", text.length - LIVE_THOUGHT_TAIL_CHARS) + 1)
+        : text;
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-w-0 cursor-pointer gap-1.5 rounded-sm py-0.5 text-start text-xs hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      >
+        <span className="flex h-5 shrink-0 items-center text-icon-muted">
+          <BrainIcon aria-hidden className="block size-3.5 shrink-0 stroke-2 opacity-70" />
+        </span>
+        {/* Bottom-aligned so the newest words stay in view as older lines fade out. */}
+        <span
+          className={cn(
+            "flex max-h-15 min-w-0 flex-1 flex-col justify-end overflow-hidden leading-5 text-muted-foreground",
+            text.length > tail.length && "mask-t-from-50%",
+          )}
+        >
+          <span>{tail || "Thinking"}</span>
+        </span>
+      </button>
+    );
+  }
+  const preview = reasoningPreview(step.text);
+  return (
+    <button type="button" onClick={onClick} className={activityTrailLineClassName}>
+      <span className="flex shrink-0 text-icon-muted">
+        <BrainIcon aria-hidden className="block size-3.5 shrink-0 stroke-2 opacity-70" />
+      </span>
+      <span className="shrink-0 text-secondary-label">
+        {step.durationMs >= 1_000 ? `Thought for ${formatDuration(step.durationMs)}` : "Thought"}
+      </span>
+      {preview ? <span className="min-w-0 truncate text-muted-foreground">{preview}</span> : null}
+    </button>
   );
 }
 

@@ -960,6 +960,11 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
   tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
   turnTokenUsage: Schema.optional(TurnTokenUsage),
+  /**
+   * The provider's guess at the user's next prompt, recorded after the turn
+   * completes. The composer offers it while empty.
+   */
+  promptSuggestion: Schema.optional(TrimmedNonEmptyString),
 });
 export type OrchestrationV2ProviderTurn = typeof OrchestrationV2ProviderTurn.Type;
 
@@ -2978,6 +2983,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getThreadProjection: "orchestration.getThreadProjection",
   getWorkflowScript: "orchestration.getWorkflowScript",
   getTurnItem: "orchestration.getTurnItem",
+  getThreadRecap: "orchestration.getThreadRecap",
   launchThread: "orchestration.launchThread",
   subscribeArchivedShell: "orchestration.subscribeArchivedShell",
   subscribeShell: "orchestration.subscribeShell",
@@ -3278,6 +3284,29 @@ export const OrchestrationV2GetTurnItemResult = Schema.Struct({
 });
 export type OrchestrationV2GetTurnItemResult = typeof OrchestrationV2GetTurnItemResult.Type;
 
+export const OrchestrationV2GetThreadRecapInput = Schema.Struct({
+  threadId: ThreadId,
+  /** The latest completed run. A new run means a new recap; also keys the client cache. */
+  runId: RunId,
+});
+export type OrchestrationV2GetThreadRecapInput = typeof OrchestrationV2GetThreadRecapInput.Type;
+
+export const OrchestrationV2GetThreadRecapResult = Schema.Struct({
+  /** False when the thread's provider can't summarise it. */
+  available: Schema.Boolean,
+  recap: Schema.NullOr(Schema.String),
+});
+export type OrchestrationV2GetThreadRecapResult = typeof OrchestrationV2GetThreadRecapResult.Type;
+
+export class OrchestrationV2GetThreadRecapError extends Schema.TaggedError<OrchestrationV2GetThreadRecapError>()(
+  "OrchestrationV2GetThreadRecapError",
+  {
+    threadId: ThreadId,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 const WORKFLOW_SCRIPT_ERROR_MESSAGES = {
   "invalid-path": "Workflow scripts must be absolute .js paths.",
   "root-unavailable": "Script root unavailable.",
@@ -3339,6 +3368,10 @@ export const OrchestrationV2RpcSchemas = {
   getTurnItem: {
     input: OrchestrationV2GetTurnItemInput,
     output: OrchestrationV2GetTurnItemResult,
+  },
+  getThreadRecap: {
+    input: OrchestrationV2GetThreadRecapInput,
+    output: OrchestrationV2GetThreadRecapResult,
   },
   launchThread: {
     input: OrchestrationV2ThreadLaunchInput,
