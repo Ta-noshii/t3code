@@ -6,11 +6,13 @@ import { SettingsRow } from "../settings/components/SettingsRow";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { SettingsSwitchRow } from "../settings/components/SettingsSwitchRow";
 import { nowBarNative, saveNowBarPreferences, useNowBarPreferences } from "./native";
-import { checkNowBarUpdate } from "./updates";
+import { nowBarUpdateProgressLabel } from "./NowBarUpdateDialog";
+import { checkNowBarUpdate, useNowBarUpdate } from "./updates";
 import { NowBarLab } from "./NowBarLab";
 
 export function NowBarSettings() {
   const preferences = useNowBarPreferences();
+  const update = useNowBarUpdate();
   const [capabilities, setCapabilities] = useState(() => nowBarNative?.capabilities());
   const [busy, setBusy] = useState(false);
   const [lab, setLab] = useState(false);
@@ -130,6 +132,10 @@ export function NowBarSettings() {
         <SettingsRow
           icon="arrow.down.circle"
           label="Check for updates"
+          value={
+            nowBarUpdateProgressLabel(update.state) ??
+            ("release" in update.state ? `${update.state.release.version} ready` : undefined)
+          }
           onPress={() => {
             void checkNowBarUpdate(true);
           }}

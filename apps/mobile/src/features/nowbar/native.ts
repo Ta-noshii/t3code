@@ -22,6 +22,14 @@ interface NowBarNativeModule {
   readState(): { since: number; readTurns: string };
   markRead(identity: string, turn: string): void;
   addListener(event: "heartbeat", listener: () => void): { remove(): void };
+  addListener(
+    event: "updateProgress",
+    listener: (event: {
+      phase: "downloading" | "verifying";
+      downloaded: number;
+      total: number;
+    }) => void,
+  ): { remove(): void };
   preferences(): NowBarPreferences;
   setPreferences(json: string): void;
   publish(rows: string): boolean;
@@ -34,6 +42,7 @@ interface NowBarNativeModule {
     active: boolean;
   };
   openSettings(): void;
+  canInstallUpdates(): boolean;
   installUpdate(
     url: string,
     sha256: string,

@@ -27,6 +27,7 @@ import { VoiceInputProvider } from "./features/voice-input/VoiceInputProvider";
 import { GlobalVoiceInputControl } from "./features/voice-input/GlobalVoiceInputControl";
 
 import { NowBarCoordinator } from "./features/nowbar/NowBarCoordinator";
+import { NowBarUpdateDialog } from "./features/nowbar/NowBarUpdateDialog";
 
 import "../global.css";
 
@@ -83,6 +84,7 @@ function AppContent() {
     <>
       <SplashScreenCoordinator />
       {Platform.OS === "android" && <NowBarCoordinator />}
+      {Platform.OS === "android" && <NowBarUpdateDialog />}
       <SubscriptionUsageCoordinator />
       <GestureHandlerRootView className="flex-1">
         <KeyboardProvider statusBarTranslucent>
