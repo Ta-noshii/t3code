@@ -233,6 +233,37 @@ const CLAUDE_SCRIPT_EXTENSIONS = [".js", ".mjs", ".tsx", ".ts", ".jsx"];
 // mcp_set_servers once each server connected or hit its own 30 s timeout.
 const CLAUDE_MCP_REGISTRATION_TIMEOUT = "90 seconds";
 
+// A settings change rebuilds the provider instance's adapter, but sessions the
+// old adapter opened keep running. These let a new auto-compact window reach
+// their live queries, and any query they reopen later.
+const liveQueriesByInstance = new Map<string, Set<ClaudeAgentSdkQuerySession>>();
+const latestAutoCompactWindowByInstance = new Map<string, string>();
+
+function autoCompactTokens(value: string | undefined): number | null {
+  return value === undefined || value.length === 0 ? null : Number(value);
+}
+
+const applyAutoCompactWindowToLiveQueries = Effect.fnUntraced(function* (
+  instanceId: string,
+  value: string,
+) {
+  const previous = latestAutoCompactWindowByInstance.get(instanceId);
+  latestAutoCompactWindowByInstance.set(instanceId, value);
+  if (previous === undefined || previous === value) return;
+  const tokens = autoCompactTokens(value);
+  for (const query of liveQueriesByInstance.get(instanceId) ?? []) {
+    if (query.setAutoCompactWindow === undefined) continue;
+    yield* query.setAutoCompactWindow(tokens).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("orchestration-v2.claude-auto-compact-live-apply-failed", {
+          instanceId,
+          cause,
+        }),
+      ),
+    );
+  }
+});
+
 export const ClaudeProviderCapabilitiesV2 = {
   sessions: {
     supportsMultipleProviderThreadsPerSession: false,
@@ -392,6 +423,10 @@ export interface ClaudeAgentSdkQuerySession {
   readonly stopTask: (taskId: string) => Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly interrupt: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly close: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
+  /** Live-applies session flag settings. Absent on test doubles. */
+  readonly setAutoCompactWindow?: (
+    tokens: number | null,
+  ) => Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
 }
 
 type ClaudeQueryStreamExit = Exit.Exit<void, ClaudeAgentSdkQueryRunnerError>;
@@ -543,6 +578,14 @@ export type ClaudeAgentSdkProtocolLogEvent =
       readonly payload: {
         readonly type: "query.stop_task";
         readonly taskId: string;
+      };
+    }
+  | {
+      readonly direction: "outgoing";
+      readonly stage: "decoded";
+      readonly payload: {
+        readonly type: "query.apply_flag_settings";
+        readonly autoCompactWindow: number | null;
       };
     }
   | {
@@ -847,6 +890,22 @@ export const layerQueryRunner: Layer.Layer<
                   direction: "outgoing",
                   stage: "decoded",
                   payload: { type: "query.stop_task", taskId },
+                }),
+              ),
+            ),
+          setAutoCompactWindow: (tokens) =>
+            Effect.tryPromise({
+              try: () => queryRuntime.applyFlagSettings({ autoCompactWindow: tokens }),
+              catch: (cause) => queryRunnerError(cause, "applyFlagSettings"),
+            }).pipe(
+              Effect.tap(() =>
+                logProtocolEvent({
+                  direction: "outgoing",
+                  stage: "decoded",
+                  payload: {
+                    type: "query.apply_flag_settings",
+                    autoCompactWindow: tokens,
+                  },
                 }),
               ),
             ),
@@ -8532,7 +8591,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
             cwd: turnInput.runtimePolicy.cwd,
             attachmentsDir,
-            settings: adapterOptions.settings,
+            settings: {
+              ...adapterOptions.settings,
+              autoCompactWindow:
+                latestAutoCompactWindowByInstance.get(adapterOptions.instanceId) ??
+                adapterOptions.settings.autoCompactWindow,
+            },
             environment: adapterOptions.environment,
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(mcpOverrides.allowedTools === undefined
@@ -8614,6 +8678,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ),
           };
           yield* Ref.set(queryContext, context);
+          const liveQueries =
+            liveQueriesByInstance.get(adapterOptions.instanceId) ??
+            new Set<ClaudeAgentSdkQuerySession>();
+          liveQueries.add(querySession);
+          liveQueriesByInstance.set(adapterOptions.instanceId, liveQueries);
           yield* querySession.messages.pipe(
             Stream.runForEach((message) =>
               sdkMessageLock.withPermits(1)(
@@ -8658,7 +8727,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 }
               }),
             ),
-            Effect.ensuring(Deferred.succeed(closed, undefined)),
+            Effect.ensuring(
+              Effect.sync(() => liveQueries.delete(querySession)).pipe(
+                Effect.andThen(Deferred.succeed(closed, undefined)),
+              ),
+            ),
             Effect.forkIn(sessionScope),
           );
           return context;
@@ -9520,6 +9593,7 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
       claudeEnvironment,
     );
+    yield* applyAutoCompactWindowToLiveQueries(instanceId, config.autoCompactWindow ?? "");
     return yield* makeClaudeAdapterV2({
       instanceId,
       settings: { ...config, enabled, binaryPath },
