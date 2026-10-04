@@ -1,5 +1,4 @@
-import type { OrchestrationMessage, OrchestrationThreadStreamItem } from "@t3tools/contracts";
-import * as Stream from "effect/Stream";
+import * as DateTime from "effect/DateTime";
 import type { EnvironmentProject, EnvironmentThreadShell } from "./state/shell.ts";
 
 export interface NowBarRow {
@@ -40,22 +39,56 @@ export interface NowBarCatalog {
   }>;
 }
 
+type RunState = "running" | "completed" | "error" | "interrupted";
+
+/** Collapse a v2 run status into the four states the Now Bar shows. */
+export function runState(thread: EnvironmentThreadShell): RunState | null {
+  const status = thread.latestRun?.status;
+  switch (status) {
+    case undefined:
+      return null;
+    case "completed":
+    case "rolled_back":
+      return "completed";
+    case "failed":
+      return "error";
+    case "interrupted":
+    case "cancelled":
+      return "interrupted";
+    default:
+      return "running";
+  }
+}
+
+/** Background work left after the run settles: monitors watch, anything else works. */
+function backgroundLiveness(thread: EnvironmentThreadShell): "monitoring" | "working" | null {
+  const tasks = thread.pendingBackgroundTasks;
+  if (tasks.length === 0) return null;
+  return tasks.every((task) => task.kind === "monitor") ? "monitoring" : "working";
+}
+
+/** The assistant's latest visible message during the current run, as a one-line status. */
+export function agentStatusText(thread: EnvironmentThreadShell): string | undefined {
+  const message = thread.source.latestVisibleMessage;
+  const startedAt = thread.latestRun?.startedAt ?? thread.latestRun?.requestedAt;
+  if (!message || message.role !== "assistant" || !startedAt) return undefined;
+  if (DateTime.toEpochMillis(message.updatedAt) < Date.parse(startedAt)) return undefined;
+  const text = message.text.replace(/\s+/g, " ").trim().slice(0, 240);
+  return text || undefined;
+}
+
 export function threadKey(thread: EnvironmentThreadShell): string {
-  return JSON.stringify([
-    thread.environmentId,
-    thread.id,
-    thread.latestTurn?.turnId ?? "background",
-  ]);
+  return JSON.stringify([thread.environmentId, thread.id, thread.latestRun?.runId ?? "background"]);
 }
 
 export function isActiveThread(thread: EnvironmentThreadShell): boolean {
   return (
     thread.archivedAt === null &&
-    (thread.latestTurn?.state === "running" ||
+    (runState(thread) === "running" ||
       thread.hasPendingApprovals ||
       thread.hasPendingUserInput ||
       thread.hasActionableProposedPlan ||
-      !!thread.backgroundLiveness)
+      backgroundLiveness(thread) !== null)
   );
 }
 
@@ -80,20 +113,20 @@ export function projectNowBarRows(
         thread.hasPendingUserInput ||
         thread.hasActionableProposedPlan;
       const phase = finished
-        ? thread.latestTurn?.state === "error"
+        ? runState(thread) === "error"
           ? "error"
-          : thread.latestTurn?.state === "interrupted"
+          : runState(thread) === "interrupted"
             ? "stopped"
             : "completed"
         : !online
           ? "offline"
           : attention
             ? "attention"
-            : thread.backgroundLiveness === "monitoring"
+            : backgroundLiveness(thread) === "monitoring"
               ? "monitoring"
               : "working";
-      const progress = thread.planProgress;
-      const total = Math.max(0, progress?.totalSteps ?? 0);
+      // v2 shells carry no plan progress, so rows show no step count.
+      const total = 0;
       const status = finished
         ? phase === "error"
           ? "Agent hit an error · Open to inspect"
@@ -108,13 +141,12 @@ export function projectNowBarRows(
               ? "Your agent has a question"
               : thread.hasActionableProposedPlan
                 ? "Plan ready for your review"
-                : ((phase === "working" && thread.latestTurn?.state === "running"
+                : ((phase === "working" && runState(thread) === "running"
                     ? statuses?.get(threadKey(thread))
                     : undefined) ??
-                  progress?.step ??
                   (phase === "monitoring" ? "Watching for changes" : "Agent is working"));
       const startedAt = Date.parse(
-        thread.latestTurn?.startedAt ?? thread.latestTurn?.requestedAt ?? thread.updatedAt,
+        thread.latestRun?.startedAt ?? thread.latestRun?.requestedAt ?? thread.updatedAt,
       );
       const provider = catalogs
         ?.get(thread.environmentId)
@@ -126,14 +158,14 @@ export function projectNowBarRows(
         key: threadKey(thread),
         provider:
           provider?.driver ??
-          thread.session?.providerName ??
+          thread.runtime?.providerName ??
           String(thread.modelSelection.instanceId),
         model: thread.modelSelection.model,
         modelLabel: model?.name ?? thread.modelSelection.model,
         // Keep streaming message updates from changing an otherwise identical push payload.
         eventAt:
           Date.parse(
-            thread.latestTurn?.completedAt ?? thread.latestTurn?.requestedAt ?? thread.createdAt,
+            thread.latestRun?.completedAt ?? thread.latestRun?.requestedAt ?? thread.createdAt,
           ) || 0,
         title: thread.title.slice(0, 120),
         project:
@@ -145,13 +177,13 @@ export function projectNowBarRows(
             ? "input"
             : thread.hasActionableProposedPlan
               ? "plan"
-              : thread.backgroundLiveness === "working"
+              : backgroundLiveness(thread) === "working"
                 ? "background"
                 : undefined,
         status: status.slice(0, 240),
         startedAt: Number.isFinite(startedAt) ? startedAt : 0,
         total,
-        completed: Math.max(0, Math.min(total, progress?.completedSteps ?? 0)),
+        completed: 0,
         url: `t3code-nowbar://threads/${encodeURIComponent(thread.environmentId)}/${encodeURIComponent(thread.id)}`,
       };
     })
@@ -181,19 +213,15 @@ export function isUnreadCompletion(
   thread: EnvironmentThreadShell,
   unread?: { readonly since: number; readonly readTurns: Readonly<Record<string, string>> },
 ): boolean {
-  const turn = thread.latestTurn;
-  if (
-    !unread ||
-    thread.archivedAt !== null ||
-    !turn ||
-    (turn.state !== "completed" && turn.state !== "error" && turn.state !== "interrupted")
-  )
+  const run = thread.latestRun;
+  const state = runState(thread);
+  if (!unread || thread.archivedAt !== null || !run || state === null || state === "running")
     return false;
-  const completedAt = Date.parse(turn.completedAt ?? "");
+  const completedAt = Date.parse(run.completedAt ?? "");
   return (
     Number.isFinite(completedAt) &&
     completedAt >= unread.since &&
-    unread.readTurns[readIdentity(thread)] !== turn.turnId
+    unread.readTurns[readIdentity(thread)] !== run.runId
   );
 }
 
@@ -207,15 +235,9 @@ export function completedNowBarRows(
   return previous.flatMap((row) => {
     if (row.phase === "completed" || row.phase === "error" || row.phase === "stopped") return [];
     const thread = byKey.get(row.key);
-    if (
-      !thread ||
-      !connected.has(thread.environmentId) ||
-      isActiveThread(thread) ||
-      !thread.latestTurn
-    )
-      return [];
-    const state = thread.latestTurn.state;
-    if (state === "running") return [];
+    if (!thread || !connected.has(thread.environmentId) || isActiveThread(thread)) return [];
+    const state = runState(thread);
+    if (state === null || state === "running") return [];
     return [
       {
         ...row,
@@ -234,80 +256,4 @@ export function completedNowBarRows(
       },
     ];
   });
-}
-
-interface AgentStatusState {
-  readonly text: string;
-  readonly createdAt: string;
-  readonly pendingId: string;
-  readonly pendingText: string;
-  readonly pendingCreatedAt: string;
-}
-export const emptyAgentStatus: AgentStatusState = {
-  text: "",
-  createdAt: "",
-  pendingId: "",
-  pendingText: "",
-  pendingCreatedAt: "",
-};
-
-/** Retain a bounded preview while streaming, publish only complete agent updates. */
-export function updateAgentStatus(
-  state: AgentStatusState,
-  message: Pick<
-    OrchestrationMessage,
-    "id" | "role" | "turnId" | "text" | "streaming" | "createdAt"
-  >,
-  turnId: string,
-): AgentStatusState {
-  if (
-    message.role !== "assistant" ||
-    message.turnId !== turnId ||
-    message.createdAt < state.createdAt
-  )
-    return state;
-  const pending = message.id === state.pendingId ? state.pendingText : "";
-  if (message.streaming)
-    return message.createdAt < state.pendingCreatedAt
-      ? state
-      : {
-          ...state,
-          pendingId: message.id,
-          pendingCreatedAt: message.createdAt,
-          pendingText: (pending + message.text).slice(0, 600),
-        };
-  const text = (message.text || pending).replace(/\s+/g, " ").trim().slice(0, 240);
-  return text
-    ? {
-        ...state,
-        text,
-        createdAt: message.createdAt,
-        ...(message.id === state.pendingId
-          ? { pendingId: "", pendingText: "", pendingCreatedAt: "" }
-          : {}),
-      }
-    : state;
-}
-
-export function agentStatusUpdates<E, R>(
-  source: Stream.Stream<OrchestrationThreadStreamItem, E, R>,
-  turnId: string,
-) {
-  return source.pipe(
-    Stream.scan(emptyAgentStatus, (state, item) => {
-      if (item.kind === "snapshot") {
-        return item.snapshot.thread.messages.reduce((current, message) => {
-          // Snapshot text is already accumulated; later deltas can continue its pending preview.
-          return updateAgentStatus(current, message, turnId);
-        }, emptyAgentStatus);
-      }
-      if (item.kind === "event" && item.event.type === "thread.message-sent") {
-        const message = item.event.payload;
-        return updateAgentStatus(state, { ...message, id: message.messageId }, turnId);
-      }
-      return state;
-    }),
-    Stream.map((state) => state.text),
-    Stream.changes,
-  );
 }

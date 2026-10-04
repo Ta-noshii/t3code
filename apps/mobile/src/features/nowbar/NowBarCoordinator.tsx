@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { AppState } from "react-native";
 import { useProjects, useServerConfigs, useThreadShells } from "../../state/entities";
 import { useWorkspaceState } from "../../state/workspace";
-import { NowBarStatus } from "./NowBarStatus";
-import { projectNowBarRows, threadKey } from "./model";
+import { agentStatusText, projectNowBarRows, runState, threadKey } from "./model";
 import { nowBarNative, useNowBarPreferences } from "./native";
 import { checkNowBarUpdate } from "./updates";
 import { useNowBarUnread } from "./unread";
@@ -15,16 +14,6 @@ export function NowBarCoordinator() {
   const { environments } = useWorkspaceState();
   const preferences = useNowBarPreferences();
   const unread = useNowBarUnread();
-  const [statuses, setStatuses] = useState<ReadonlyMap<string, string>>(new Map());
-  const onStatus = useCallback((key: string, text: string | null) => {
-    setStatuses((previous) => {
-      if ((previous.get(key) ?? null) === (text || null)) return previous;
-      const next = new Map(previous);
-      if (text) next.set(key, text);
-      else next.delete(key);
-      return next;
-    });
-  }, []);
   const connected = useMemo(
     () =>
       new Set(
@@ -32,10 +21,29 @@ export function NowBarCoordinator() {
       ),
     [environments],
   );
-  const rows = useMemo(
-    () => projectNowBarRows(threads, projects, connected, unread, catalogs, statuses),
-    [threads, projects, connected, unread, catalogs, statuses],
-  );
+  const showAgentText =
+    preferences.enabled && preferences.custom && preferences.expanded && !preferences.private;
+  const rows = useMemo(() => {
+    const base = projectNowBarRows(threads, projects, connected, unread, catalogs);
+    if (!showAgentText) return base;
+    // Agent text goes only to the top three working rows of the expanded, non-private view.
+    const visible = new Set(
+      base
+        .slice(0, 3)
+        .filter((row) => row.phase === "working")
+        .map((row) => row.key),
+    );
+    const statuses = new Map<string, string>();
+    for (const thread of threads) {
+      const key = threadKey(thread);
+      if (!visible.has(key) || runState(thread) !== "running") continue;
+      const text = agentStatusText(thread);
+      if (text) statuses.set(key, text);
+    }
+    return statuses.size === 0
+      ? base
+      : projectNowBarRows(threads, projects, connected, unread, catalogs, statuses);
+  }, [threads, projects, connected, unread, catalogs, showAgentText]);
   const payload = JSON.stringify(rows);
 
   useEffect(() => {
@@ -76,31 +84,5 @@ export function NowBarCoordinator() {
     },
     [],
   );
-  const visible = new Set(
-    rows
-      .slice(0, 3)
-      .filter((row) => row.phase === "working")
-      .map((row) => row.key),
-  );
-  return preferences.enabled &&
-    preferences.custom &&
-    preferences.expanded &&
-    !preferences.private ? (
-    <>
-      {threads
-        .filter(
-          (thread) => visible.has(threadKey(thread)) && thread.latestTurn?.state === "running",
-        )
-        .map((thread) => (
-          <NowBarStatus
-            key={threadKey(thread)}
-            environmentId={thread.environmentId}
-            threadId={thread.id}
-            turnId={thread.latestTurn!.turnId}
-            rowKey={threadKey(thread)}
-            onStatus={onStatus}
-          />
-        ))}
-    </>
-  ) : null;
+  return null;
 }

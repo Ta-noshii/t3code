@@ -4,15 +4,49 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
-  TurnId,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
-import { emptyAgentStatus, updateAgentStatus } from "@t3tools/client-runtime/nowbar";
-import { completedNowBarRows, projectNowBarRows, readIdentity } from "./model";
+import { agentStatusText, completedNowBarRows, projectNowBarRows, readIdentity } from "./model";
 
 const environmentId = EnvironmentId.make("laptop");
 const connected = new Set([environmentId]);
+type RunPatch = Partial<NonNullable<EnvironmentThreadShell["latestRun"]>>;
+function run(patch: RunPatch = {}): NonNullable<EnvironmentThreadShell["latestRun"]> {
+  return {
+    runId: RunId.make("turn"),
+    status: "running",
+    requestedAt: "2026-09-09T10:00:00Z",
+    startedAt: "2026-09-09T10:00:01Z",
+    completedAt: null,
+    assistantMessageId: null,
+    ...patch,
+  };
+}
+function background(kind: "monitor" | "command") {
+  return [
+    { taskId: "task-1", kind },
+  ] as unknown as EnvironmentThreadShell["pendingBackgroundTasks"];
+}
+function withMessage(
+  base: EnvironmentThreadShell,
+  message: { role: "assistant" | "user"; text: string; updatedAt: string },
+): EnvironmentThreadShell {
+  return {
+    ...base,
+    source: {
+      ...base.source,
+      latestVisibleMessage: {
+        id: MessageId.make("m1"),
+        role: message.role,
+        text: message.text,
+        updatedAt: DateTime.makeUnsafe(message.updatedAt),
+      },
+    },
+  } as EnvironmentThreadShell;
+}
 function thread(patch: Partial<EnvironmentThreadShell> = {}): EnvironmentThreadShell {
   return {
     environmentId,
@@ -25,26 +59,21 @@ function thread(patch: Partial<EnvironmentThreadShell> = {}): EnvironmentThreadS
     branch: null,
     worktreePath: null,
     pullRequests: [],
-    latestTurn: {
-      turnId: TurnId.make("turn"),
-      state: "running",
-      requestedAt: "2026-09-09T10:00:00Z",
-      startedAt: "2026-09-09T10:00:01Z",
-      completedAt: null,
-      assistantMessageId: null,
-    },
+    latestRun: run(),
+    runtime: null,
+    pendingBackgroundTasks: [],
+    source: { latestVisibleMessage: null } as unknown as EnvironmentThreadShell["source"],
     createdAt: "2026-09-09T10:00:00Z",
     updatedAt: "2026-09-09T10:00:02Z",
     archivedAt: null,
     settledOverride: null,
     settledAt: null,
-    session: null,
     latestUserMessageAt: null,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
     ...patch,
-  };
+  } as unknown as EnvironmentThreadShell;
 }
 
 describe("Now Bar agent projection", () => {
@@ -55,19 +84,15 @@ describe("Now Bar agent projection", () => {
     expect(projectNowBarRows([running], [], connected)[0]).toMatchObject({
       provider: "cursor",
       model: "claude-sonnet",
-      eventAt: Date.parse(running.latestTurn!.requestedAt),
+      eventAt: Date.parse(running.latestRun!.requestedAt!),
     });
     const finished = {
       ...running,
-      latestTurn: {
-        ...running.latestTurn!,
-        state: "completed" as const,
-        completedAt: "2026-09-09T10:05:00Z",
-      },
+      latestRun: run({ status: "completed", completedAt: "2026-09-09T10:05:00Z" }),
     };
     expect(
       projectNowBarRows([finished], [], connected, { since: 0, readTurns: {} })[0]?.eventAt,
-    ).toBe(Date.parse(finished.latestTurn.completedAt));
+    ).toBe(Date.parse(finished.latestRun.completedAt!));
     expect(
       projectNowBarRows([{ ...running, updatedAt: "2026-09-09T10:01:00Z" }], [], connected),
     ).toEqual(projectNowBarRows([running], [], connected));
@@ -122,8 +147,8 @@ describe("Now Bar agent projection", () => {
     expect(
       project({
         ...running,
-        backgroundLiveness: "monitoring",
-        latestTurn: { ...running.latestTurn!, state: "completed" },
+        pendingBackgroundTasks: background("monitor"),
+        latestRun: run({ status: "completed" }),
       })?.status,
     ).toBe("Watching for changes");
     expect(project({ ...running, hasPendingApprovals: true })?.status).toBe(
@@ -132,44 +157,43 @@ describe("Now Bar agent projection", () => {
     expect(
       projectNowBarRows([running], [], new Set(), undefined, undefined, statuses)[0]?.status,
     ).toContain("Connection paused");
-    expect(
-      project({ ...running, latestTurn: { ...running.latestTurn!, turnId: TurnId.make("next") } })
-        ?.status,
-    ).toBe("Agent is working");
+    expect(project({ ...running, latestRun: run({ runId: RunId.make("next") }) })?.status).toBe(
+      "Agent is working",
+    );
   });
-  it("publishes complete agent messages, assembles deltas and ignores old turns and user text", () => {
-    const base = {
-      id: MessageId.make("m1"),
-      role: "assistant" as const,
-      turnId: TurnId.make("turn"),
-      createdAt: "2026-09-09T12:00:00Z",
-      streaming: false,
-      text: "Checking the build",
-    };
-    let state = updateAgentStatus(emptyAgentStatus, base, "turn");
-    expect(state.text).toBe("Checking the build");
-    state = updateAgentStatus(
-      state,
-      { ...base, id: MessageId.make("m2"), streaming: true, text: "Running " },
-      "turn",
-    );
-    state = updateAgentStatus(
-      state,
-      { ...base, id: MessageId.make("m2"), streaming: true, text: "tests now" },
-      "turn",
-    );
-    expect(state.text).toBe("Checking the build");
-    state = updateAgentStatus(state, { ...base, id: MessageId.make("m2"), text: "" }, "turn");
-    expect(state.text).toBe("Running tests now");
-    expect(updateAgentStatus(state, { ...base, role: "user", text: "User prompt" }, "turn")).toBe(
-      state,
-    );
-    expect(updateAgentStatus(state, { ...base, turnId: TurnId.make("old") }, "turn")).toBe(state);
-    expect(updateAgentStatus(state, { ...base, createdAt: "2026-09-08T12:00:00Z" }, "turn")).toBe(
-      state,
-    );
+  it("reads agent text from the current run's latest assistant message only", () => {
+    const running = thread();
     expect(
-      updateAgentStatus(state, { ...base, text: "x".repeat(20_000) }, "turn").text,
+      agentStatusText(
+        withMessage(running, {
+          role: "assistant",
+          text: "Running\n  focused tests",
+          updatedAt: "2026-09-09T10:00:05Z",
+        }),
+      ),
+    ).toBe("Running focused tests");
+    expect(
+      agentStatusText(
+        withMessage(running, { role: "user", text: "Prompt", updatedAt: "2026-09-09T10:00:05Z" }),
+      ),
+    ).toBeUndefined();
+    expect(
+      agentStatusText(
+        withMessage(running, {
+          role: "assistant",
+          text: "Earlier run",
+          updatedAt: "2026-09-09T09:00:00Z",
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      agentStatusText(
+        withMessage(running, {
+          role: "assistant",
+          text: "x".repeat(20_000),
+          updatedAt: "2026-09-09T10:00:05Z",
+        }),
+      ),
     ).toHaveLength(240);
   });
   it("distinguishes approval, question, plan review and background work", () => {
@@ -177,7 +201,7 @@ describe("Now Bar agent projection", () => {
       { hasPendingApprovals: true },
       { hasPendingUserInput: true },
       { hasActionableProposedPlan: true },
-      { backgroundLiveness: "working" as const },
+      { pendingBackgroundTasks: background("command") },
     ];
     expect(
       cases.map((patch) => projectNowBarRows([thread(patch)], [], connected)[0]?.kind),
@@ -185,11 +209,7 @@ describe("Now Bar agent projection", () => {
   });
   it("retains new unread completions until the matching turn is read, including offline", () => {
     const finished = thread({
-      latestTurn: {
-        ...thread().latestTurn!,
-        state: "completed",
-        completedAt: "2026-09-09T10:05:00Z",
-      },
+      latestRun: run({ status: "completed", completedAt: "2026-09-09T10:05:00Z" }),
     });
     const unread = { since: Date.parse("2026-09-09T10:00:00Z"), readTurns: {} };
     const rows = projectNowBarRows([finished], [], connected, unread);
@@ -198,7 +218,7 @@ describe("Now Bar agent projection", () => {
     expect(
       projectNowBarRows([finished], [], connected, {
         ...unread,
-        readTurns: { [readIdentity(finished)]: finished.latestTurn!.turnId },
+        readTurns: { [readIdentity(finished)]: finished.latestRun!.runId },
       }),
     ).toEqual([]);
     expect(completedNowBarRows(rows, [finished], connected)).toEqual([]);
@@ -219,7 +239,7 @@ describe("Now Bar agent projection", () => {
   });
   it("read receipts do not suppress a later turn or a matching ID in another environment", () => {
     const finished = thread({
-      latestTurn: { ...thread().latestTurn!, state: "error", completedAt: "2026-09-09T10:05:00Z" },
+      latestRun: run({ status: "failed", completedAt: "2026-09-09T10:05:00Z" }),
     });
     const unread = { since: 0, readTurns: { [readIdentity(finished)]: "old-turn" } };
     expect(projectNowBarRows([finished], [], connected, unread)[0]?.phase).toBe("error");
@@ -227,21 +247,17 @@ describe("Now Bar agent projection", () => {
     expect(
       projectNowBarRows([other], [], connected, {
         since: 0,
-        readTurns: { [readIdentity(finished)]: finished.latestTurn!.turnId },
+        readTurns: { [readIdentity(finished)]: finished.latestRun!.runId },
       })[0]?.phase,
     ).toBe("error");
   });
-  it("prioritizes attention and uses real plan progress", () => {
+  it("prioritizes attention over working rows", () => {
     const rows = projectNowBarRows(
-      [
-        thread({ planProgress: { step: "Running checks", completedSteps: 3, totalSteps: 5 } }),
-        thread({ id: ThreadId.make("approval"), hasPendingApprovals: true }),
-      ],
+      [thread(), thread({ id: ThreadId.make("approval"), hasPendingApprovals: true })],
       [],
       connected,
     );
     expect(rows.map((row) => row.phase)).toEqual(["attention", "working"]);
-    expect(rows[1]).toMatchObject({ status: "Running checks", completed: 3, total: 5 });
     expect(rows[0]?.status).toContain("Approval needed");
   });
   it("does not conflate matching thread IDs in different environments", () => {
@@ -263,7 +279,7 @@ describe("Now Bar agent projection", () => {
   it("only sends completion for the same observed turn after it ends", () => {
     const running = thread();
     const previous = projectNowBarRows([running], [], connected);
-    const finished = thread({ latestTurn: { ...running.latestTurn!, state: "completed" } });
+    const finished = thread({ latestRun: run({ status: "completed" }) });
     expect(projectNowBarRows([finished], [], connected)).toEqual([]);
     expect(completedNowBarRows(previous, [finished], connected)[0]?.status).toContain(
       "Work complete",
@@ -272,23 +288,23 @@ describe("Now Bar agent projection", () => {
     expect(
       completedNowBarRows(
         previous,
-        [thread({ latestTurn: { ...finished.latestTurn!, turnId: TurnId.make("new") } })],
+        [thread({ latestRun: run({ status: "completed", runId: RunId.make("new") }) })],
         connected,
       ),
     ).toEqual([]);
   });
   it("keeps background agents and user questions live after the main turn ends", () => {
-    const finished = { ...thread().latestTurn!, state: "completed" as const };
+    const finished = run({ status: "completed" });
     expect(
       projectNowBarRows(
-        [thread({ latestTurn: finished, backgroundLiveness: "monitoring" })],
+        [thread({ latestRun: finished, pendingBackgroundTasks: background("monitor") })],
         [],
         connected,
       )[0]?.phase,
     ).toBe("monitoring");
     expect(
       projectNowBarRows(
-        [thread({ latestTurn: finished, hasPendingUserInput: true })],
+        [thread({ latestRun: finished, hasPendingUserInput: true })],
         [],
         connected,
       )[0]?.phase,

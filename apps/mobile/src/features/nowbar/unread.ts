@@ -35,7 +35,7 @@ export function useReadNowBarThread(thread: EnvironmentThreadShell | null, conte
         )
           return;
         const identity = readIdentity(thread);
-        const turn = thread.latestTurn!.turnId;
+        const turn = thread.latestRun!.runId;
         nowBarNative?.markRead(identity, turn);
         state = { ...state, readTurns: { ...state.readTurns, [identity]: turn } };
         for (const listener of listeners) listener();
