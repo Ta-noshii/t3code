@@ -186,6 +186,11 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
     "browser",
   ),
+  preview_overflow_check: tool(
+    ["Check", "Checking", "Checked", "the preview page for overflow"],
+    "browser",
+    "browser",
+  ),
   preview_wait_for: tool(
     ["Wait", "Waiting", "Waited", "for the preview page"],
     "browser",
