@@ -22,6 +22,7 @@ import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useThreadShellsForProjectRefs } from "../state/entities";
 import {
   ADD_TO_MACHINE_LABEL_CLASS,
+  type CopyTargetOption,
   type EnvMode,
   type EnvironmentOption,
   resolveContextStripLabelsCompact,
@@ -36,13 +37,17 @@ import {
   BranchToolbarBranchSelector,
   type BranchToolbarBranchSelectorHandle,
 } from "./BranchToolbarBranchSelector";
-import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
+import {
+  BranchToolbarEnvironmentSelector,
+  CopyEnvironmentMenuContent,
+} from "./BranchToolbarEnvironmentSelector";
 import { openAddProjectToMachine } from "./AddProjectToMachineDialog";
 import { type AddProjectTarget, useAddProjectTargets } from "../hooks/useAddProjectTargets";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import {
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
   THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
 } from "./chat/threadDetailsPanelStyles";
@@ -101,6 +106,8 @@ interface BranchToolbarProps {
   trailing?: ReactNode;
   availableEnvironments?: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
+  copyTargets?: readonly CopyTargetOption[] | undefined;
+  onCopyToEnvironment?: ((target: CopyTargetOption) => void) | undefined;
 }
 
 function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string) {
@@ -152,6 +159,8 @@ interface RunContextSelectorProps {
   showEnvironmentPicker: boolean;
   showEnvironmentIndicator: boolean;
   onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
+  copyTargets: readonly CopyTargetOption[] | undefined;
+  onCopyToEnvironment: ((target: CopyTargetOption) => void) | undefined;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
@@ -175,6 +184,8 @@ const RunContextSelector = memo(function RunContextSelector({
   showEnvironmentPicker,
   showEnvironmentIndicator,
   onEnvironmentChange,
+  copyTargets,
+  onCopyToEnvironment,
   effectiveEnvMode,
   activeWorktreePath,
   onEnvModeChange,
@@ -262,6 +273,40 @@ const RunContextSelector = memo(function RunContextSelector({
       {isPanel && showEnvironmentIndicator ? workspaceIcon : null}
     </>
   );
+
+  if (envLocked && copyTargets && copyTargets.length > 0 && onCopyToEnvironment) {
+    return (
+      <Menu>
+        <MenuTrigger
+          render={isPanel ? <ThreadDetailsControl part="select" /> : <ComposerControl size="xs" />}
+          className={isPanel ? undefined : "min-w-0 max-w-[48%] flex-initial justify-start"}
+          aria-label={`Runs on ${activeEnvironment?.label ?? "Run on"}. Copy this chat to another machine`}
+          data-composer-context-control
+          data-composer-shortcut="composer.host"
+        >
+          {triggerContent}
+          {isPanel ? (
+            <span data-slot="select-icon">
+              <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />
+            </span>
+          ) : (
+            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+          )}
+        </MenuTrigger>
+        <MenuPopup
+          align="start"
+          side={isPanel ? "bottom" : "top"}
+          {...(isPanel ? {} : composerFloatingLayerProps)}
+        >
+          <CopyEnvironmentMenuContent
+            activeEnvironment={activeEnvironment}
+            copyTargets={copyTargets}
+            onCopyToEnvironment={onCopyToEnvironment}
+          />
+        </MenuPopup>
+      </Menu>
+    );
+  }
 
   if (isLocked) {
     return (
@@ -622,6 +667,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   availableEnvironments,
   onEnvironmentChange,
   trailing,
+  copyTargets,
+  onCopyToEnvironment,
 }: BranchToolbarProps) {
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
   const threadRef = scopeThreadRef(environmentId, threadId);
@@ -709,6 +756,8 @@ export const BranchToolbar = memo(function BranchToolbar({
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={activeEnvironmentOption !== null}
             onEnvironmentChange={onEnvironmentChange}
+            copyTargets={copyTargets}
+            onCopyToEnvironment={onCopyToEnvironment}
             effectiveEnvMode={effectiveEnvMode}
             activeWorktreePath={activeWorktreePath}
             onEnvModeChange={onEnvModeChange}
@@ -759,6 +808,8 @@ export const BranchToolbar = memo(function BranchToolbar({
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={showEnvironmentIndicator}
             onEnvironmentChange={onEnvironmentChange}
+            copyTargets={copyTargets}
+            onCopyToEnvironment={onCopyToEnvironment}
             effectiveEnvMode={effectiveEnvMode}
             activeWorktreePath={activeWorktreePath}
             onEnvModeChange={onEnvModeChange}
@@ -788,6 +839,8 @@ export const BranchToolbar = memo(function BranchToolbar({
                 availableEnvironments={availableEnvironments}
                 {...(showEnvironmentPicker ? { onEnvironmentChange } : {})}
                 {...(addTargets.length > 0 ? { onAddToMachine: () => onAddToMachine(null) } : {})}
+                copyTargets={copyTargets}
+                onCopyToEnvironment={onCopyToEnvironment}
               />
               {showGitControls ? (
                 <Separator

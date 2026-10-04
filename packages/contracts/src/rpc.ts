@@ -228,6 +228,14 @@ import {
   OrchestrationV2ThreadLaunchError,
 } from "./orchestrationV2.ts";
 import {
+  THREAD_TRANSFER_WS_METHODS,
+  ThreadTransferError,
+  ThreadTransferExportInput,
+  ThreadTransferExportResult,
+  ThreadTransferImportInput,
+  ThreadTransferImportResult,
+} from "./threadTransfer.ts";
+import {
   ProjectCreateNewInput,
   ProjectCreateNewResult,
   ProjectCreateFromThreadInput,
@@ -1814,6 +1822,17 @@ const WsOrchestrationV2SubscribeCommandOutputRpc = Rpc.make(
     stream: true,
   },
 );
+const WsThreadTransferExportRpc = Rpc.make(THREAD_TRANSFER_WS_METHODS.exportThread, {
+  payload: ThreadTransferExportInput,
+  success: ThreadTransferExportResult,
+  error: Schema.Union([ThreadTransferError, EnvironmentAuthorizationError]),
+});
+
+const WsThreadTransferImportRpc = Rpc.make(THREAD_TRANSFER_WS_METHODS.importThread, {
+  payload: ThreadTransferImportInput,
+  success: ThreadTransferImportResult,
+  error: Schema.Union([ThreadTransferError, EnvironmentAuthorizationError]),
+});
 
 const WsSubscribeTerminalMetadataRpc = Rpc.make(WS_METHODS.subscribeTerminalMetadata, {
   payload: Schema.Struct({}),
@@ -2137,4 +2156,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
   WsOrchestrationV2SubscribeCommandOutputRpc,
+  WsThreadTransferExportRpc,
+  WsThreadTransferImportRpc,
 ).middleware(RpcScopeAuthorization);
