@@ -189,6 +189,11 @@ interface ClaudeQuerySetPermissionModeFrame {
   readonly mode: string;
 }
 
+interface ClaudeQueryApplyFlagSettingsFrame {
+  readonly type: "query.apply_flag_settings";
+  readonly autoCompactWindow: number | null;
+}
+
 interface ClaudeQueryInterruptFrame {
   readonly type: "query.interrupt";
 }
@@ -245,6 +250,7 @@ type ClaudeOutboundFrame =
   | ClaudePromptOfferFrame
   | ClaudeQuerySetModelFrame
   | ClaudeQuerySetPermissionModeFrame
+  | ClaudeQueryApplyFlagSettingsFrame
   | ClaudeQueryInterruptFrame
   | ClaudePermissionResponseFrame
   | ClaudeSessionForkFrame
