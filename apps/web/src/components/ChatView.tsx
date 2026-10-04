@@ -198,6 +198,7 @@ import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
 import {
   type ComposerSubmissionIntent,
   collapseExpandedComposerCursor,
+  latestPromptSuggestion,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
 import {
@@ -315,6 +316,7 @@ import { resolveChatShortcutCommand, shortcutLabelForCommand } from "../keybindi
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
+  HistoryIcon,
   CheckCircle2Icon,
   MessageCircleIcon,
   PaperclipIcon,
@@ -509,6 +511,7 @@ import { useLinkedThreadPullRequest } from "./ThreadStatusIndicators";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
+import { useThreadRecap } from "./chat/useThreadRecap";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
 import {
@@ -1775,6 +1778,15 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadLiveTokenUsage = useMemo(
     () => latestProviderTurnTokenUsage(serverProjection?.providerTurns ?? []),
     [serverProjection?.providerTurns],
+  );
+  const projectionRuns = serverProjection?.runs;
+  const projectionProviderTurns = serverProjection?.providerTurns;
+  const promptSuggestion = useMemo(
+    () =>
+      projectionRuns && projectionProviderTurns
+        ? latestPromptSuggestion({ runs: projectionRuns, providerTurns: projectionProviderTurns })
+        : null,
+    [projectionRuns, projectionProviderTurns],
   );
   const serverVisibleTurnItems = useThreadVisibleTurnItems(routeThreadDetailRef);
   const serverThreadHistory = useThreadHistory(routeThreadDetailRef);
@@ -7751,6 +7763,38 @@ export default function ChatView(props: ChatViewProps) {
     isStoppingBackgroundWork,
     onOpenRelatedThread,
   ]);
+  const latestCompletedRun = useMemo(() => {
+    const latest = projectionRuns?.reduce<(typeof projectionRuns)[number] | undefined>(
+      (current, run) => (current === undefined || run.ordinal > current.ordinal ? run : current),
+      undefined,
+    );
+    return latest?.status === "completed"
+      ? {
+          runId: latest.id,
+          completedAt: latest.completedAt === null ? null : DateTime.formatIso(latest.completedAt),
+        }
+      : null;
+  }, [projectionRuns]);
+  const threadRecap = useThreadRecap({
+    environmentId: isServerThread ? environmentId : null,
+    threadId: isServerThread ? (activeThread?.id ?? null) : null,
+    ready: serverProjection !== null,
+    completedRun: latestCompletedRun,
+    idle: phase === "ready" && pendingApprovals.length === 0 && pendingUserInputs.length === 0,
+    supported: serverConfig?.environment.capabilities.threadRecap === true,
+  });
+  const threadRecapBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (threadRecap.recap === null) return null;
+    return {
+      id: `thread-recap:${activeThread?.id ?? "unknown"}`,
+      variant: "info",
+      icon: <HistoryIcon />,
+      title: "While you were away",
+      description: threadRecap.recap,
+      dismissLabel: "Dismiss recap",
+      onDismiss: threadRecap.dismiss,
+    };
+  }, [activeThread?.id, threadRecap.dismiss, threadRecap.recap]);
   // Settled, snoozed, and woke are thread state, not composer actions: each
   // gets one quiet line after the last message instead of a banner. A woken
   // thread announces itself here, not just in the sidebar pill. Dismissing
@@ -7954,6 +7998,7 @@ export default function ChatView(props: ChatViewProps) {
       goalBannerItem,
       backgroundWorkBannerItem,
     ].filter((item) => item !== null);
+    const threadRecapItems = threadRecapBannerItem === null ? [] : [threadRecapBannerItem];
     // The user asked for this one, so it leads the notice tier instead of trailing it.
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
     const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
@@ -7965,6 +8010,7 @@ export default function ChatView(props: ChatViewProps) {
         ...projectCloneItems,
         ...systemComposerBannerItems,
         ...backgroundWorkItems,
+        ...threadRecapItems,
       ];
     }
     return [
@@ -7974,6 +8020,7 @@ export default function ChatView(props: ChatViewProps) {
       ...projectCloneItems,
       ...systemComposerBannerItems,
       ...backgroundWorkItems,
+      ...threadRecapItems,
       {
         id: `branch-mismatch:${activeBranchMismatchKey}`,
         variant: "info",
@@ -8031,6 +8078,7 @@ export default function ChatView(props: ChatViewProps) {
     showBranchMismatchBanner,
     systemComposerBannerItems,
     usageLimitsBanner,
+    threadRecapBannerItem,
   ]);
 
   useEffect(() => {
@@ -12273,6 +12321,7 @@ export default function ChatView(props: ChatViewProps) {
                               activeTasksProgress={activeComposerTasksProgress}
                               activeTaskSteps={activeComposerTaskSteps}
                               compactThreadUnavailable={compactThreadUnavailable}
+                              promptSuggestion={promptSuggestion}
                               compactDisabled={compactDisabled}
                               compactDisabledReason={compactDisabledReason}
                               resolvedTheme={resolvedTheme}
