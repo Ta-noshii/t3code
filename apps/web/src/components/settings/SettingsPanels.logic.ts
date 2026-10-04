@@ -254,6 +254,33 @@ export function formatDiagnosticsDescription(input: {
   return `${mode}.`;
 }
 
+/**
+ * The config an instance edit starts from. A custom instance lives only in
+ * `providerInstances`. The default instance for a driver may still be the
+ * legacy `providers.<driver>` blob, which is turned into an instance without
+ * its in-config `enabled` flag so the envelope's flag wins.
+ */
+export function resolveEditableProviderInstance(input: {
+  readonly settings: Pick<ServerSettings, "providers" | "providerInstances">;
+  readonly instanceId: ProviderInstanceId;
+  readonly driver: ProviderDriverKind;
+  readonly isDefault: boolean;
+}): ProviderInstanceConfig | undefined {
+  const explicitInstance = input.settings.providerInstances?.[input.instanceId];
+  if (explicitInstance !== undefined || !input.isDefault) {
+    return explicitInstance;
+  }
+  type LegacyProviderSettings = ServerSettings["providers"][keyof ServerSettings["providers"]];
+  const legacyConfig = (input.settings.providers as Record<string, LegacyProviderSettings>)[
+    input.driver
+  ];
+  if (legacyConfig === undefined) {
+    return undefined;
+  }
+  const { enabled, ...config } = legacyConfig;
+  return { driver: input.driver, enabled, config };
+}
+
 export function buildProviderInstanceUpdatePatch(input: {
   readonly settings: Pick<ServerSettings, "providers" | "providerInstances">;
   readonly instanceId: ProviderInstanceId;

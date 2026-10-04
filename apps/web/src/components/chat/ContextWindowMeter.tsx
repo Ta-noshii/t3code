@@ -1,12 +1,24 @@
+import type { EnvironmentId, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import {
+  buildAutoCompactWindowOptions,
   formatContextWindowCompactionMessage,
   formatContextWindowCost,
+  parseAutoCompactWindow,
 } from "./ContextWindowMeter.logic";
 import { Minimize2Icon } from "lucide-react";
 import { composerFloatingLayerProps } from "./composerEventScope";
+import { useClaudeAutoCompactWindow } from "./useClaudeAutoCompactWindow";
+
+/** The provider instance whose auto-compact setting the popover edits. */
+export interface ContextWindowAutoCompactTarget {
+  readonly environmentId: EnvironmentId;
+  readonly instanceId: ProviderInstanceId;
+  readonly driverKind: ProviderDriverKind;
+}
 
 function formatPercentage(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
@@ -26,6 +38,8 @@ export function ContextWindowMeter(props: {
   compactDisabledReason?: string | null | undefined;
   /** While a turn runs, the button queues the compaction to start once the turn ends. */
   compactAfterTurn?: boolean | undefined;
+  /** Shows the auto-compact choice when this is a Claude instance. */
+  autoCompactTarget?: ContextWindowAutoCompactTarget | null | undefined;
 }) {
   const {
     usage,
@@ -34,6 +48,7 @@ export function ContextWindowMeter(props: {
     compactDisabled,
     compactDisabledReason,
     compactAfterTurn,
+    autoCompactTarget,
   } = props;
   const usedPercentage = formatPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
@@ -52,7 +67,8 @@ export function ContextWindowMeter(props: {
       <PopoverTrigger
         openOnHover
         delay={150}
-        closeDelay={onCompact ? 150 : 0}
+        // Interactive content needs a moment to move the pointer into it.
+        closeDelay={onCompact || autoCompactTarget ? 150 : 0}
         render={
           <Button
             size="icon-sm"
@@ -153,10 +169,16 @@ export function ContextWindowMeter(props: {
               </span>
             </div>
           ) : null}
-          {usage.compactsAutomatically ? (
-            <div className="mt-1 text-pretty text-secondary-label text-2xs font-medium">
+          {autoCompactTarget ? (
+            <ContextWindowAutoCompactSection
+              target={autoCompactTarget}
+              usage={usage}
+              modelDisplayName={modelDisplayName}
+            />
+          ) : usage.compactsAutomatically ? (
+            <ContextWindowCompactionMessage>
               {formatContextWindowCompactionMessage(modelDisplayName, usage.autoCompactThreshold)}
-            </div>
+            </ContextWindowCompactionMessage>
           ) : null}
           {onCompact ? (
             <>
@@ -180,6 +202,75 @@ export function ContextWindowMeter(props: {
         </div>
       </PopoverPopup>
     </Popover>
+  );
+}
+
+function ContextWindowCompactionMessage(props: { children: string }) {
+  return (
+    <div className="mt-1 text-pretty text-secondary-label text-2xs font-medium">
+      {props.children}
+    </div>
+  );
+}
+
+/**
+ * Mounted only while the popover is open, so the settings subscription costs
+ * nothing for a closed meter. Without a Claude instance it falls back to the
+ * plain compaction message.
+ */
+function ContextWindowAutoCompactSection(props: {
+  target: ContextWindowAutoCompactTarget;
+  usage: ContextWindowSnapshot;
+  modelDisplayName: string | null | undefined;
+}) {
+  const { target, usage, modelDisplayName } = props;
+  const control = useClaudeAutoCompactWindow(target);
+  const message = usage.compactsAutomatically ? (
+    <ContextWindowCompactionMessage>
+      {formatContextWindowCompactionMessage(
+        modelDisplayName,
+        usage.autoCompactThreshold,
+        parseAutoCompactWindow(control?.value),
+      )}
+    </ContextWindowCompactionMessage>
+  ) : null;
+  if (control === null) {
+    return message;
+  }
+  const options = buildAutoCompactWindowOptions({
+    maxTokens: usage.maxTokens,
+    current: control.value,
+  });
+  return (
+    <>
+      {message}
+      <div className="flex items-center justify-between gap-3 text-2xs leading-4">
+        <span className="text-secondary-label">Auto-compact at</span>
+        <Select
+          value={control.value}
+          onValueChange={(next) => {
+            if (typeof next === "string") control.setValue(next);
+          }}
+        >
+          <SelectTrigger size="xs" variant="ghost" aria-label="Auto-compact at">
+            <SelectValue>
+              {options.find((option) => option.value === control.value)?.label ?? control.value}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup {...composerFloatingLayerProps} alignItemWithTrigger={false} align="end">
+            {options.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
+      <div className="text-pretty text-secondary-label text-2xs">
+        Takes effect when Claude starts a new session for this thread, after 30 minutes idle or a
+        server restart.
+      </div>
+    </>
   );
 }
 

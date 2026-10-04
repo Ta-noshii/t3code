@@ -18,6 +18,7 @@ import {
   isProjectGroupingEnabled,
   projectGroupingModeFromToggle,
   resolveBackgroundActivityProfileOption,
+  resolveEditableProviderInstance,
 } from "./SettingsPanels.logic";
 
 describe("typography settings restore", () => {
@@ -241,6 +242,62 @@ describe("buildProviderInstanceUpdatePatch", () => {
 
     expect(patch.providerInstances?.[instanceId]).toEqual(nextInstance);
     expect(patch.providers).toBeUndefined();
+  });
+});
+
+describe("resolveEditableProviderInstance", () => {
+  const claude = ProviderDriverKind.make("claudeAgent");
+
+  it("builds the default instance from the legacy provider blob without its enabled flag", () => {
+    const instance = resolveEditableProviderInstance({
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        providers: {
+          ...DEFAULT_SERVER_SETTINGS.providers,
+          claudeAgent: {
+            ...DEFAULT_SERVER_SETTINGS.providers.claudeAgent,
+            enabled: false,
+            autoCompactWindow: "300000",
+          },
+        },
+      },
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      driver: claude,
+      isDefault: true,
+    });
+
+    expect(instance?.driver).toBe(claude);
+    expect(instance?.enabled).toBe(false);
+    expect(instance?.config).toMatchObject({ autoCompactWindow: "300000" });
+    expect(instance?.config).not.toHaveProperty("enabled");
+  });
+
+  it("prefers an explicit instance and never synthesizes a custom one", () => {
+    const explicit = {
+      driver: claude,
+      config: { autoCompactWindow: "500000" },
+    } satisfies ProviderInstanceConfig;
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: { [ProviderInstanceId.make("claudeAgent")]: explicit },
+    };
+
+    expect(
+      resolveEditableProviderInstance({
+        settings,
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        driver: claude,
+        isDefault: true,
+      }),
+    ).toBe(explicit);
+    expect(
+      resolveEditableProviderInstance({
+        settings,
+        instanceId: ProviderInstanceId.make("claude_work"),
+        driver: claude,
+        isDefault: false,
+      }),
+    ).toBeUndefined();
   });
 });
 
