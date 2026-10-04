@@ -42,6 +42,11 @@ interface QueuedRowThumbnail {
 
 const QUEUED_RUN_DRAG_TYPE = "application/x-t3code-queued-run";
 
+/** /compact and /logout run as their own turn; the server refuses to steer them into another. */
+function runsAsOwnTurn(text: string, attachments: ReadonlyArray<unknown>): boolean {
+  return attachments.length === 0 && ["/compact", "/logout"].includes(text.trim().toLowerCase());
+}
+
 export interface QueuedRunsControlHandle {
   steerNext: (repeat: boolean) => boolean;
   editLatest: (repeat: boolean) => boolean;
@@ -207,7 +212,9 @@ export function QueuedRunsControl({
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
       const next = queued[0];
-      if (!next || !workflow?.canPromoteToSteer) return false;
+      if (!next || !workflow?.canPromoteToSteer || runsAsOwnTurn(next.text, next.attachments)) {
+        return false;
+      }
       if (!repeat && busyRunId === null) void steer(next.run.id);
       return true;
     },
@@ -450,7 +457,8 @@ export function QueuedRunsControl({
                               disabled={
                                 item.runId === null ||
                                 busyRunId !== null ||
-                                !workflow?.canPromoteToSteer
+                                !workflow?.canPromoteToSteer ||
+                                runsAsOwnTurn(item.text, item.attachments)
                               }
                               onClick={() => {
                                 if (item.runId !== null) {
@@ -465,7 +473,9 @@ export function QueuedRunsControl({
                           <TooltipPopup>
                             {activeRun === null
                               ? "There is no active run to steer"
-                              : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
+                              : runsAsOwnTurn(item.text, item.attachments)
+                                ? "Runs as its own turn after the current one"
+                                : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
                           </TooltipPopup>
                         </Tooltip>
                         <Tooltip>
