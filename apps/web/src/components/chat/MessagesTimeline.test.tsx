@@ -2521,8 +2521,10 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("Ran 2 commands");
     expect(markup).toContain('aria-expanded="false"');
-    // Entries stay hidden until the toggle expands the group.
-    expect(markup).not.toContain("vp lint");
+    // The collapsed group lists its recent steps as one-line links, but the
+    // full entries stay hidden until the toggle expands the group.
+    expect(markup).toContain("vp lint");
+    expect(markup).not.toContain('data-timeline-row-kind="work"');
   });
 
   it("renders a muted failure marker for failed tool lifecycle entries", () => {
