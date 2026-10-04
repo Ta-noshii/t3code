@@ -11,6 +11,7 @@ import type { DraftId } from "../../composerDraftStore";
 import { useT3ProjectFileScripts } from "../../hooks/useT3ProjectFileScripts";
 import {
   shouldShowEnvironmentIndicator,
+  type CopyTargetOption,
   type EnvMode,
   type EnvironmentOption,
 } from "../BranchToolbar.logic";
@@ -56,6 +57,8 @@ export interface ThreadDetailsPanelProps extends Pick<
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
   onEnvironmentChange: (environmentId: EnvironmentId) => void;
+  copyTargets?: readonly CopyTargetOption[];
+  onCopyToEnvironment?: (target: CopyTargetOption) => void;
   onEnvModeChange: (mode: EnvMode) => void;
   /** The thread's env mode as ChatView resolves it. */
   envMode: EnvMode;
@@ -161,6 +164,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   {...(canPickEnvironment
                     ? { onEnvironmentChange: props.onEnvironmentChange }
                     : {})}
+                  copyTargets={props.copyTargets}
+                  onCopyToEnvironment={props.onCopyToEnvironment}
                 />
               ) : null}
 

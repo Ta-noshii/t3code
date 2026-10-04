@@ -24,6 +24,7 @@ import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
 import {
+  type CopyTargetOption,
   type EnvMode,
   type EnvironmentOption,
   resolveContextStripLabelsCompact,
@@ -38,7 +39,10 @@ import {
   BranchToolbarBranchSelector,
   type BranchToolbarBranchSelectorHandle,
 } from "./BranchToolbarBranchSelector";
-import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
+import {
+  BranchToolbarEnvironmentSelector,
+  CopyEnvironmentMenuContent,
+} from "./BranchToolbarEnvironmentSelector";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { ComposerControl } from "./chat/ComposerControl";
@@ -89,6 +93,8 @@ interface BranchToolbarProps {
   onComposerFocusRequest?: () => void;
   availableEnvironments?: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
+  copyTargets?: readonly CopyTargetOption[];
+  onCopyToEnvironment?: (target: CopyTargetOption) => void;
   composerControlsHostRef?: (element: HTMLDivElement | null) => void;
   contextStripVisible?: boolean;
 }
@@ -104,6 +110,8 @@ interface MobileRunContextSelectorProps {
   showEnvironmentPicker: boolean;
   showEnvironmentIndicator: boolean;
   onEnvironmentChange: ((environmentId: EnvironmentId) => void) | undefined;
+  copyTargets: readonly CopyTargetOption[] | undefined;
+  onCopyToEnvironment: ((target: CopyTargetOption) => void) | undefined;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
@@ -123,6 +131,8 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   showEnvironmentPicker,
   showEnvironmentIndicator,
   onEnvironmentChange,
+  copyTargets,
+  onCopyToEnvironment,
   effectiveEnvMode,
   activeWorktreePath,
   onEnvModeChange,
@@ -188,6 +198,29 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
       </ComposerContextLabel>
     </>
   );
+
+  if (envLocked && copyTargets && copyTargets.length > 0 && onCopyToEnvironment) {
+    return (
+      <Menu>
+        <MenuTrigger
+          render={<ComposerControl size="xs" />}
+          className="min-w-0 max-w-[48%] flex-initial justify-start"
+          data-composer-context-control
+          data-composer-shortcut="composer.host"
+        >
+          {triggerContent}
+          <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        </MenuTrigger>
+        <MenuPopup align="start" side="top" {...composerFloatingLayerProps}>
+          <CopyEnvironmentMenuContent
+            activeEnvironment={activeEnvironment}
+            copyTargets={copyTargets}
+            onCopyToEnvironment={onCopyToEnvironment}
+          />
+        </MenuPopup>
+      </Menu>
+    );
+  }
 
   if (isLocked) {
     return (
@@ -520,6 +553,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   onComposerFocusRequest,
   availableEnvironments,
   onEnvironmentChange,
+  copyTargets,
+  onCopyToEnvironment,
   composerControlsHostRef,
   contextStripVisible = true,
 }: BranchToolbarProps) {
@@ -673,6 +708,8 @@ export const BranchToolbar = memo(function BranchToolbar({
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={showEnvironmentIndicator}
             onEnvironmentChange={onEnvironmentChange}
+            copyTargets={copyTargets}
+            onCopyToEnvironment={onCopyToEnvironment}
             effectiveEnvMode={effectiveEnvMode}
             activeWorktreePath={activeWorktreePath}
             onEnvModeChange={onEnvModeChange}
@@ -699,6 +736,8 @@ export const BranchToolbar = memo(function BranchToolbar({
                 environmentId={environmentId}
                 availableEnvironments={availableEnvironments}
                 {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
+                copyTargets={copyTargets}
+                onCopyToEnvironment={onCopyToEnvironment}
               />
               {showGitControls ? (
                 <Separator

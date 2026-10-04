@@ -80,6 +80,18 @@ on that machine. Existing threads stay where they started. If resource checks ar
 unavailable or all eligible machines are full, choose a machine manually to continue.
 Mobile keeps its manual environment selection.
 
+### Copy a chat to another machine
+
+On web and desktop, click the machine name in a started chat's composer, choose
+another connected machine, then the project to copy the chat into. The copy
+opens on that machine in the project's main folder, not in this chat's
+worktree, and the original chat stays where it is.
+
+When both machines run a version with chat copying, a Claude chat brings its
+session along, so the agent remembers the whole conversation. Otherwise the
+copy starts with a turn that hands the agent the earlier conversation and asks
+it to summarise where things stand.
+
 ### Tailscale HTTPS
 
 Join both devices to the same tailnet. In the desktop app, enable **Tailscale

@@ -53,15 +53,69 @@ export function resolveEnvironmentOptionLabel(input: {
   return runtimeLabel ?? savedLabel ?? input.environmentId;
 }
 
-// A remote (non-primary) environment is always surfaced, even when it is the
-// only environment available: with a single connected machine there is nothing
-// to pick, but the user still needs to see where the project runs.
+// Always shown, this device included: besides telling where the project runs,
+// the indicator is where a started chat is copied to another machine.
 export function shouldShowEnvironmentIndicator(input: {
   activeEnvironment: Pick<EnvironmentOption, "isPrimary"> | null;
   canPickEnvironment: boolean;
 }): boolean {
-  if (input.canPickEnvironment) return true;
-  return input.activeEnvironment !== null && !input.activeEnvironment.isPrimary;
+  return input.canPickEnvironment || input.activeEnvironment !== null;
+}
+
+/** Where a started chat can be copied: another environment and the project it lands in. */
+export interface CopyTargetOption {
+  environmentId: EnvironmentId;
+  projectId: ProjectId;
+  environmentLabel: string;
+  machine: EnvironmentMachineKind;
+  projectLabel: string;
+  /** The target project is this chat's project, checked out on the other environment. */
+  sameProject: boolean;
+  connected: boolean;
+}
+
+/**
+ * Every other environment, sorted by label, each offering its projects. This
+ * chat's own project leads its environment's list; the rest follow by title.
+ */
+export function buildCopyTargets(input: {
+  currentEnvironmentId: EnvironmentId;
+  /** This chat's project on each environment that has it. */
+  projectEnvironments: ReadonlyArray<Pick<EnvironmentOption, "environmentId" | "projectId">>;
+  environments: ReadonlyArray<{
+    environmentId: EnvironmentId;
+    label: string;
+    machine: EnvironmentMachineKind;
+    connected: boolean;
+  }>;
+  projects: ReadonlyArray<{ environmentId: EnvironmentId; id: ProjectId; title: string }>;
+}): CopyTargetOption[] {
+  const sameProjectIds = new Map(
+    input.projectEnvironments.flatMap((option) =>
+      option.projectId === null ? [] : [[option.environmentId, option.projectId] as const],
+    ),
+  );
+  return input.environments
+    .filter((environment) => environment.environmentId !== input.currentEnvironmentId)
+    .toSorted((a, b) => a.label.localeCompare(b.label))
+    .flatMap((environment) =>
+      input.projects
+        .filter((project) => project.environmentId === environment.environmentId)
+        .map((project) => ({
+          environmentId: environment.environmentId,
+          projectId: project.id,
+          environmentLabel: environment.label,
+          machine: environment.machine,
+          projectLabel: project.title,
+          sameProject: sameProjectIds.get(environment.environmentId) === project.id,
+          connected: environment.connected,
+        }))
+        .toSorted(
+          (a, b) =>
+            Number(b.sameProject) - Number(a.sameProject) ||
+            a.projectLabel.localeCompare(b.projectLabel),
+        ),
+    );
 }
 
 export function shouldShowComposerContextStrip(input: {

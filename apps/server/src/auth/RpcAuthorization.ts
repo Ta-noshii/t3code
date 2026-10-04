@@ -8,6 +8,7 @@ import {
   AuthReviewWriteScope,
   AuthTerminalOperateScope,
   ORCHESTRATION_V2_WS_METHODS,
+  THREAD_TRANSFER_WS_METHODS,
   type AuthEnvironmentScope,
   EnvironmentAuthorizationError,
   RpcScopeAuthorization,
@@ -38,6 +39,9 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_V2_WS_METHODS.subscribeArchivedShell]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: AuthOrchestrationReadScope,
+  // An export carries the provider's raw session, which holds more than the thread shows.
+  [THREAD_TRANSFER_WS_METHODS.exportThread]: AuthOrchestrationOperateScope,
+  [THREAD_TRANSFER_WS_METHODS.importThread]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectsMutate]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverProbe]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetConfig]: AuthOrchestrationReadScope,

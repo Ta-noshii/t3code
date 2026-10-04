@@ -49,6 +49,7 @@ import { layerWithLegacyImporter as threadManagementServiceLayer } from "./Threa
 import { layer as threadLaunchServiceLayer } from "./ThreadLaunchService.ts";
 import { layer as threadLifecycleServiceLayer } from "./ThreadLifecycleService.ts";
 import { layer as threadForkServiceLayer } from "./ThreadForkService.ts";
+import { layer as threadTransferServiceLayer } from "./ThreadTransferService.ts";
 import { layer as turnItemPositionStoreLayer } from "./TurnItemPositionStore.ts";
 import { layer as scheduledTaskServiceLayer } from "../scheduledTasks/ScheduledTaskService.ts";
 
@@ -232,6 +233,18 @@ const agentSessionImporterProvided = agentSessionImporterLayer.pipe(
   ),
 );
 
+const threadTransferProvided = threadTransferServiceLayer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      ProjectServiceLayerLive,
+      orchestratorProvided,
+      providerAdapterRegistryProvided,
+      eventSinkProvided,
+      idAllocatorLayer,
+    ),
+  ),
+);
+
 const threadManagementProvided = threadManagementServiceLayer.pipe(
   Layer.provide(Layer.merge(orchestratorProvided, legacyV1ThreadImporterProvided)),
 );
@@ -319,6 +332,7 @@ export const OrchestrationV2ProductionLayerLive = Layer.mergeAll(
   ),
   providerContinuationWorkerProvided,
   agentSessionImporterProvided,
+  threadTransferProvided,
 ).pipe(
   Layer.provide(Scheduler.layer),
   Layer.provideMerge(OrchestrationEventInfrastructureLayerLive),

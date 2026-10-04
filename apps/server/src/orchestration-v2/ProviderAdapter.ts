@@ -259,6 +259,20 @@ export class ProviderAdapterForkThreadError extends Schema.TaggedError<ProviderA
   }
 }
 
+/** Export or import of a native thread for a copy to another environment failed. */
+export class ProviderAdapterTransferThreadError extends Schema.TaggedError<ProviderAdapterTransferThreadError>()(
+  "ProviderAdapterTransferThreadError",
+  {
+    driver: ProviderDriverKind,
+    operation: Schema.Literals(["export", "import"]),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Failed to ${this.operation} a ${this.driver} native thread.`;
+  }
+}
+
 export class ProviderAdapterTurnStartError extends Schema.TaggedError<ProviderAdapterTurnStartError>()(
   "ProviderAdapterTurnStartError",
   {
@@ -471,6 +485,12 @@ export interface ProviderAdapterV2ForkThreadInput {
   readonly runtimePolicy?: ProviderAdapterV2RuntimePolicy;
 }
 
+/** A provider's own conversation, serialized to move to another environment. */
+export interface ProviderAdapterV2NativeThreadExport {
+  readonly format: string;
+  readonly data: unknown;
+}
+
 export interface ProviderAdapterV2EventSubscription {
   readonly events: Stream.Stream<ProviderAdapterV2Event, ProviderAdapterV2Error>;
   readonly close: Effect.Effect<void>;
@@ -591,6 +611,29 @@ export interface ProviderAdapterV2Shape {
   readonly openSession: (
     input: ProviderAdapterV2OpenSessionInput,
   ) => Effect.Effect<ProviderAdapterV2SessionRuntime, ProviderAdapterV2Error, Scope.Scope>;
+  /**
+   * Serializes a provider thread's native conversation so another environment
+   * can import it. Absent when the driver cannot; null when this thread has
+   * nothing to export.
+   */
+  readonly exportNativeThread?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+    readonly cwd: string | null;
+  }) => Effect.Effect<
+    ProviderAdapterV2NativeThreadExport | null,
+    ProviderAdapterTransferThreadError
+  >;
+  /**
+   * Recreates an exported conversation on this machine under `cwd`, returning
+   * the native thread a new provider thread resumes and, for drivers that
+   * resume at a message, the native message its first turn continues from.
+   */
+  readonly importNativeThread?: (
+    input: ProviderAdapterV2NativeThreadExport & { readonly cwd: string },
+  ) => Effect.Effect<
+    { readonly nativeThreadId: string; readonly conversationHeadId?: string },
+    ProviderAdapterTransferThreadError
+  >;
 }
 
 export class ProviderAdapterV2 extends Context.Service<ProviderAdapterV2, ProviderAdapterV2Shape>()(
