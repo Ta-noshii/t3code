@@ -1919,10 +1919,21 @@ const make = Effect.gen(function* () {
         const listed = input?.all === true ? [] : yield* loadOrchestratorModels;
         const curated = input?.all !== true;
         const inherited = parent?.thread.modelSelection;
-        const shown = (instanceId: string, model: string) =>
+        // A selection may name a model by an alias (Antigravity's
+        // `antigravity-default` points at whichever native model is current),
+        // so both the thread's own model and the list match aliases too.
+        const names = (model: ServerProvider["models"][number]) => [
+          model.slug,
+          ...(model.aliases ?? []),
+        ];
+        const shown = (instanceId: string, model: ServerProvider["models"][number]) =>
           listed.length === 0 ||
-          (instanceId === inherited?.instanceId && model === inherited.model) ||
-          listed.some((entry) => entry.provider === instanceId && entry.model === model);
+          (inherited !== undefined &&
+            instanceId === inherited.instanceId &&
+            names(model).includes(inherited.model)) ||
+          listed.some(
+            (entry) => entry.provider === instanceId && names(model).includes(entry.model),
+          );
         let hiddenModelCount = 0;
         const entries = providers.flatMap((provider) => {
           const constraints = providerConstraints(
@@ -1935,7 +1946,7 @@ const make = Effect.gen(function* () {
               !modelPreferences[provider.instanceId]?.hiddenModels.includes(model.slug),
           );
           const models = offered.filter((model) =>
-            curated ? shown(provider.instanceId, model.slug) : true,
+            curated ? shown(provider.instanceId, model) : true,
           );
           const usable = constraints.length === 0;
           if (curated && (!usable || models.length === 0)) {
