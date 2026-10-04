@@ -59,9 +59,9 @@ export function useClaudeAutoCompactWindow(input: {
       })
     : undefined;
   const savedValue = readAutoCompactWindow(instance?.config);
-  // Holds the choice until the server's settings push changes the saved
-  // value, so the select does not flick back in between. `from` is the saved
-  // value it was chosen over; once that changes, the saved value wins.
+  // Holds the choice while the write is in flight, so the select does not
+  // flick back in between. `from` is the saved value it was chosen over; once
+  // that changes or the write settles, the saved value wins.
   const [pending, setPending] = useState<{
     readonly key: string;
     readonly from: string;
@@ -98,8 +98,9 @@ export function useClaudeAutoCompactWindow(input: {
         { operation: "upsert", instanceId, instance: nextInstance },
         patch,
       ).then((result) => {
-        if (result._tag !== "Failure") return;
+        // Settled either way: the saved value is now the server's answer.
         setPending((current) => (current === chosen ? null : current));
+        if (result._tag !== "Failure") return;
         if (isAtomCommandInterrupted(result)) return;
         const error = squashAtomCommandFailure(result);
         toastManager.add({
