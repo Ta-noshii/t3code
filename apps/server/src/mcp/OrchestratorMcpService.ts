@@ -12,6 +12,7 @@ import {
   type OrchestrationV2ThreadShell,
   type OrchestrationV2TurnItem,
   OrchestratorMcpFailure,
+  type OrchestratorMcpCapabilitiesInput,
   type OrchestratorMcpCapabilitiesResult,
   type OrchestratorMcpCreateThreadsInput,
   type OrchestratorMcpCreateThreadsResult,
@@ -94,6 +95,7 @@ import {
 } from "./McpInvocationContext.ts";
 import * as Metrics from "../observability/Metrics.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_WAIT_TIMEOUT_MS = 60 * 60 * 1_000;
@@ -125,6 +127,7 @@ type TerminalTaskStatus = Extract<
 export interface OrchestratorMcpServiceShape {
   readonly capabilities: (
     scope: McpInvocationScope,
+    input?: OrchestratorMcpCapabilitiesInput,
   ) => Effect.Effect<OrchestratorMcpCapabilitiesResult, OrchestratorMcpFailure>;
   readonly delegateTask: (
     scope: McpInvocationScope,
@@ -934,6 +937,7 @@ const make = Effect.gen(function* () {
         )
       : Effect.succeed(project.defaultModelSelection);
   const secretRequests = yield* SecretRequests.SecretRequests;
+  const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
 
   const requireCapability = (scope: McpInvocationScope) =>
     scope.capabilities.has("orchestration")
@@ -1122,6 +1126,18 @@ const make = Effect.gen(function* () {
     });
 
   const loadProviders = providerRegistry.getProviders;
+
+  /**
+   * The orchestratorModels server setting. An unreadable settings file lists
+   * everything: a short list is a convenience, and hiding models on a read
+   * error would look like they vanished.
+   */
+  const loadOrchestratorModels = Option.isNone(serverSettings)
+    ? Effect.succeed([] as ReadonlyArray<{ provider: string; model: string }>)
+    : serverSettings.value.getSettings.pipe(
+        Effect.map((settings) => settings.orchestratorModels),
+        Effect.orElseSucceed(() => [] as ReadonlyArray<{ provider: string; model: string }>),
+      );
 
   /**
    * Instance ids the adapter registry resolves — the same lookup a
@@ -1890,7 +1906,7 @@ const make = Effect.gen(function* () {
         return { status, secretRef: secretRef.value };
       }).pipe(Effect.withSpan("OrchestratorMcpService.requestSecret")),
 
-    capabilities: (scope) =>
+    capabilities: (scope, input) =>
       Effect.gen(function* () {
         const { parent, limits } = yield* loadCaller(scope);
         const providers = yield* loadProviders;
@@ -1900,35 +1916,53 @@ const make = Effect.gen(function* () {
           Effect.map((settings) => settings.providerModelPreferences ?? {}),
           Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
         );
+        const listed = input?.all === true ? [] : yield* loadOrchestratorModels;
+        const curated = input?.all !== true;
+        const inherited = parent?.thread.modelSelection;
+        const shown = (instanceId: string, model: string) =>
+          listed.length === 0 ||
+          (instanceId === inherited?.instanceId && model === inherited.model) ||
+          listed.some((entry) => entry.provider === instanceId && entry.model === model);
+        let hiddenModelCount = 0;
+        const entries = providers.flatMap((provider) => {
+          const constraints = providerConstraints(
+            provider,
+            orchestrationCapableInstanceIds.has(provider.instanceId),
+          );
+          const offered = provider.models.filter(
+            (model) =>
+              model.isCustom ||
+              !modelPreferences[provider.instanceId]?.hiddenModels.includes(model.slug),
+          );
+          const models = offered.filter((model) =>
+            curated ? shown(provider.instanceId, model.slug) : true,
+          );
+          const usable = constraints.length === 0;
+          if (curated && (!usable || models.length === 0)) {
+            hiddenModelCount += offered.length;
+            return [];
+          }
+          hiddenModelCount += offered.length - models.length;
+          return [{ provider, models, constraints }];
+        });
         return {
           parentThreadId: parent?.thread.id ?? null,
           inheritedProviderInstanceId: parent?.thread.modelSelection.instanceId ?? null,
           inheritedModel: parent?.thread.modelSelection.model ?? null,
           runtimeMode: limits.runtimeMode,
           interactionMode: limits.interactionMode,
-          providers: providers.map((provider) => {
-            const constraints = providerConstraints(
-              provider,
-              orchestrationCapableInstanceIds.has(provider.instanceId),
-            );
+          providers: entries.map(({ provider, models, constraints }) => {
             return {
               providerInstanceId: provider.instanceId,
               driverKind: provider.driver,
-              displayName: provider?.displayName ?? null,
-              models:
-                provider?.models
-                  .filter(
-                    (model) =>
-                      model.isCustom ||
-                      !modelPreferences[provider.instanceId]?.hiddenModels.includes(model.slug),
-                  )
-                  .map((model) => ({
-                    id: model.slug,
-                    label: model.name ?? null,
-                    ...(model.capabilities?.optionDescriptors === undefined
-                      ? {}
-                      : { options: model.capabilities.optionDescriptors }),
-                  })) ?? [],
+              displayName: provider.displayName ?? null,
+              models: models.map((model) => ({
+                id: model.slug,
+                label: model.name ?? null,
+                ...(model.capabilities?.optionDescriptors === undefined
+                  ? {}
+                  : { options: model.capabilities.optionDescriptors }),
+              })),
               ...(provider.supportedRuntimeModes === undefined ||
               provider.supportedRuntimeModes.length === 0
                 ? {}
@@ -1938,6 +1972,7 @@ const make = Effect.gen(function* () {
               constraints: [...constraints],
             };
           }),
+          ...(hiddenModelCount > 0 ? { hiddenModelCount } : {}),
           features: {
             appOwnedSubagents: true,
             asyncPolling: true,

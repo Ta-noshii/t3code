@@ -496,6 +496,16 @@ export const OrchestratorMcpProviderCapability = Schema.Struct({
 });
 export type OrchestratorMcpProviderCapability = typeof OrchestratorMcpProviderCapability.Type;
 
+export const OrchestratorMcpCapabilitiesInput = Schema.Struct({
+  all: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "List every model and provider, including ones outside the server's orchestratorModels list and providers that cannot run child tasks.",
+    }),
+  ),
+});
+export type OrchestratorMcpCapabilitiesInput = typeof OrchestratorMcpCapabilitiesInput.Type;
+
 export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   /** The calling thread, or null when the caller is not a T3 thread. */
   parentThreadId: Schema.NullOr(ThreadId),
@@ -505,6 +515,8 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   providers: Schema.Array(OrchestratorMcpProviderCapability),
+  /** Models left out by the orchestratorModels setting or an unusable provider; `all: true` shows them. */
+  hiddenModelCount: Schema.optional(Schema.Number),
   features: Schema.Struct({
     appOwnedSubagents: Schema.Boolean,
     asyncPolling: Schema.Boolean,
