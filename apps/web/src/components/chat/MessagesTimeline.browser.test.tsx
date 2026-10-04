@@ -48,6 +48,7 @@ function baseProps(): Omit<TimelineProps, "timelineEntries"> {
     onOpenTurnDiff: () => {},
     onOpenThread: () => {},
     onForkFromRun: async () => {},
+    onEditInNewThread: async () => {},
     onRollbackCheckpoint: () => {},
     supportsConversationRollback: false,
     onRevertToTurnCount: () => {},

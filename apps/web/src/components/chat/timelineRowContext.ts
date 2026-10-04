@@ -47,6 +47,8 @@ export interface TimelineRowSharedState {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
   }) => Promise<void>;
+  /** Opens a new thread with the history before this user message and the message in its composer. */
+  onEditInNewThread: (messageId: MessageId) => Promise<void>;
   onRollbackCheckpoint: (input: {
     readonly checkpointId: string;
     readonly scopeId: string;

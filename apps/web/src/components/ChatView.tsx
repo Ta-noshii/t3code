@@ -2777,6 +2777,7 @@ export default function ChatView(props: ChatViewProps) {
   const {
     onConfirmRevertStable,
     onForkFromRunStable,
+    onEditInNewThreadStable,
     onRevertTimelineTurnStable,
     onTimelineRollbackCheckpointStable,
   } = useTimelineRewind({
@@ -3369,6 +3370,9 @@ export default function ChatView(props: ChatViewProps) {
                 parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                 workflowOpening={paintOnlyDisplayedTimeline ? null : workflowOpening}
                 onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRunStable}
+                onEditInNewThread={
+                  paintOnlyDisplayedTimeline ? async () => {} : onEditInNewThreadStable
+                }
                 onRollbackCheckpoint={onTimelineRollbackCheckpointStable}
                 supportsConversationRollback={
                   !paintOnlyDisplayedTimeline && supportsConversationRollback

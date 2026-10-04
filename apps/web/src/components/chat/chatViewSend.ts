@@ -148,6 +148,33 @@ export async function startFanoutThread(input: {
   }
 }
 
+/** Puts a message's downloaded attachments back into a composer, images as previews. */
+export function addRestoredComposerAttachments(
+  target: ScopedThreadRef | DraftId,
+  files: ReadonlyArray<File>,
+  attachments: ChatMessage["attachments"],
+): void {
+  const images: ComposerImageAttachment[] = [];
+  const restoredFiles: ComposerFileAttachment[] = [];
+  files.forEach((file, index) => {
+    const attachment = {
+      id: randomUUID(),
+      name: file.name,
+      mimeType: file.type,
+      sizeBytes: file.size,
+      file,
+    };
+    if (attachments?.[index]?.type === "image") {
+      images.push({ ...attachment, type: "image", previewUrl: URL.createObjectURL(file) });
+    } else {
+      restoredFiles.push({ ...attachment, type: "file" });
+    }
+  });
+  const store = useComposerDraftStore.getState();
+  store.addImages(target, images, { allowDuplicates: true });
+  store.addFiles(target, restoredFiles, { allowDuplicates: true });
+}
+
 /**
  * Reverts the thread to before `message` and puts that message's text and
  * attachments back in the composer draft. Returns the restored prompt, or the
@@ -227,24 +254,7 @@ export async function rewindToMessage(input: {
           ? `${currentPrompt}\n\n${restoredPrompt}`
           : restoredPrompt;
     store.setPrompt(draftTarget, nextPrompt);
-    const images: ComposerImageAttachment[] = [];
-    const restoredFiles: ComposerFileAttachment[] = [];
-    files.forEach((file, index) => {
-      const attachment = {
-        id: randomUUID(),
-        name: file.name,
-        mimeType: file.type,
-        sizeBytes: file.size,
-        file,
-      };
-      if (message.attachments?.[index]?.type === "image") {
-        images.push({ ...attachment, type: "image", previewUrl: URL.createObjectURL(file) });
-      } else {
-        restoredFiles.push({ ...attachment, type: "file" });
-      }
-    });
-    store.addImages(draftTarget, images, { allowDuplicates: true });
-    store.addFiles(draftTarget, restoredFiles, { allowDuplicates: true });
+    addRestoredComposerAttachments(draftTarget, files, message.attachments);
     return { error: null, prompt: nextPrompt };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Failed to revert thread state." };
