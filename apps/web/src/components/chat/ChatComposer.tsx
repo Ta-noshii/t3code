@@ -203,6 +203,7 @@ import {
 } from "./ComposerAttachmentStrip";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerFooterPrimaryActions } from "./ComposerFooterControls";
+import type { ContextWindowAutoCompactTarget } from "./ContextWindowMeter";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -996,6 +997,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadModelSelection,
     modelOptionsByInstance,
   );
+  // The meter reports the thread's own provider, so the auto-compact choice
+  // edits that instance on the thread's environment, not the picker's draft.
+  const contextWindowInstanceId =
+    activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId ?? null;
+  const contextWindowDriverKind =
+    contextWindowInstanceId === null
+      ? null
+      : (providerInstanceEntries.find((entry) => entry.instanceId === contextWindowInstanceId)
+          ?.driverKind ?? null);
+  const autoCompactTarget: ContextWindowAutoCompactTarget | null =
+    contextWindowInstanceId !== null && contextWindowDriverKind === "claudeAgent"
+      ? {
+          environmentId,
+          instanceId: contextWindowInstanceId,
+          driverKind: contextWindowDriverKind,
+        }
+      : null;
   const reserveContextWindowMeter = shouldReserveContextWindowMeter({
     meterEnabled: settings.contextWindowMeterEnabled,
     detailLoading: props.threadSyncPhase === "loading",
@@ -3520,6 +3538,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     }
                     reserveContextWindowMeter={reserveContextWindowMeter}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
+                    autoCompactTarget={autoCompactTarget}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     canInterrupt={canInterrupt}
