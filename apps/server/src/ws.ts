@@ -61,6 +61,7 @@ import {
   OrchestrationV2DispatchCommandError,
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2GetThreadProjectionError,
+  OrchestrationV2GetThreadRecapError,
   OrchestrationV2ThreadLaunchError,
   type OrchestrationProjectShell,
   type OrchestrationV2ShellSnapshot,
@@ -118,6 +119,7 @@ import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as ThreadManagementService from "./orchestration-v2/ThreadManagementService.ts";
+import * as ThreadRecapService from "./orchestration-v2/ThreadRecapService.ts";
 import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
@@ -1275,6 +1277,7 @@ const layerWsRpc = (
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
       const threadTransfer = yield* ThreadTransferService.ThreadTransferServiceV2;
+      const threadRecap = yield* ThreadRecapService.ThreadRecapServiceV2;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
@@ -2058,6 +2061,21 @@ const layerWsRpc = (
                   }),
                 ),
             ),
+          ),
+        [ORCHESTRATION_V2_WS_METHODS.getThreadRecap]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_V2_WS_METHODS.getThreadRecap,
+            threadRecap.getThreadRecap(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationV2GetThreadRecapError({
+                    threadId: input.threadId,
+                    message: "Failed to recap the thread",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
           ),
         [THREAD_TRANSFER_WS_METHODS.exportThread]: (input) =>
           observeRpcEffect(

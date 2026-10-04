@@ -52,6 +52,7 @@ import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ThreadTransferService from "./ThreadTransferService.ts";
+import * as ThreadRecapService from "./ThreadRecapService.ts";
 
 /** The shared application event log and its command receipts. */
 export const layerEventInfrastructure = Layer.mergeAll(
@@ -240,6 +241,16 @@ const layerAgentSessionImporterProvided = AgentSessionImporter.layer.pipe(
   ),
 );
 
+const layerThreadRecapProvided = ThreadRecapService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      ProjectionStore.layer,
+      layerProviderAdapterRegistryProvided,
+      layerRuntimePolicyProvided,
+    ),
+  ),
+);
+
 const layerThreadTransferProvided = ThreadTransferService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -353,6 +364,7 @@ export const layer = Layer.mergeAll(
   layerOrchestratorProvided,
   layerMcpAppRequestsProvided,
   layerThreadManagementProvided,
+  layerThreadRecapProvided,
   layerEffectWorkerProvided,
   layerProviderSessionManagerProvided,
   layerProviderAuthServiceProvided,
