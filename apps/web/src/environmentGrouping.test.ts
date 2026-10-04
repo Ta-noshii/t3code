@@ -98,7 +98,7 @@ describe("environment grouping", () => {
       id: ProjectId.make("workbench-remote"),
       environmentId: remoteEnvironmentId,
       title: "workbench",
-      workspaceRoot: "/tmp/workbench",
+      workspaceRoot: "/srv/workbench",
     });
     const build = (projects: Project[]) =>
       buildSidebarProjectSnapshots({
@@ -116,16 +116,21 @@ describe("environment grouping", () => {
     expect(projectGroupsSpanEnvironments(build([separateRemote]))).toBe(false);
   });
 
-  it("keeps projects without repository identity physically scoped", () => {
+  it("groups projects without repository identity by path across environments", () => {
     const primary = makeProject();
     const remote = makeProject({
       id: ProjectId.make("project-remote"),
       environmentId: remoteEnvironmentId,
     });
+    const remoteElsewhere = makeProject({
+      id: ProjectId.make("project-remote-elsewhere"),
+      environmentId: remoteEnvironmentId,
+      workspaceRoot: "/srv/shared-repo",
+    });
 
-    expect(deriveLogicalProjectKey(primary)).toBe(derivePhysicalProjectKey(primary));
-    expect(deriveLogicalProjectKey(remote)).toBe(derivePhysicalProjectKey(remote));
-    expect(deriveLogicalProjectKey(primary)).not.toBe(deriveLogicalProjectKey(remote));
+    expect(deriveLogicalProjectKey(primary)).toBe(deriveLogicalProjectKey(remote));
+    expect(deriveLogicalProjectKey(primary)).not.toBe(derivePhysicalProjectKey(primary));
+    expect(deriveLogicalProjectKey(primary)).not.toBe(deriveLogicalProjectKey(remoteElsewhere));
   });
 
   it("uses the physical key when repository grouping is disabled", () => {
