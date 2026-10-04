@@ -55,6 +55,11 @@ interface QueuedRowThumbnail {
 // A longer queue shows its first messages and a button that shows the rest.
 const QUEUE_VISIBLE_ROWS = 3;
 
+/** /compact and /logout run as their own turn; the server refuses to steer them into another. */
+function runsAsOwnTurn(text: string, attachments: ReadonlyArray<unknown>): boolean {
+  return attachments.length === 0 && ["/compact", "/logout"].includes(text.trim().toLowerCase());
+}
+
 export interface QueuedRunsControlHandle {
   steerNext: (repeat: boolean) => boolean;
   editLatest: (repeat: boolean) => boolean;
@@ -186,6 +191,7 @@ export function QueuedRunsControl({
     steerNext(repeat) {
       const next = queued[0];
       if (!next || !canSend) return false;
+      if (!workflow?.canSendNow && runsAsOwnTurn(next.text, next.attachments)) return false;
       if (!repeat && busyRunId === null) void sendQueuedMessage(next.run.id);
       return true;
     },
@@ -273,7 +279,11 @@ export function QueuedRunsControl({
                         <Button
                           size="xs"
                           variant="ghost-muted"
-                          disabled={item.runId === null || busyRunId !== null}
+                          disabled={
+                            item.runId === null ||
+                            busyRunId !== null ||
+                            (!workflow?.canSendNow && runsAsOwnTurn(item.text, item.attachments))
+                          }
                           onClick={() => {
                             if (item.runId !== null) {
                               void sendQueuedMessage(item.runId);
@@ -285,7 +295,9 @@ export function QueuedRunsControl({
                         </Button>
                       </TooltipTrigger>
                       <TooltipPopup>
-                        {`${workflow?.canSendNow ? "Start a turn with this message" : workflow?.promoteSkipsCompaction ? "Skip compaction and send this message" : "Send into the current turn"}${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
+                        {!workflow?.canSendNow && runsAsOwnTurn(item.text, item.attachments)
+                          ? "Runs as its own turn after the current one"
+                          : `${workflow?.canSendNow ? "Start a turn with this message" : workflow?.promoteSkipsCompaction ? "Skip compaction and send this message" : "Send into the current turn"}${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
                       </TooltipPopup>
                     </Tooltip>
                   </>

@@ -871,6 +871,7 @@ export function useComposerSend(input: ComposerSendInput) {
       shouldQueueBehindActiveRun,
     } = planComposerTurn({
       messageText: messageTextForSend,
+      attachmentCount: composerAttachmentsSnapshot.length,
       sendQueuesBehindSetup,
       isServerThread,
       activeMessageCount,

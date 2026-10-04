@@ -254,6 +254,9 @@ window indicator (legacy)** to see context usage. The meter is off by default
 and appears once the provider reports usage. Open it for usage details and
 **Compact context** when the provider supports compaction.
 
+While the agent is working, `/compact` waits in the queue and runs after the current
+turn; remove it from the queue to cancel.
+
 Claude instances can also compact idle threads for you. See
 [compact long conversations](./providers-claude.md#compact-long-conversations).
 
