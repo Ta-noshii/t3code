@@ -2,6 +2,8 @@ import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  ContextHandoffId,
+  ContextTransferId,
   MessageId,
   NodeId,
   ProviderSessionId,
@@ -13,7 +15,10 @@ import {
   RunId,
   ThreadId,
   ProjectId,
+  TurnItemId,
+  type OrchestrationV2ContextHandoff,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2TurnItem,
   OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -855,3 +860,380 @@ for (const previousMessages of [[], ["/compact", " /COMPACT "]]) {
       }),
   );
 }
+
+function makeNativeForkFallbackHarness() {
+  const now = DateTime.makeUnsafe("2026-10-04T12:00:00Z");
+  const driver = ProviderDriverKind.make("claudeAgent");
+  const instanceId = ProviderInstanceId.make("claudeAgent");
+  const modelSelection = { instanceId, model: "claude-opus-5-5" };
+  const sourceThreadId = ThreadId.make("thread-fork-fallback-source");
+  const threadId = ThreadId.make("thread-fork-fallback-target");
+  const runId = RunId.make("run-fork-fallback-target");
+  const rootNodeId = NodeId.make("root-fork-fallback-target");
+  const attemptId = RunAttemptId.make("attempt-fork-fallback-target");
+  const providerThreadId = ProviderThreadId.make("provider-thread-fork-fallback-target");
+  const providerSessionId = ProviderSessionId.make("provider-session-fork-fallback-target");
+  const checkpointScopeId = CheckpointScopeId.make("scope-fork-fallback-target");
+  const messageId = MessageId.make("message-fork-fallback-target");
+  const sourceProviderThreadId = ProviderThreadId.make("provider-thread-fork-fallback-source");
+  const sourceRun = { id: RunId.make("run-fork-fallback-source-1"), ordinal: 1 };
+  const laterSourceRun = { id: RunId.make("run-fork-fallback-source-2"), ordinal: 2 };
+  const transferId = ContextTransferId.make("transfer-fork-fallback");
+  const providerThread: OrchestrationV2ThreadProjection["providerThreads"][number] = {
+    id: providerThreadId,
+    driver,
+    providerInstanceId: instanceId,
+    providerSessionId,
+    appThreadId: threadId,
+    ownerNodeId: null,
+    nativeThreadRef: null,
+    nativeConversationHeadRef: null,
+    status: "not_loaded",
+    firstRunOrdinal: 1,
+    lastRunOrdinal: 1,
+    handoffIds: [],
+    forkedFrom: { providerThreadId: sourceProviderThreadId },
+    createdAt: now,
+    updatedAt: now,
+  };
+  const forkTransfer: OrchestrationV2ThreadProjection["contextTransfers"][number] = {
+    id: transferId,
+    type: "fork",
+    sourceThreadId,
+    targetThreadId: threadId,
+    sourcePoint: { threadId: sourceThreadId, runId: sourceRun.id },
+    basePoint: null,
+    sourceProviderInstanceId: instanceId,
+    targetProviderInstanceId: instanceId,
+    targetRunId: runId,
+    status: "pending",
+    resolution: null,
+    createdBy: "user",
+    error: null,
+    createdAt: now,
+    updatedAt: now,
+    consumedAt: null,
+  };
+  let projection = {
+    thread: {
+      id: threadId,
+      activeProviderThreadId: providerThreadId,
+      branch: null,
+      worktreePath: null,
+    },
+    runs: [
+      {
+        id: runId,
+        threadId,
+        ordinal: 1,
+        providerInstanceId: instanceId,
+        modelSelection,
+        providerThreadId,
+        userMessageId: messageId,
+        rootNodeId,
+        activeAttemptId: attemptId,
+        status: "starting",
+        requestedAt: now,
+        startedAt: null,
+        completedAt: null,
+        checkpointId: null,
+        contextHandoffId: null,
+      },
+    ],
+    attempts: [
+      {
+        id: attemptId,
+        runId,
+        rootNodeId,
+        attemptOrdinal: 1,
+        providerInstanceId: instanceId,
+        providerThreadId,
+        providerTurnId: null,
+        reason: "initial",
+        status: "pending",
+        startedAt: null,
+        completedAt: null,
+      },
+    ],
+    nodes: [
+      {
+        id: rootNodeId,
+        threadId,
+        runId,
+        parentNodeId: null,
+        rootNodeId,
+        kind: "root_turn",
+        status: "pending",
+        countsForRun: true,
+        providerThreadId,
+        providerTurnId: null,
+        nativeItemRef: null,
+        runtimeRequestId: null,
+        checkpointScopeId,
+        startedAt: null,
+        completedAt: null,
+      },
+    ],
+    providerThreads: [providerThread],
+    messages: [
+      {
+        id: messageId,
+        threadId,
+        runId,
+        nodeId: rootNodeId,
+        role: "user",
+        text: "Try the other approach",
+        attachments: [],
+        streaming: false,
+        createdBy: "user",
+        creationSource: "web",
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    checkpointScopes: [
+      {
+        id: checkpointScopeId,
+        threadId,
+        runId,
+        nodeId: rootNodeId,
+        parentScopeId: null,
+        providerThreadId,
+        kind: "root_run",
+        ordinalWithinParent: 0,
+        advancesAppRunCount: true,
+        cwd: "/tmp/fork-fallback",
+        createdAt: now,
+      },
+    ],
+    providerSessions: [],
+    providerTurns: [],
+    contextHandoffs: [],
+    contextTransfers: [forkTransfer],
+    turnItems: [],
+    visibleTurnItems: [],
+    runtimeRequests: [],
+    subagents: [],
+    plans: [],
+    checkpoints: [],
+    updatedAt: now,
+  } as unknown as OrchestrationV2ThreadProjection;
+  const targetRow = (
+    id: string,
+    runId: RunId | null,
+    visibility: "local" | "inherited",
+    type: OrchestrationV2TurnItem["type"] = "assistant_message",
+  ) => ({ visibility, item: { id: TurnItemId.make(id), runId, type } });
+  // The fork's own timeline: inherited rows up to the fork point, then its own.
+  const targetRows = [
+    targetRow("item-from-grandparent", RunId.make("run-fork-fallback-grandparent"), "inherited"),
+    targetRow("item-imported", null, "inherited"),
+    targetRow("item-reasoning", sourceRun.id, "inherited", "reasoning"),
+    targetRow("item-kept", sourceRun.id, "inherited"),
+    targetRow("item-target-prompt", runId, "local", "user_message"),
+  ];
+  const events: Array<OrchestrationV2DomainEvent> = [];
+  const commit = (incoming: ReadonlyArray<OrchestrationV2DomainEvent>) => {
+    for (const event of incoming) {
+      expect(isDomainEvent(event)).toBe(true);
+      events.push(event);
+      projection = ProjectionStore.applyToProjection(projection, event);
+    }
+  };
+  const handoffId = ContextHandoffId.make("handoff-fork-fallback");
+  const prepareProviderHandoff = vi.fn(
+    (
+      handoffInput: Parameters<
+        ContextHandoffService.ContextHandoffServiceV2Shape["prepareProviderHandoff"]
+      >[0],
+    ) =>
+      Effect.succeed({
+        id: handoffId,
+        transferId: handoffInput.transferId,
+        threadId: handoffInput.threadId,
+        targetRunId: handoffInput.targetRunId,
+        fromProviderThreadIds: handoffInput.fromProviderThreadIds,
+        toProviderThreadId: handoffInput.toProviderThreadId,
+        coveredRunOrdinals: handoffInput.coveredRunOrdinals,
+        strategy: handoffInput.strategy,
+        status: "ready",
+        summaryMessageId: null,
+        summaryText: "Earlier conversation",
+        createdByProviderInstanceId: handoffInput.toProviderInstanceId,
+        createdAt: handoffInput.createdAt,
+        updatedAt: handoffInput.createdAt,
+      } satisfies OrchestrationV2ContextHandoff),
+  );
+  const forkThread = vi.fn(() =>
+    Effect.fail(
+      new ProviderAdapterEventStreamError({
+        driver,
+        providerSessionId,
+        cause: "no SDK assistant message cursor was recorded for that turn",
+      }),
+    ),
+  );
+  const ensureThread = vi.fn(() =>
+    Effect.succeed({
+      ...providerThread,
+      nativeThreadRef: { driver, nativeId: "fresh-claude-session", strength: "strong" as const },
+    }),
+  );
+  const session = {
+    driver,
+    providerSession: {
+      id: providerSessionId,
+      driver,
+      providerInstanceId: instanceId,
+      status: "ready",
+      cwd: "/tmp/fork-fallback",
+      model: null,
+      capabilities: CodexProviderCapabilitiesV2,
+      createdAt: now,
+      updatedAt: now,
+      lastError: null,
+    },
+    forkThread,
+    ensureThread,
+  };
+  const startRootRun = vi.fn<
+    (input: RunExecutionService.RunExecutionServiceV2StartRootRunInput) => Effect.Effect<void>
+  >(() => Effect.void);
+  const turnStartContext = () => Effect.succeed({ ...projection, hasConversation: true });
+  const layer = ProviderTurnStart.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({ prepareProviderHandoff }),
+        Layer.mock(EventSink.EventSinkV2)({
+          write: ({ events: incoming }) =>
+            Effect.sync(() => {
+              commit(incoming);
+              return { storedEvents: [] } as never;
+            }),
+          writeIfRunCurrent: ({ events: incoming }) =>
+            Effect.sync(() => {
+              commit(incoming);
+              return { committed: true, storedEvents: [] } as never;
+            }),
+        }),
+        IdAllocator.layer,
+        FileSystem.layerNoop({}),
+        Layer.mock(GitWorkflow.GitWorkflowService)({}),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getTurnStartContext: turnStartContext,
+          getRuntimeRecoveryProjection: turnStartContext,
+          getThreadRecords: () =>
+            Effect.succeed({
+              runs: [
+                {
+                  ...sourceRun,
+                  status: "completed",
+                  providerInstanceId: instanceId,
+                  providerThreadId: sourceProviderThreadId,
+                  activeAttemptId: null,
+                },
+                {
+                  ...laterSourceRun,
+                  status: "completed",
+                  providerInstanceId: instanceId,
+                  providerThreadId: sourceProviderThreadId,
+                  activeAttemptId: null,
+                },
+              ],
+              providerThreads: [{ ...providerThread, id: sourceProviderThreadId }],
+              attempts: [],
+              providerTurns: [],
+            } as never),
+          getThreadProjection: (requested) =>
+            requested === threadId
+              ? Effect.succeed({ visibleTurnItems: targetRows } as never)
+              : Effect.die("The fallback reads the fork's own inherited rows"),
+        }),
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+          open: () => Effect.succeed(session as never),
+        }),
+        Layer.mock(ProviderAuthService.ProviderAuthService)({
+          tryHandlePromptCommand: () => Effect.succeed(false),
+        }),
+        Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
+        Layer.mock(RuntimePolicy.RuntimePolicyV2)({
+          resolve: () => Effect.succeed({ cwd: "/tmp/fork-fallback" } as never),
+        }),
+      ),
+    ),
+  );
+  const startWith = (willRetry: boolean) =>
+    Effect.gen(function* () {
+      yield* (yield* ProviderTurnStart.ProviderTurnStartServiceV2).start({
+        threadId,
+        runId,
+        willRetry,
+      });
+    }).pipe(Effect.provide(layer));
+  return {
+    transferId,
+    handoffId,
+    sourceProviderThreadId,
+    forkThread,
+    ensureThread,
+    prepareProviderHandoff,
+    startRootRun,
+    events,
+    projection: () => projection,
+    start: startWith(false),
+    startWithRetry: startWith(true),
+  };
+}
+
+effectIt.effect("continues a fork from the source transcript when the native fork fails", () =>
+  Effect.gen(function* () {
+    const harness = makeNativeForkFallbackHarness();
+
+    yield* harness.start;
+
+    expect(harness.forkThread).toHaveBeenCalledOnce();
+    expect(harness.ensureThread).toHaveBeenCalledOnce();
+    const handoffInput = harness.prepareProviderHandoff.mock.calls[0]?.[0];
+    expect(handoffInput).toMatchObject({
+      transferId: harness.transferId,
+      fromProviderThreadIds: [harness.sourceProviderThreadId],
+      coveredRunOrdinals: { from: 1, to: 1 },
+      strategy: "full_thread_summary",
+    });
+    // The inherited conversation goes over; reasoning and the fork's own prompt do not.
+    expect(handoffInput?.items.map((item) => item.id)).toEqual([
+      "item-from-grandparent",
+      "item-imported",
+      "item-kept",
+    ]);
+    const projection = harness.projection();
+    expect(projection.contextTransfers).toMatchObject([
+      {
+        id: harness.transferId,
+        status: "resolved_portable",
+        resolution: { strategy: "portable_context", contextHandoffId: harness.handoffId },
+      },
+    ]);
+    expect(projection.contextTransfers[0]?.error).toContain("Native fork failed");
+    expect(projection.runs[0]?.status).toBe("running");
+    expect(projection.providerThreads[0]).toMatchObject({
+      nativeThreadRef: { nativeId: "fresh-claude-session" },
+      forkedFrom: null,
+    });
+    expect(harness.startRootRun).toHaveBeenCalledOnce();
+  }),
+);
+
+effectIt.effect("retries a failed native fork before falling back to the transcript", () =>
+  Effect.gen(function* () {
+    const harness = makeNativeForkFallbackHarness();
+
+    const error = yield* harness.startWithRetry.pipe(Effect.flip);
+
+    expect(error._tag).toBe("ProviderTurnStartError");
+    expect(harness.ensureThread).not.toHaveBeenCalled();
+    expect(harness.prepareProviderHandoff).not.toHaveBeenCalled();
+    expect(harness.events).toEqual([]);
+  }),
+);
