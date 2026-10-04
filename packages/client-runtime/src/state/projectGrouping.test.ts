@@ -190,6 +190,28 @@ describe("buildProjectGroups", () => {
     ]);
   });
 
+  it("groups folders without a git remote by path across environments", () => {
+    const laptop = makeProject("work-laptop", "/home/me/Work", { repositoryIdentity: null });
+    const server = makeProject("work-server", "/home/me/Work/", {
+      environmentId: EnvironmentId.make("environment-server"),
+      repositoryIdentity: null,
+    });
+    const elsewhere = makeProject("notes", "/home/me/notes", { repositoryIdentity: null });
+
+    const grouped = buildProjectGroups({
+      projects: [laptop, server, elsewhere],
+      settings: settings("repository"),
+    });
+    expect(grouped.map((group) => group.members.map((member) => member.project.id))).toEqual([
+      ["work-laptop", "work-server"],
+      ["notes"],
+    ]);
+
+    expect(
+      buildProjectGroups({ projects: [laptop, server], settings: settings("separate") }),
+    ).toHaveLength(2);
+  });
+
   it("dedupes stale registrations at one physical path using the freshest project", () => {
     const stale = makeProject("stale", "/work/t3code", {
       repositoryIdentity: null,
