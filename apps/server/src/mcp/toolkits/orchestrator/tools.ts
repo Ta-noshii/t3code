@@ -1,4 +1,5 @@
 import {
+  OrchestratorMcpCapabilitiesInput,
   OrchestratorMcpCapabilitiesResult,
   OrchestratorMcpCreateThreadsInput,
   OrchestratorMcpCreateThreadsResult,
@@ -44,7 +45,8 @@ const threadMetadataDependencies = [
 
 const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description:
-    "List the V2 provider instances and their current models from the same live catalog as the composer, including configured custom models, inherited runtime settings, and app-owned orchestration features available to this T3 thread. For a separate top-level thread in a new or existing worktree, use t3_thread_launch with workspaceStrategy.",
+    "List the V2 provider instances and their current models from the same live catalog as the composer, including configured custom models, inherited runtime settings, and app-owned orchestration features available to this T3 thread. By default it lists only the models in the server's orchestratorModels setting (plus this thread's own model) and only providers that can run child tasks; hiddenModelCount says how many were left out. Pass all=true for the whole catalog. delegate_task accepts any model in the catalog either way. For a separate top-level thread in a new or existing worktree, use t3_thread_launch with workspaceStrategy.",
+  parameters: OrchestratorMcpCapabilitiesInput,
   success: OrchestratorMcpCapabilitiesResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",

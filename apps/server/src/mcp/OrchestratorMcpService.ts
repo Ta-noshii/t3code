@@ -11,6 +11,7 @@ import {
   type OrchestrationV2ThreadShell,
   type OrchestrationV2TurnItem,
   OrchestratorMcpFailure,
+  type OrchestratorMcpCapabilitiesInput,
   type OrchestratorMcpCapabilitiesResult,
   type OrchestratorMcpCreateThreadsInput,
   type OrchestratorMcpCreateThreadsResult,
@@ -70,6 +71,7 @@ import {
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -92,6 +94,7 @@ type TerminalTaskStatus = Extract<
 export interface OrchestratorMcpServiceShape {
   readonly capabilities: (
     scope: McpInvocationScope,
+    input?: OrchestratorMcpCapabilitiesInput,
   ) => Effect.Effect<OrchestratorMcpCapabilitiesResult, OrchestratorMcpFailure>;
   readonly delegateTask: (
     scope: McpInvocationScope,
@@ -760,6 +763,7 @@ const make = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const providerAdapters = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
   const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
+  const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
 
   const requireCapability = (scope: McpInvocationScope) =>
     scope.capabilities.has("orchestration")
@@ -876,6 +880,18 @@ const make = Effect.gen(function* () {
     });
 
   const loadProviders = providerRegistry.getProviders;
+
+  /**
+   * The orchestratorModels server setting. An unreadable settings file lists
+   * everything: a short list is a convenience, and hiding models on a read
+   * error would look like they vanished.
+   */
+  const loadOrchestratorModels = Option.isNone(serverSettings)
+    ? Effect.succeed([] as ReadonlyArray<{ provider: string; model: string }>)
+    : serverSettings.value.getSettings.pipe(
+        Effect.map((settings) => settings.orchestratorModels),
+        Effect.orElseSucceed(() => [] as ReadonlyArray<{ provider: string; model: string }>),
+      );
 
   /**
    * Instance ids the adapter registry resolves — the same lookup a
@@ -1320,40 +1336,60 @@ const make = Effect.gen(function* () {
           );
         return { scheduledTaskId: existing.id, deleted: true };
       }),
-    capabilities: (scope) =>
+    capabilities: (scope, input) =>
       Effect.gen(function* () {
         yield* requireCapability(scope);
         const parent = yield* loadProjection(scope.threadId);
         const providers = yield* loadProviders;
         const orchestrationCapableInstanceIds = yield* loadOrchestrationCapableInstanceIds();
+        const listed = input?.all === true ? [] : yield* loadOrchestratorModels;
+        const curated = input?.all !== true;
+        const inherited = parent.thread.modelSelection;
+        const shown = (instanceId: string, model: string) =>
+          listed.length === 0 ||
+          (instanceId === inherited.instanceId && model === inherited.model) ||
+          listed.some((entry) => entry.provider === instanceId && entry.model === model);
+        let hiddenModelCount = 0;
+        const entries = providers.flatMap((provider) => {
+          const constraints = providerConstraints(
+            provider,
+            orchestrationCapableInstanceIds.has(provider.instanceId),
+          );
+          const models = provider.models.filter((model) =>
+            curated ? shown(provider.instanceId, model.slug) : true,
+          );
+          const usable = constraints.length === 0;
+          if (curated && (!usable || models.length === 0)) {
+            hiddenModelCount += provider.models.length;
+            return [];
+          }
+          hiddenModelCount += provider.models.length - models.length;
+          return [{ provider, models, constraints }];
+        });
         return {
           parentThreadId: scope.threadId,
           inheritedProviderInstanceId: parent.thread.modelSelection.instanceId,
           inheritedModel: parent.thread.modelSelection.model,
           runtimeMode: parent.thread.runtimeMode,
           interactionMode: parent.thread.interactionMode,
-          providers: providers.map((provider) => {
-            const constraints = providerConstraints(
-              provider,
-              orchestrationCapableInstanceIds.has(provider.instanceId),
-            );
+          providers: entries.map(({ provider, models, constraints }) => {
             return {
               providerInstanceId: provider.instanceId,
               driverKind: provider.driver,
-              displayName: provider?.displayName ?? null,
-              models:
-                provider?.models.map((model) => ({
-                  id: model.slug,
-                  label: model.name ?? null,
-                  ...(model.capabilities?.optionDescriptors === undefined
-                    ? {}
-                    : { options: model.capabilities.optionDescriptors }),
-                })) ?? [],
+              displayName: provider.displayName ?? null,
+              models: models.map((model) => ({
+                id: model.slug,
+                label: model.name ?? null,
+                ...(model.capabilities?.optionDescriptors === undefined
+                  ? {}
+                  : { options: model.capabilities.optionDescriptors }),
+              })),
               canRunChildTask: constraints.length === 0,
               canRunCrossProviderChildTask: constraints.length === 0,
               constraints: [...constraints],
             };
           }),
+          ...(hiddenModelCount > 0 ? { hiddenModelCount } : {}),
           features: {
             appOwnedSubagents: true,
             asyncPolling: true,

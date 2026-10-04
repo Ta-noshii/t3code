@@ -1238,6 +1238,18 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
   ),
   /**
+   * Models the orchestrator_capabilities MCP tool lists, as provider instance
+   * and model slug pairs. Empty lists every model. The full catalog stays one
+   * `all: true` away, and delegate_task accepts any model either way; this
+   * only keeps the tool's answer short.
+   */
+  orchestratorModels: Schema.Array(
+    Schema.Struct({
+      provider: ProviderInstanceId,
+      model: TrimmedNonEmptyString,
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /**
    * Per-project overrides of the keys in `PROJECT_SCOPED_SERVER_SETTING_KEYS`.
    * The source of truth for project settings; `projectAgentBrowserAccessOverrides`,
    * `projectAutoPullOverrides` and `projectScriptOverrides` are derived views
@@ -1617,6 +1629,14 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  orchestratorModels: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        provider: ProviderInstanceId,
+        model: TrimmedNonEmptyString,
+      }),
+    ),
+  ),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   /**
    * Per-project entry replacement: each entry replaces that project's whole

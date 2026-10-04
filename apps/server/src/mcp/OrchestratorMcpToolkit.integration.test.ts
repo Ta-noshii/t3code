@@ -1343,12 +1343,6 @@ describe("orchestrator MCP toolkit", () => {
                   providerInstanceId: claudeInstanceId,
                   canRunCrossProviderChildTask: true,
                 }),
-                // No opencode adapter is registered in this harness, so the
-                // capability view must not claim delegation can target it.
-                expect.objectContaining({
-                  providerInstanceId: "opencode",
-                  canRunChildTask: false,
-                }),
                 // Models advertise their option descriptors so agents can
                 // discover valid target.options ids and values.
                 expect.objectContaining({
@@ -1360,6 +1354,23 @@ describe("orchestrator MCP toolkit", () => {
                     }),
                   ],
                 }),
+              ]),
+            });
+
+            // No opencode adapter is registered in this harness, so the default
+            // view leaves it out and only all=true shows it, marked unusable.
+            const defaultView = capabilities.structuredContent as {
+              providers: ReadonlyArray<{ providerInstanceId: string }>;
+              hiddenModelCount?: number;
+            };
+            expect(defaultView.providers.map((entry) => entry.providerInstanceId)).not.toContain(
+              "opencode",
+            );
+            expect(defaultView.hiddenModelCount).toBeGreaterThan(0);
+            const everything = yield* invoke("orchestrator_capabilities", { all: true });
+            expect(everything.structuredContent).toMatchObject({
+              providers: expect.arrayContaining([
+                expect.objectContaining({ providerInstanceId: "opencode", canRunChildTask: false }),
               ]),
             });
 
