@@ -296,7 +296,11 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
-import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
+import {
+  ContextWindowMeter,
+  ContextWindowMeterPlaceholder,
+  type ContextWindowAutoCompactTarget,
+} from "./ContextWindowMeter";
 import {
   providerSupportsManualCompaction,
   resolveContextWindowModelDisplayName,
@@ -1364,6 +1368,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   activeContextWindow: ContextWindowSnapshot | null;
   reserveContextWindowMeter: boolean;
   activeThreadModelDisplayName: string | null;
+  autoCompactTarget: ContextWindowAutoCompactTarget | null;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -1408,6 +1413,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           compactDisabled={props.compactDisabled}
           compactDisabledReason={props.compactDisabledReason}
           compactAfterTurn={props.isRunning}
+          autoCompactTarget={props.autoCompactTarget}
         />
       ) : props.reserveContextWindowMeter ? (
         <ContextWindowMeterPlaceholder />
@@ -2427,6 +2433,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const activeThreadModelDisplayName = useMemo(
     () => resolveContextWindowModelDisplayName(activeThreadModelSelection, modelOptionsByInstance),
     [activeThreadModelSelection, modelOptionsByInstance],
+  );
+  // The meter reports the thread's own provider, so the auto-compact choice
+  // edits that instance on the thread's environment, not the picker's draft.
+  const contextWindowInstanceId =
+    activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId ?? null;
+  const contextWindowDriverKind =
+    contextWindowInstanceId === null
+      ? null
+      : (providerInstanceEntries.find((entry) => entry.instanceId === contextWindowInstanceId)
+          ?.driverKind ?? null);
+  const autoCompactTarget = useMemo<ContextWindowAutoCompactTarget | null>(
+    () =>
+      contextWindowInstanceId !== null && contextWindowDriverKind === "claudeAgent"
+        ? {
+            environmentId,
+            instanceId: contextWindowInstanceId,
+            driverKind: contextWindowDriverKind,
+          }
+        : null,
+    [contextWindowDriverKind, contextWindowInstanceId, environmentId],
   );
   const reserveContextWindowMeter = shouldReserveContextWindowMeter({
     meterEnabled: settings.contextWindowMeterEnabled,
@@ -7762,6 +7788,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     }
                     reserveContextWindowMeter={reserveContextWindowMeter}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
+                    autoCompactTarget={autoCompactTarget}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     canInterrupt={canInterrupt}
