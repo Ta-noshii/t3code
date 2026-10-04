@@ -157,7 +157,7 @@ export function formatContextWindowCost(cost: {
 const AUTO_COMPACT_WINDOW_MIN = 100_000;
 const AUTO_COMPACT_WINDOW_MAX = 1_000_000;
 const AUTO_COMPACT_WINDOW_PRESETS = [
-  100_000, 150_000, 200_000, 300_000, 400_000, 500_000, 750_000, 1_000_000,
+  100_000, 150_000, 200_000, 250_000, 300_000, 400_000, 500_000, 750_000, 1_000_000,
 ] as const;
 
 export interface AutoCompactWindowOption {

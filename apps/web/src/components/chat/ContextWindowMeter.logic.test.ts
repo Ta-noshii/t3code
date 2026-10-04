@@ -180,6 +180,7 @@ describe("buildAutoCompactWindowOptions", () => {
       "100k",
       "150k",
       "200k",
+      "250k",
       "300k",
       "400k",
       "500k",
@@ -198,7 +199,7 @@ describe("buildAutoCompactWindowOptions", () => {
   });
 
   it("offers every preset when the context window is unknown", () => {
-    expect(buildAutoCompactWindowOptions({ maxTokens: null, current: "" })).toHaveLength(9);
+    expect(buildAutoCompactWindowOptions({ maxTokens: null, current: "" })).toHaveLength(10);
   });
 
   it("keeps a saved value that is not a preset, in order", () => {
