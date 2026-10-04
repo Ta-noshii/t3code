@@ -124,6 +124,13 @@ This removes the selected message and later conversation from the active thread
 and provider history. It does not undo external actions or separate provider
 memory. The action is available only when the provider supports rewind.
 
+To keep the original thread, choose **Edit in new thread** instead. It opens a
+new thread with the conversation up to that message and puts the message and its
+attachments in the composer, unsent. The provider continues its own copy of the
+session when it can fork one; otherwise it receives the earlier conversation as
+context. A steer cannot be edited this way, because it belongs to the turn it
+joined.
+
 ## Prompt stash
 
 On web and desktop, press `Cmd+S` on macOS or `Ctrl+S` on Windows and Linux to save

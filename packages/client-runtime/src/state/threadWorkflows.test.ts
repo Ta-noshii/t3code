@@ -2,9 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 
 import {
+  buildEarlierConversationTranscript,
   canDetachThreadProviderSession,
   canForkProjectedAssistantItem,
   deriveThreadQueueWorkflowState,
+  planEditInNewThread,
   resolveLatestMergeBackRun,
   threadSupportsProviderHandoff,
 } from "./threadWorkflows.ts";
@@ -421,4 +423,105 @@ describe("thread workflows", () => {
       expect(resolveLatestMergeBackRun(projection)).toBeNull();
     },
   );
+});
+
+describe("edit in new thread", () => {
+  const loaded = { hasEarlierHistory: false };
+  const row = (
+    sourceThreadId: string,
+    item: {
+      readonly type: "user_message" | "assistant_message" | "reasoning";
+      readonly id: string;
+      readonly runId: string | null;
+      readonly text?: string;
+      readonly inputIntent?: string;
+      readonly attachments?: ReadonlyArray<{ readonly name: string }>;
+    },
+  ) =>
+    ({
+      sourceThreadId,
+      item: {
+        ...item,
+        messageId: item.id,
+        text: item.text ?? "",
+        attachments: item.attachments ?? [],
+      },
+    }) as never;
+
+  it("forks at the end of the run that answered the previous message", () => {
+    const rows = [
+      row("parent", { type: "user_message", id: "u1", runId: "r1", inputIntent: "turn_start" }),
+      row("parent", { type: "assistant_message", id: "a1", runId: "r1" }),
+      row("fork", { type: "user_message", id: "u2", runId: "r2", inputIntent: "turn_start" }),
+      row("fork", { type: "reasoning", id: "think", runId: "r2" }),
+      row("fork", { type: "assistant_message", id: "a2", runId: "r2" }),
+      row("fork", { type: "user_message", id: "u3", runId: "r3", inputIntent: "queued_turn" }),
+    ];
+
+    expect(planEditInNewThread(rows, "u3" as never, loaded)).toMatchObject({
+      type: "fork",
+      sourceThreadId: "fork",
+      runId: "r2",
+      message: { messageId: "u3" },
+    });
+    // An inherited answer forks the parent thread it came from.
+    expect(planEditInNewThread(rows, "u2" as never, loaded)).toMatchObject({
+      type: "fork",
+      sourceThreadId: "parent",
+      runId: "r1",
+    });
+  });
+
+  it("starts empty with a transcript when no run precedes the message", () => {
+    const rows = [
+      row("t", { type: "user_message", id: "u1", runId: null, text: "Old question" }),
+      row("t", { type: "assistant_message", id: "a1", runId: null, text: "Old answer" }),
+      row("t", { type: "user_message", id: "u2", runId: null, inputIntent: "turn_start" }),
+    ];
+
+    const plan = planEditInNewThread(rows, "u2" as never, loaded);
+    expect(plan?.type).toBe("fresh");
+    expect(plan?.type === "fresh" ? plan.earlierMessages.map((item) => item.id) : []).toEqual([
+      "u1",
+      "a1",
+    ]);
+    expect(planEditInNewThread(rows.slice(0, 1), "u1" as never, loaded)).toMatchObject({
+      type: "fresh",
+      earlierMessages: [],
+    });
+    // A run may precede the loaded window; never drop that history silently.
+    expect(planEditInNewThread(rows, "u2" as never, { hasEarlierHistory: true })).toEqual({
+      type: "history_not_loaded",
+    });
+  });
+
+  it("does not cut a steer out of the run it joined", () => {
+    const rows = [
+      row("t", { type: "user_message", id: "u1", runId: "r1", inputIntent: "turn_start" }),
+      row("t", { type: "user_message", id: "s1", runId: "r1", inputIntent: "steer" }),
+    ];
+
+    expect(planEditInNewThread(rows, "s1" as never, loaded)).toBeNull();
+    expect(planEditInNewThread(rows, "missing" as never, loaded)).toBeNull();
+  });
+
+  it("writes the transcript with context links reduced to their labels", () => {
+    const transcript = buildEarlierConversationTranscript({
+      title: "Parser",
+      messages: [
+        {
+          type: "user_message",
+          text: "Read [parser.ts](t3-context://v1/mention/ctx_1)",
+          attachments: [{ name: "log.txt" }],
+        },
+        { type: "assistant_message", text: "Done." },
+        { type: "assistant_message", text: "   " },
+      ] as never,
+    });
+
+    expect(transcript).toContain('continues "Parser"');
+    expect(transcript).toContain("## User\n\nRead parser.ts\n\n(Attached: log.txt)");
+    expect(transcript).toContain("## Assistant\n\nDone.");
+    expect(transcript.match(/## Assistant/g)).toHaveLength(1);
+  });
 });

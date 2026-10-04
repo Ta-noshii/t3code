@@ -103,7 +103,11 @@ import {
   deriveThreadRuntime,
   presentPendingBackgroundWork,
 } from "@t3tools/client-runtime/state/thread-execution";
-import { threadSupportsProviderHandoff } from "@t3tools/client-runtime/state/thread-workflows";
+import {
+  buildEarlierConversationTranscript,
+  planEditInNewThread,
+  threadSupportsProviderHandoff,
+} from "@t3tools/client-runtime/state/thread-workflows";
 import {
   codexFeedbackMessage,
   parseCodexFeedbackCommand,
@@ -365,6 +369,7 @@ import {
   composerDraftHasUserContent,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
+  type ComposerThreadTarget,
   type DraftThreadEnvMode,
   useComposerDraftStore,
   DraftId,
@@ -1515,6 +1520,33 @@ function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | n
 
 /** Runs with a workspace preparation retry in flight, across ChatView instances. */
 const retryingWorkspacePreparationRunIds = new Set<RunId>();
+
+/** Puts a message's downloaded attachments back into a composer, images as previews. */
+function addRestoredComposerAttachments(
+  target: ComposerThreadTarget,
+  files: ReadonlyArray<File>,
+  attachments: ChatMessage["attachments"],
+): void {
+  const images: ComposerImageAttachment[] = [];
+  const restoredFiles: ComposerFileAttachment[] = [];
+  files.forEach((file, index) => {
+    const attachment = {
+      id: randomUUID(),
+      name: file.name,
+      mimeType: file.type,
+      sizeBytes: file.size,
+      file,
+    };
+    if (attachments?.[index]?.type === "image") {
+      images.push({ ...attachment, type: "image", previewUrl: URL.createObjectURL(file) });
+    } else {
+      restoredFiles.push({ ...attachment, type: "file" });
+    }
+  });
+  const store = useComposerDraftStore.getState();
+  store.addImages(target, images, { allowDuplicates: true });
+  store.addFiles(target, restoredFiles, { allowDuplicates: true });
+}
 
 export default function ChatView(props: ChatViewProps) {
   const {
@@ -8037,24 +8069,7 @@ export default function ChatView(props: ChatViewProps) {
               ? `${currentPrompt}\n\n${restoredPrompt}`
               : restoredPrompt;
         store.setPrompt(composerDraftTarget, nextPrompt);
-        const images: ComposerImageAttachment[] = [];
-        const restoredFiles: ComposerFileAttachment[] = [];
-        files.forEach((file, index) => {
-          const attachment = {
-            id: randomUUID(),
-            name: file.name,
-            mimeType: file.type,
-            sizeBytes: file.size,
-            file,
-          };
-          if (message.attachments?.[index]?.type === "image") {
-            images.push({ ...attachment, type: "image", previewUrl: URL.createObjectURL(file) });
-          } else {
-            restoredFiles.push({ ...attachment, type: "file" });
-          }
-        });
-        store.addImages(composerDraftTarget, images, { allowDuplicates: true });
-        store.addFiles(composerDraftTarget, restoredFiles, { allowDuplicates: true });
+        addRestoredComposerAttachments(composerDraftTarget, files, message.attachments);
         if (currentRouteThreadKeyRef.current === routeThreadKey) {
           promptRef.current = nextPrompt;
           composerRef.current?.resetCursorState({ prompt: nextPrompt, cursor: nextPrompt.length });
@@ -8202,6 +8217,142 @@ export default function ChatView(props: ChatViewProps) {
       environmentId,
       forkThreadFromRun,
       navigate,
+      setThreadError,
+    ],
+  );
+  const onEditInNewThread = useCallback(
+    async (messageId: MessageId) => {
+      if (!activeThread) return;
+      if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
+        setThreadError(
+          activeThread.id,
+          `Reconnect ${activeEnvironmentUnavailableLabel} before editing in a new thread.`,
+        );
+        return;
+      }
+      if (phase === "running" || isSendBusy || isConnecting) {
+        setThreadError(
+          activeThread.id,
+          "Interrupt the current turn before editing in a new thread.",
+        );
+        return;
+      }
+      const plan = planEditInNewThread(serverVisibleTurnItems, messageId, {
+        hasEarlierHistory: serverThreadHistory.hasMoreHistory,
+      });
+      if (!plan) return;
+      if (plan.type === "history_not_loaded") {
+        setThreadError(
+          activeThread.id,
+          "Load the earlier messages at the top of this thread, then edit this message again.",
+        );
+        return;
+      }
+      setThreadError(activeThread.id, null);
+      try {
+        const connection = readPreparedConnection(environmentId);
+        if (!connection) throw new Error("The environment is not connected.");
+        const files = await prepareRevertedMessageAttachments({
+          message: plan.message,
+          environmentId,
+          httpBaseUrl: connection.httpBaseUrl,
+          createAssetUrl: createAttachmentAssetUrl,
+        });
+        let target: ComposerThreadTarget;
+        let targetThreadRef: ScopedThreadRef | null = null;
+        let prompt = recallableComposerPrompt(plan.message.text);
+        const transcriptFiles: File[] = [];
+        if (plan.type === "fork") {
+          const targetThreadId = newThreadId();
+          targetThreadRef = scopeThreadRef(environmentId, targetThreadId);
+          const result = await forkThreadFromRun({
+            environmentId,
+            input: {
+              sourceThreadId: plan.sourceThreadId,
+              targetThreadId,
+              runId: plan.runId,
+              title: `${activeThread.title} fork`,
+            },
+          });
+          if (result._tag === "Failure") {
+            if (isAtomCommandInterrupted(result)) return;
+            throw squashAtomCommandFailure(result);
+          }
+          if (!(await waitForThreadShell(targetThreadRef))) {
+            throw new Error(
+              "The new thread was created, but its data did not reach this client. Reconnect and open it from the sidebar.",
+            );
+          }
+          target = targetThreadRef;
+        } else {
+          // Nothing before the message ran in T3 (it is the first message, or the
+          // earlier history was imported), so there is no run to fork. The new thread
+          // starts in the same workspace and carries the earlier messages itself.
+          const draft = await handleNewThread(
+            scopeProjectRef(activeThread.environmentId, activeThread.projectId),
+            {
+              branch: activeThread.branch,
+              worktreePath: activeThread.worktreePath,
+              envMode: activeThread.worktreePath ? "worktree" : "local",
+              startFromOrigin: false,
+            },
+          );
+          if (!draft) throw new Error("Could not start a new thread.");
+          target = draft.draftId;
+          if (plan.earlierMessages.length > 0) {
+            const transcript = buildEarlierConversationTranscript({
+              title: activeThread.title,
+              messages: plan.earlierMessages,
+            });
+            const canAttachFiles =
+              serverConfig?.environment.capabilities.fileAttachments !== undefined;
+            if (canAttachFiles) {
+              transcriptFiles.push(
+                new File([transcript], "earlier-conversation.md", { type: "text/markdown" }),
+              );
+            } else {
+              prompt = prompt.length > 0 ? `${transcript}\n\n---\n\n${prompt}` : transcript;
+            }
+            toastManager.add({
+              type: "info",
+              title: "Earlier messages go with your next message",
+              description: canAttachFiles
+                ? `The ${plan.earlierMessages.length} earlier messages are attached as earlier-conversation.md.`
+                : `The ${plan.earlierMessages.length} earlier messages were added to the prompt.`,
+            });
+          }
+        }
+        useComposerDraftStore.getState().setPrompt(target, prompt);
+        addRestoredComposerAttachments(target, transcriptFiles, undefined);
+        addRestoredComposerAttachments(target, files, plan.message.attachments);
+        if (targetThreadRef) {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(targetThreadRef),
+          });
+        }
+      } catch (error) {
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to edit in a new thread.",
+        );
+      }
+    },
+    [
+      activeEnvironmentUnavailable,
+      activeEnvironmentUnavailableLabel,
+      activeThread,
+      createAttachmentAssetUrl,
+      environmentId,
+      forkThreadFromRun,
+      handleNewThread,
+      isConnecting,
+      isSendBusy,
+      navigate,
+      phase,
+      serverConfig,
+      serverThreadHistory.hasMoreHistory,
+      serverVisibleTurnItems,
       setThreadError,
     ],
   );
@@ -11027,6 +11178,7 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenThread={onOpenRelatedThread}
                 parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                 onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRun}
+                onEditInNewThread={paintOnlyDisplayedTimeline ? async () => {} : onEditInNewThread}
                 onRollbackCheckpoint={(input) => {
                   if (!paintOnlyDisplayedTimeline) void onRollbackCheckpoint(input);
                 }}

@@ -53,6 +53,17 @@ import {
   restartCancelledBackgroundWorkNote,
 } from "./RestartBackgroundNote.ts";
 
+/** The conversation item types `getTurnStartHistory` returns for handoffs. */
+const FORK_FALLBACK_ITEM_TYPES: ReadonlySet<OrchestrationV2TurnItem["type"]> = new Set([
+  "user_message",
+  "assistant_message",
+  "command_execution",
+  "error",
+  "run_interrupt_result",
+  "file_change",
+  "proposed_plan",
+]);
+
 export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStartError>()(
   "ProviderTurnStartError",
   {
@@ -602,6 +613,7 @@ export const layer: Layer.Layer<
           return undefined;
         });
       let effectiveHandoffs = handoffs;
+      let nativeForkFellBack = false;
       const loadedProviderThread = yield* Effect.gen(function* () {
         if (nativeForkTransfer !== undefined) {
           const sourceProjection = yield* projectionStore.getThreadRecords(
@@ -628,7 +640,7 @@ export const layer: Layer.Layer<
               cause: `Native fork transfer ${nativeForkTransfer.id} has no source provider execution.`,
             });
           }
-          return yield* loadFromProvider(
+          const forked = yield* Effect.result(
             session.forkThread({
               sourceProviderThread,
               sourceProviderTurns: sourceProjection.providerTurns,
@@ -640,6 +652,83 @@ export const layer: Layer.Layer<
                 : { providerTurnId: sourceProviderTurn.id }),
             }),
           );
+          if (forked._tag === "Success") return forked.success;
+          if (input.willRetry === true) return yield* forked.failure;
+
+          // A fork must not strand the new thread. When the provider cannot copy
+          // its session (no recorded cut point, missing session file), start a
+          // fresh one and hand it the source conversation up to the fork point.
+          yield* Effect.logWarning("Native fork failed; continuing the fork from its transcript", {
+            driver: session.driver,
+            sourceProviderThreadId: sourceProviderThread.id,
+            runId,
+            errorTag: forked.failure._tag,
+          });
+          const replacement = yield* loadFromProvider(
+            session.ensureThread({
+              threadId: projection.thread.id,
+              modelSelection: run.modelSelection,
+              runtimePolicy: resolvedRuntimePolicy,
+              providerSessionId,
+              existingProviderThread: { ...providerThread, nativeThreadRef: null },
+            }),
+          );
+          if (replacement === undefined) return undefined;
+          const createdAt = yield* DateTime.now;
+          const handoff = yield* contextHandoffService.prepareProviderHandoff({
+            threadId: projection.thread.id,
+            targetRunId: run.id,
+            transferId: nativeForkTransfer.id,
+            fromProviderThreadIds: [sourceProviderThread.id],
+            toProviderThreadId: providerThread.id,
+            fromProviderInstanceId: sourceRun.providerInstanceId,
+            toProviderInstanceId: run.providerInstanceId,
+            coveredRunOrdinals: { from: 1, to: sourceRun.ordinal },
+            strategy: "full_thread_summary",
+            runs: sourceProjection.runs,
+            // The fork shows the conversation it inherits from the source as
+            // inherited rows, cut at the fork point and kept stable if the
+            // source rewinds later. Those rows are exactly what to hand over.
+            items: (yield* projectionStore.getThreadProjection(
+              projection.thread.id,
+            )).visibleTurnItems.flatMap(({ visibility, item }) =>
+              visibility === "inherited" && FORK_FALLBACK_ITEM_TYPES.has(item.type) ? [item] : [],
+            ),
+            createdAt,
+          });
+          effectiveHandoffs = [handoff, ...effectiveHandoffs];
+          nativeForkFellBack = true;
+          yield* eventSink.write({
+            events: [
+              {
+                id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+                type: "context-handoff.updated",
+                threadId: projection.thread.id,
+                runId: run.id,
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: createdAt,
+                payload: handoff,
+              },
+              {
+                id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+                type: "context-transfer.updated",
+                threadId: projection.thread.id,
+                runId: run.id,
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: createdAt,
+                payload: {
+                  ...nativeForkTransfer,
+                  targetProviderInstanceId: run.providerInstanceId,
+                  targetRunId: run.id,
+                  status: "resolved_portable",
+                  resolution: { strategy: "portable_context", contextHandoffId: handoff.id },
+                  error: `Native fork failed: ${forked.failure.message || forked.failure._tag}`,
+                  updatedAt: createdAt,
+                },
+              },
+            ],
+          });
+          return replacement;
         }
         if (providerThread.nativeThreadRef === null) {
           // Hand the run's provider thread to the adapter so it adopts this
@@ -828,7 +917,7 @@ export const layer: Layer.Layer<
         firstRunOrdinal: providerThread.firstRunOrdinal ?? run.ordinal,
         lastRunOrdinal: run.ordinal,
         handoffIds: providerThread.handoffIds,
-        forkedFrom: providerThread.forkedFrom,
+        forkedFrom: nativeForkFellBack ? null : providerThread.forkedFrom,
         status: "active",
         createdAt: providerThread.createdAt,
         updatedAt: now,
@@ -873,7 +962,9 @@ export const layer: Layer.Layer<
           occurredAt: now,
           payload: runningProviderThread,
         },
-        ...(nativeForkTransfer === undefined || runningProviderThread.nativeThreadRef === null
+        ...(nativeForkTransfer === undefined ||
+        nativeForkFellBack ||
+        runningProviderThread.nativeThreadRef === null
           ? []
           : [
               {
