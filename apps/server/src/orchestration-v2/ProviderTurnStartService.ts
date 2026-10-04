@@ -1149,8 +1149,9 @@ export const layer: Layer.Layer<
           const sourceBusy = sourceProjection.runs.some(
             (candidate) => candidate.ordinal > sourceRun.ordinal && isActiveRun(candidate),
           );
+          let nativeForkError: string | null = null;
           if (!sourceBusy) {
-            return yield* loadFromProvider(
+            const forked = yield* Effect.result(
               session.forkThread({
                 sourceProviderThread,
                 sourceProviderTurns: sourceProjection.providerTurns,
@@ -1162,6 +1163,18 @@ export const layer: Layer.Layer<
                   : { providerTurnId: sourceProviderTurn.id }),
               }),
             );
+            if (forked._tag === "Success") return forked.success;
+            if (input.willRetry === true) return yield* forked.failure;
+            // A fork must not strand the new thread. When the provider cannot copy
+            // its session (no recorded cut point, missing session file), start a
+            // fresh one and hand it the source conversation up to the fork point.
+            yield* Effect.logWarning("Native fork failed; continuing the fork from its transcript", {
+              driver: session.driver,
+              sourceProviderThreadId: sourceProviderThread.id,
+              runId,
+              errorTag: forked.failure._tag,
+            });
+            nativeForkError = `Native fork failed: ${forked.failure.message || forked.failure._tag}`;
           }
           const sourceItems = yield* ContextHandoffService.readForkHistoryItems(
             projectionStore,
@@ -1193,7 +1206,11 @@ export const layer: Layer.Layer<
               modelSelection: run.modelSelection,
               runtimePolicy: resolvedRuntimePolicy,
               providerSessionId,
-              existingProviderThread: { ...providerThread, forkedFrom: null },
+              existingProviderThread:
+                nativeForkError === null
+                  ? { ...providerThread, forkedFrom: null }
+                  : { ...providerThread, forkedFrom: null, nativeThreadRef: null },
+              ...(nativeForkError === null ? {} : { forceNewNativeThread: true }),
             }),
           );
           if (loaded === undefined) return undefined;
@@ -1222,7 +1239,7 @@ export const layer: Layer.Layer<
                   targetProviderInstanceId: run.providerInstanceId,
                   status: "resolved_portable",
                   resolution: { strategy: "portable_context", contextHandoffId: handoff.id },
-                  error: null,
+                  error: nativeForkError,
                   updatedAt: createdAt,
                 },
               },
