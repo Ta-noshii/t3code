@@ -148,6 +148,13 @@ import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/sel
 import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
+  CLAUDE_SESSION_EXPORT_FORMAT,
+  ClaudeSessionExport,
+  claudeHomeDir,
+  exportClaudeSession,
+  importClaudeSession,
+} from "./claudeSessionTransfer.ts";
+import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
@@ -3364,11 +3371,58 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
       Effect.provideService(Path.Path, path),
     );
 
+  const usesServerClaudeHome = () => {
+    const home = claudeHomeDir(adapterOptions.environment);
+    return home !== null && home === claudeHomeDir(process.env);
+  };
+
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: adapterOptions.instanceId,
     driver: CLAUDE_PROVIDER,
     getCapabilities: () => Effect.succeed(ClaudeProviderCapabilitiesV2),
     planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
+    // The SDK's session helpers read the Claude home from process.env, the same
+    // limitation forkThread below has. An instance with its own home could
+    // export nothing or import into the wrong home, so it moves no session and
+    // the copy falls back to its imported history.
+    exportNativeThread: Effect.fn("ClaudeAdapterV2.exportNativeThread")(function* (input) {
+      const sessionId = input.providerThread.nativeThreadRef?.nativeId;
+      if (sessionId === undefined || sessionId === null || !usesServerClaudeHome()) return null;
+      // A rolled-back thread continues from this message until its next turn.
+      const upToMessageId = input.providerThread.nativeConversationHeadRef?.nativeId ?? undefined;
+      const data = yield* Effect.tryPromise({
+        try: () => exportClaudeSession(sessionId, { dir: input.cwd ?? undefined, upToMessageId }),
+        catch: (cause) =>
+          new ProviderAdapter.ProviderAdapterTransferThreadError({
+            driver: CLAUDE_PROVIDER,
+            operation: "export",
+            cause,
+          }),
+      });
+      return { format: CLAUDE_SESSION_EXPORT_FORMAT, data };
+    }),
+    importNativeThread: Effect.fn("ClaudeAdapterV2.importNativeThread")(function* (input) {
+      const transferError = (cause: unknown) =>
+        new ProviderAdapter.ProviderAdapterTransferThreadError({
+          driver: CLAUDE_PROVIDER,
+          operation: "import",
+          cause,
+        });
+      if (!usesServerClaudeHome()) {
+        return yield* transferError("This Claude instance uses its own Claude home.");
+      }
+      if (input.format !== CLAUDE_SESSION_EXPORT_FORMAT) {
+        return yield* transferError(`Unsupported Claude session format '${input.format}'.`);
+      }
+      const exported = yield* Schema.decodeUnknownEffect(ClaudeSessionExport)(input.data).pipe(
+        Effect.mapError(transferError),
+      );
+      const imported = yield* Effect.tryPromise({
+        try: () => importClaudeSession(exported, { dir: input.cwd }),
+        catch: transferError,
+      });
+      return { nativeThreadId: imported.sessionId, conversationHeadId: imported.headMessageId };
+    }),
     openSession: Effect.fn("ClaudeAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
