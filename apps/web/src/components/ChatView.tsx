@@ -109,6 +109,8 @@ import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReferenc
 import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import { useAtomValue } from "@effect/atom-react";
 import { type SetStateAction, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { HistoryIcon } from "lucide-react";
+import * as DateTime from "effect/DateTime";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
@@ -123,7 +125,7 @@ import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
-import { composerRequiresModifier } from "../composer-logic";
+import { composerRequiresModifier, latestPromptSuggestion } from "../composer-logic";
 import {
   derivePhase,
   deriveActivePlanState,
@@ -308,6 +310,7 @@ import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEn
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { useAgentOpenedPreviews } from "./preview/useAgentOpenedPreviews";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { useThreadRecap } from "./chat/useThreadRecap";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
 import {
@@ -522,6 +525,12 @@ export default function ChatView(props: ChatViewProps) {
   const activeProviderThread = serverProjection?.providerThreads.find(
     (thread) => thread.id === serverProjection.thread.activeProviderThreadId,
   );
+  const projectionRuns = serverProjection?.runs;
+  const projectionProviderTurns = serverProjection?.providerTurns;
+  const promptSuggestion =
+    projectionRuns && projectionProviderTurns
+      ? latestPromptSuggestion({ runs: projectionRuns, providerTurns: projectionProviderTurns })
+      : null;
   const activeThreadLiveTokenUsage = latestProviderTurnTokenUsage(
     serverProjection?.providerTurns ?? [],
     serverProjection,
@@ -2649,11 +2658,44 @@ export default function ChatView(props: ChatViewProps) {
           },
         })
       : null;
+  const latestCompletedRun = (() => {
+    const latest = projectionRuns?.reduce<(typeof projectionRuns)[number] | undefined>(
+      (current, run) => (current === undefined || run.ordinal > current.ordinal ? run : current),
+      undefined,
+    );
+    return latest?.status === "completed"
+      ? {
+          runId: latest.id,
+          completedAt: latest.completedAt === null ? null : DateTime.formatIso(latest.completedAt),
+        }
+      : null;
+  })();
+  const threadRecap = useThreadRecap({
+    environmentId: isServerThread ? environmentId : null,
+    threadId: isServerThread ? (activeThread?.id ?? null) : null,
+    ready: serverProjection !== null,
+    completedRun: latestCompletedRun,
+    idle: phase === "ready" && pendingApprovals.length === 0 && pendingUserInputs.length === 0,
+    supported: serverConfig?.environment.capabilities.threadRecap === true,
+  });
+  const threadRecapBannerItem: ComposerBannerStackItem | null =
+    threadRecap.recap === null
+      ? null
+      : {
+          id: `thread-recap:${activeThread?.id ?? "unknown"}`,
+          variant: "info",
+          icon: <HistoryIcon />,
+          title: "While you were away",
+          description: threadRecap.recap,
+          dismissLabel: "Dismiss recap",
+          onDismiss: threadRecap.dismiss,
+        };
   const composerBannerItems = (() => {
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const backgroundWorkItems = [childInputBanner, goalBanner, backgroundWorkBanner].filter(
       (item) => item !== null,
     );
+    const threadRecapItems = threadRecapBannerItem === null ? [] : [threadRecapBannerItem];
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
     const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
@@ -2664,6 +2706,7 @@ export default function ChatView(props: ChatViewProps) {
         ...projectCloneItems,
         ...systemComposerBannerItems,
         ...backgroundWorkItems,
+        ...threadRecapItems,
       ];
     }
     return [
@@ -2673,6 +2716,7 @@ export default function ChatView(props: ChatViewProps) {
       ...projectCloneItems,
       ...systemComposerBannerItems,
       ...backgroundWorkItems,
+      ...threadRecapItems,
       branchMismatchBannerItem({
         mismatchKey: activeBranchMismatchKey,
         mismatch: localCheckoutBranchMismatch,
@@ -3815,6 +3859,7 @@ export default function ChatView(props: ChatViewProps) {
                               activeTasksProgress={activeComposerTasksProgress}
                               activeTaskSteps={activeComposerTaskSteps}
                               compactThreadUnavailable={compactThreadUnavailable}
+                              promptSuggestion={promptSuggestion}
                               compactDisabled={compactDisabled}
                               compactDisabledReason={compactDisabledReason}
                               resolvedTheme={resolvedTheme}

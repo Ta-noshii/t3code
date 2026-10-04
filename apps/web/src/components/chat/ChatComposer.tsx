@@ -453,6 +453,8 @@ export interface ChatComposerProps {
 
   activeContextWindow: ContextWindowSnapshot | null;
   compactThreadUnavailable: boolean;
+  /** The provider's guess at the next prompt, offered while the composer is empty. */
+  promptSuggestion: string | null;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
 
@@ -590,6 +592,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProjectId,
     activeContextWindow,
     compactThreadUnavailable,
+    promptSuggestion,
     compactDisabled,
     compactDisabledReason,
     resolvedTheme,
@@ -1249,6 +1252,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const isChoiceOnlyPendingQuestion =
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
+  // Only an idle composer with nothing else to answer offers the suggestion.
+  const offeredPromptSuggestion =
+    phase === "ready" &&
+    !isComposerApprovalState &&
+    pendingUserInputs.length === 0 &&
+    !(showPlanFollowUpPrompt && activeProposedPlan) &&
+    !projectSelectionRequired &&
+    !showProviderUnavailable
+      ? promptSuggestion
+      : null;
   const showComposerTopDrawer =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
@@ -2256,6 +2269,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     planModeUiEnabled,
     isLiteralPendingAnswer,
     pendingUserInputs,
+    offeredPromptSuggestion,
     promptHistoryMessages,
     promptHistoryPositionRef,
     composerDraftTarget,
@@ -3820,7 +3834,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 ? "Enable a provider in Settings to send a message"
                                 : phase === "disconnected"
                                   ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                  : offeredPromptSuggestion !== null
+                                    ? `${offeredPromptSuggestion}   Tab to use`
+                                    : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
                     disabled={
                       isConnecting ||

@@ -38,6 +38,8 @@ export function useComposerCommandKey(input: {
   readonly planModeUiEnabled: boolean;
   readonly isLiteralPendingAnswer: boolean;
   readonly pendingUserInputs: ReadonlyArray<PendingUserInput>;
+  /** The provider's next-prompt suggestion the composer is offering, if any. */
+  readonly offeredPromptSuggestion: string | null;
   readonly promptHistoryMessages: ChatComposerProps["promptHistoryMessages"];
   readonly promptHistoryPositionRef: RefObject<{
     targetKey: string;
@@ -90,6 +92,7 @@ export function useComposerCommandKey(input: {
     planModeUiEnabled,
     isLiteralPendingAnswer,
     pendingUserInputs,
+    offeredPromptSuggestion,
     promptHistoryMessages,
     promptHistoryPositionRef,
     composerDraftTarget,
@@ -194,6 +197,19 @@ export function useComposerCommandKey(input: {
     const { trigger } = resolveActiveComposerTrigger();
     const menuIsActive =
       !isLiteralPendingAnswer && (composerMenuOpenRef.current || trigger !== null);
+    // Tab fills an empty composer with the suggestion. It shows only after a
+    // finished turn, so it never meets a Tab binding that acts on a running one.
+    if (
+      key === "Tab" &&
+      !event.shiftKey &&
+      submissionIntent === null &&
+      !menuIsActive &&
+      offeredPromptSuggestion !== null &&
+      promptRef.current.trim().length === 0
+    ) {
+      replacePromptFromHistory(offeredPromptSuggestion);
+      return true;
+    }
     if (key === "Escape") {
       if (!menuIsActive || event.isComposing || event.keyCode === 229) return false;
       dismissComposerTrigger(trigger);
