@@ -267,8 +267,7 @@ function ContextWindowAutoCompactSection(props: {
         </Select>
       </div>
       <div className="text-pretty text-secondary-label text-2xs">
-        Takes effect when Claude starts a new session for this thread, after 30 minutes idle or a
-        server restart.
+        Applies right away to every Claude thread on this provider.
       </div>
     </>
   );
