@@ -36,10 +36,9 @@ env:
   # Applied in order. A branch that is gone (merged and deleted) is skipped, and commits
   # upstream already contains drop out as empty cherry-picks.
   PATCH_BRANCHES: >-
-    patch/edit-fork
+    patch/edit-fork-v2
     fix/hyprland-snapshot-flight-sizing
     fix/preview-viewport-main-zoom
-    patch/subagents
 
 jobs:
   plan:

@@ -116,8 +116,9 @@ run_checks() {
     set -e
     (cd apps/server && vp run typecheck)
     (cd apps/web && vp run typecheck)
-    (cd apps/server && vp test run src/orchestration/forkThread.test.ts src/orchestration/transferThread.test.ts src/claudeHistoryWorker.test.ts src/provider/Layers/ClaudeAdapter.test.ts)
-    (cd apps/web && vp test run src/components/ChatView.logic.test.ts src/components/BranchToolbar.logic.test.ts)
+    (cd apps/server && vp test run src/mcp/toolkits/preview/overflowCheck.test.ts src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts src/orchestration-v2/Adapters/CodexAdapterV2.test.ts src/orchestration-v2/Adapters/claudeSessionTransfer.test.ts src/orchestration-v2/ProviderTurnStartService.test.ts src/orchestration-v2/ThreadRecapService.test.ts src/orchestration-v2/ThreadTransferService.test.ts)
+    (cd apps/web && vp test run src/components/ChatView.logic.test.ts src/components/BranchToolbar.logic.test.ts src/components/chatCopy.logic.test.ts src/components/chat/ContextWindowMeter.logic.test.ts src/components/chat/MessagesTimeline.logic.test.ts src/components/chat/MessagesTimeline.test.tsx src/components/chat/useThreadRecap.test.ts src/environmentGrouping.test.ts)
+    (cd packages/client-runtime && vp test run src/state/projectGrouping.test.ts src/state/threadWorkflows.test.ts)
     (cd native/hyprland-snap-shot && cargo test --quiet)
   ) > "$RUNNER_TEMP/checks.log" 2>&1
 }
@@ -146,8 +147,9 @@ beyond what the patch needs. Rerun the failing commands until they pass:
 
   (cd apps/server && vp run typecheck)
   (cd apps/web && vp run typecheck)
-  (cd apps/server && vp test run src/orchestration/forkThread.test.ts src/orchestration/transferThread.test.ts src/claudeHistoryWorker.test.ts src/provider/Layers/ClaudeAdapter.test.ts)
-  (cd apps/web && vp test run src/components/ChatView.logic.test.ts src/components/BranchToolbar.logic.test.ts)
+  (cd apps/server && vp test run src/mcp/toolkits/preview/overflowCheck.test.ts src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts src/orchestration-v2/Adapters/CodexAdapterV2.test.ts src/orchestration-v2/Adapters/claudeSessionTransfer.test.ts src/orchestration-v2/ProviderTurnStartService.test.ts src/orchestration-v2/ThreadRecapService.test.ts src/orchestration-v2/ThreadTransferService.test.ts)
+  (cd apps/web && vp test run src/components/ChatView.logic.test.ts src/components/BranchToolbar.logic.test.ts src/components/chatCopy.logic.test.ts src/components/chat/ContextWindowMeter.logic.test.ts src/components/chat/MessagesTimeline.logic.test.ts src/components/chat/MessagesTimeline.test.tsx src/components/chat/useThreadRecap.test.ts src/environmentGrouping.test.ts)
+  (cd packages/client-runtime && vp test run src/state/projectGrouping.test.ts src/state/threadWorkflows.test.ts)
   (cd native/hyprland-snap-shot && cargo test --quiet)
 
 Do not commit. The failing output:
