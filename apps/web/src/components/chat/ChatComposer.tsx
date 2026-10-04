@@ -2212,7 +2212,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       noProviderAvailable ||
       activePendingApproval !== null ||
       pendingUserInputs.length > 0 ||
-      phase === "running" ||
       isSendBusy ||
       isConnecting ||
       !activeThreadId

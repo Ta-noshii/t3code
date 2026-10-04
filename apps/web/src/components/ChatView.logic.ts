@@ -1392,9 +1392,43 @@ export function formatOutgoingPrompt(params: {
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
 
+export function isCompactCommandText(text: string): boolean {
+  return text.trim().toLowerCase() === "/compact";
+}
+
 export function isCompactCommandMessage(message: ChatMessage): boolean {
-  const text = message.text.trim().toLowerCase();
-  return message.role === "user" && text === "/compact" && !message.attachments?.length;
+  return (
+    message.role === "user" && isCompactCommandText(message.text) && !message.attachments?.length
+  );
+}
+
+/** Whether a bare /compact already waits in the queue, on the server or still in flight. */
+export function hasQueuedCompactCommand(input: {
+  readonly runs: ReadonlyArray<{ readonly status: string; readonly userMessageId: MessageId }>;
+  readonly messages: ReadonlyArray<{
+    readonly id: MessageId;
+    readonly text: string;
+    readonly attachments: ReadonlyArray<unknown>;
+  }>;
+  readonly optimisticMessages: ReadonlyArray<ChatMessage>;
+}): boolean {
+  if (
+    input.optimisticMessages.some(
+      (message) => message.inputIntent === "queued_turn" && isCompactCommandMessage(message),
+    )
+  ) {
+    return true;
+  }
+  return input.runs.some(
+    (run) =>
+      run.status === "queued" &&
+      input.messages.some(
+        (message) =>
+          message.id === run.userMessageId &&
+          message.attachments.length === 0 &&
+          isCompactCommandText(message.text),
+      ),
+  );
 }
 
 // Errors surface through two maps (draft-keyed and thread-keyed) whose entries
@@ -1524,6 +1558,7 @@ export type ComposerSendSnapshot = ReturnType<typeof snapshotComposerSend>;
 /** How a composer send dispatches: where it runs and whether it waits behind other work. */
 export function planComposerTurn(input: {
   readonly messageText: string;
+  readonly attachmentCount: number;
   readonly sendQueuesBehindSetup: boolean;
   readonly isServerThread: boolean;
   readonly activeMessageCount: number;
@@ -1546,6 +1581,12 @@ export function planComposerTurn(input: {
     input.resumeCompactionTokens !== null &&
     !input.keepFullHistory &&
     !COMPACT_COMMAND_PATTERN.test(input.messageText);
+  // The server refuses to steer /compact into a running turn, so a typed one
+  // always queues as its own turn.
+  const queueCompactCommand =
+    input.phase === "running" &&
+    isCompactCommandText(input.messageText) &&
+    input.attachmentCount === 0;
   return {
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
@@ -1553,10 +1594,13 @@ export function planComposerTurn(input: {
     baseBranchForWorktree: shouldCreateWorktree ? input.activeThreadBranch : null,
     compactBeforeSend,
     turnDispatchMode:
-      compactBeforeSend || input.sendQueuesBehindSetup ? ("queue" as const) : input.dispatchMode,
+      compactBeforeSend || input.sendQueuesBehindSetup || queueCompactCommand
+        ? ("queue" as const)
+        : input.dispatchMode,
     shouldQueueBehindActiveRun:
       compactBeforeSend ||
       input.sendQueuesBehindSetup ||
+      queueCompactCommand ||
       (input.phase === "running" && input.dispatchMode === "queue"),
   };
 }

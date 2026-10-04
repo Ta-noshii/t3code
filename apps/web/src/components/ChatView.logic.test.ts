@@ -1,6 +1,7 @@
 import {
   boundAttachmentIds,
   findRecordedWorktreeSetup,
+  hasQueuedCompactCommand,
   mergeDirectPreviewAnnotation,
   planComposerTurn,
   snapshotComposerSend,
@@ -1074,6 +1075,7 @@ describe("snapshotComposerSend", () => {
 describe("planComposerTurn", () => {
   const base = {
     messageText: "hello",
+    attachmentCount: 0,
     sendQueuesBehindSetup: false,
     isServerThread: false,
     activeMessageCount: 0,
@@ -1133,6 +1135,23 @@ describe("planComposerTurn", () => {
       shouldQueueBehindActiveRun: false,
       baseBranchForWorktree: null,
     });
+  });
+
+  it("queues a bare /compact typed during a turn, whatever the dispatch mode", () => {
+    const running = {
+      ...base,
+      isServerThread: true,
+      activeMessageCount: 3,
+      phase: "running" as const,
+      dispatchMode: "steer" as const,
+    };
+    expect(planComposerTurn({ ...running, messageText: " /compact " })).toMatchObject({
+      turnDispatchMode: "queue",
+      shouldQueueBehindActiveRun: true,
+    });
+    expect(
+      planComposerTurn({ ...running, messageText: "/compact", attachmentCount: 1 }),
+    ).toMatchObject({ turnDispatchMode: "steer", shouldQueueBehindActiveRun: false });
   });
 });
 
@@ -1244,5 +1263,67 @@ describe("deriveWorkspaceMutationId", () => {
     expect(deriveWorkspaceMutationId([item("reply", "assistant_message", "completed")], null)).toBe(
       null,
     );
+  });
+});
+
+describe("hasQueuedCompactCommand", () => {
+  const compactMessageId = MessageId.make("message:compact");
+  const promptMessageId = MessageId.make("message:prompt");
+  const messages = [
+    { id: compactMessageId, text: " /compact ", attachments: [] },
+    { id: promptMessageId, text: "Fix the build", attachments: [] },
+  ];
+
+  it("finds a /compact that waits in the server queue", () => {
+    expect(
+      hasQueuedCompactCommand({
+        runs: [
+          { status: "running", userMessageId: promptMessageId },
+          { status: "queued", userMessageId: compactMessageId },
+        ],
+        messages,
+        optimisticMessages: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores a /compact run that already started and a queued /compact with attachments", () => {
+    expect(
+      hasQueuedCompactCommand({
+        runs: [{ status: "running", userMessageId: compactMessageId }],
+        messages,
+        optimisticMessages: [],
+      }),
+    ).toBe(false);
+    expect(
+      hasQueuedCompactCommand({
+        runs: [{ status: "queued", userMessageId: compactMessageId }],
+        messages: [{ id: compactMessageId, text: "/compact", attachments: [{}] }],
+        optimisticMessages: [],
+      }),
+    ).toBe(false);
+  });
+
+  it("counts a queued /compact the server has not acknowledged yet", () => {
+    const optimistic = {
+      id: MessageId.make("message:optimistic"),
+      role: "user" as const,
+      text: "/compact",
+      runId: null,
+      createdAt: "2026-10-04T12:00:00.000Z",
+      updatedAt: "2026-10-04T12:00:00.000Z",
+      streaming: false,
+    };
+    expect(
+      hasQueuedCompactCommand({
+        runs: [],
+        messages: [],
+        optimisticMessages: [{ ...optimistic, inputIntent: "queued_turn" }],
+      }),
+    ).toBe(true);
+    // A /compact sent outside a running turn starts right away and is not queued.
+    expect(
+      hasQueuedCompactCommand({ runs: [], messages: [], optimisticMessages: [optimistic] }),
+    ).toBe(false);
   });
 });

@@ -450,7 +450,12 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
     onOpenThread: onOpenRelatedThreadStable,
   });
 
-  const sendStandaloneCommand = async (text: string, failureMessage: string) => {
+  const sendStandaloneCommand = async (
+    text: string,
+    failureMessage: string,
+    options?: { readonly queue?: boolean },
+  ) => {
+    const queue = options?.queue === true;
     if (!activeThread || !clientSettingsHydrated || sendInFlightRef.current) return;
     const context = composerRef.current?.getSendContext();
     if (!context?.providerAvailable) return;
@@ -471,9 +476,10 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
         createdAt,
         updatedAt: createdAt,
         streaming: false,
+        ...(queue ? { inputIntent: "queued_turn" as const } : {}),
       },
     ]);
-    scrollToEnd();
+    if (!queue) scrollToEnd();
     // Commands settle into a result, so this always runs.
     const settingsResult = await persistThreadSettingsForNextTurn({
       threadId,
@@ -493,6 +499,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
               modelSelection: context.selectedModelSelection,
               runtimeMode,
               interactionMode: context.interactionMode,
+              ...(queue ? { dispatchMode: "queue" as const } : {}),
               createdAt,
             },
           });
