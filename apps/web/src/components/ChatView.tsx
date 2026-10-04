@@ -66,6 +66,9 @@ import {
   type ScopedThreadRef,
   type ThreadId,
   type RunId,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  resolveEnvironmentMachineKind,
+  type ThreadTransferExportResult,
   ProviderInteractionMode,
   resolveIdleCompaction,
   RuntimeMode,
@@ -175,7 +178,8 @@ import { cn } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
-import { newMessageId } from "~/lib/utils";
+import { newMessageId, newThreadId } from "~/lib/utils";
+import { buildThreadRouteParams } from "../threadRoutes";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
 import {
   applyProviderInstanceSettings,
@@ -243,6 +247,8 @@ import {
   useThreadHistory,
   useQuietThreadShell,
   useThreadCheckpointSummaries,
+  useProjects,
+  waitForThreadShell,
 } from "../state/entities";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
@@ -279,6 +285,8 @@ import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { ThreadDetailsPanel } from "./chat/ThreadDetailsPanel";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import {
+  buildCopyTargets,
+  type CopyTargetOption,
   resolveEffectiveEnvMode,
   resolveLocalCheckoutBranchMismatch,
   shouldShowComposerContextStrip,
@@ -341,6 +349,14 @@ import { assetEnvironment } from "../state/assets";
 import { readEnvironmentScope, readPreparedConnection } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
+import { threadExportCommand, threadImportCommand } from "../state/threadTransfer";
+import { requestConfirmDialog } from "../confirmDialog";
+import {
+  buildCopyHandoffMessage,
+  buildCopySummaryPrompt,
+  chatCopyMessages,
+  resolveCopyModelSelection,
+} from "./chatCopy.logic";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { observeResize } from "~/lib/observeResize";
 import { ThreadVisitWatermark } from "./chat/ThreadVisitWatermark";
@@ -445,6 +461,8 @@ export default function ChatView(props: ChatViewProps) {
     label: "load earlier thread history",
     reportFailure: false,
   });
+  const exportThreadFromServer = useAtomCommand(threadExportCommand, { reportFailure: false });
+  const importThreadOnServer = useAtomCommand(threadImportCommand, { reportFailure: false });
   const { environments } = useEnvironments();
   const providersByEnvironment = useEnvironmentProviders();
   const primaryEnvironment = usePrimaryEnvironment();
@@ -1147,6 +1165,23 @@ export default function ChatView(props: ChatViewProps) {
     logicalProjectEnvironments.find(
       (environment) => environment.environmentId === activeThread?.environmentId,
     ) ?? null;
+  // A started chat can be copied into any project of another environment.
+  const allProjects = useProjects();
+  const copyTargets =
+    isServerThread && activeThread
+      ? buildCopyTargets({
+          currentEnvironmentId: activeThread.environmentId,
+          projectEnvironments: logicalProjectEnvironments,
+          environments: environments.map((environment) => ({
+            environmentId: environment.environmentId,
+            label: environment.label,
+            machine: resolveEnvironmentMachineKind(environment.serverConfig ?? null),
+            connected:
+              environment.connection.phase === "connected" && environment.serverConfig !== null,
+          })),
+          projects: allProjects,
+        })
+      : [];
   const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
     activeEnvironment: activeEnvironmentOption,
     canPickEnvironment: hasMultipleEnvironments,
@@ -2801,6 +2836,175 @@ export default function ChatView(props: ChatViewProps) {
     composerDraftTarget,
     setThreadError,
   });
+  const [isCopyingThread, setIsCopyingThread] = useState(false);
+  const onCopyToEnvironment = async (target: CopyTargetOption) => {
+    const targetEnvironmentId = target.environmentId;
+    if (!activeThread || isCopyingThread || targetEnvironmentId === environmentId) return;
+    const targetEnvironment = environmentById.get(targetEnvironmentId);
+    if (!targetEnvironment) return;
+    const targetLabel = `${target.environmentLabel} (${target.projectLabel})`;
+    const sourceLabel = environmentById.get(environmentId)?.label ?? "another machine";
+    if (phase === "running" || isSendBusy || isConnecting) {
+      setThreadError(activeThread.id, "Stop the current turn before copying this chat.");
+      return;
+    }
+    const targetConfig = targetEnvironment.serverConfig;
+    if (targetEnvironment.connection.phase !== "connected" || !targetConfig) {
+      setThreadError(
+        activeThread.id,
+        `Connect ${target.environmentLabel} before copying this chat to it.`,
+      );
+      return;
+    }
+    const confirmed =
+      (await requestConfirmDialog(
+        [
+          `Copy this chat to ${targetLabel}?`,
+          `A new chat opens on ${target.environmentLabel} with this conversation in it and continues from where you are. It works in the "${target.projectLabel}" project's main folder${activeThread.worktreePath ? ", not this chat's worktree" : ""}. This chat stays here unchanged.`,
+        ].join("\n"),
+      )) ?? true;
+    if (!confirmed) return;
+
+    setIsCopyingThread(true);
+    setThreadError(activeThread.id, null);
+    try {
+      // Instance ids are per machine; the copy needs the same kind of provider there.
+      const modelSelection = resolveCopyModelSelection({
+        source: activeThread.modelSelection,
+        sourceProviders: providersByEnvironment.get(environmentId) ?? EMPTY_PROVIDERS,
+        targetProviders: providersByEnvironment.get(targetEnvironmentId) ?? EMPTY_PROVIDERS,
+      });
+      if (modelSelection === null) {
+        throw new Error(
+          `${target.environmentLabel} has no enabled provider like this chat's. Turn one on there, then copy again.`,
+        );
+      }
+      let exported: ThreadTransferExportResult | null = null;
+      if (serverConfig?.environment.capabilities.threadTransfer === true) {
+        const result = await exportThreadFromServer({
+          environmentId,
+          input: { threadId: activeThread.id },
+        });
+        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        exported = result.value;
+      }
+      // An older source has no export, so the copy takes the messages this client holds.
+      const messages = exported?.messages ?? chatCopyMessages(timelineMessages);
+      const threadId = newThreadId();
+      const createdAt = new Date().toISOString();
+      let nativeHistory = false;
+
+      if (targetConfig.environment.capabilities.threadTransfer === true) {
+        const importInput = {
+          threadId,
+          projectId: target.projectId,
+          title: activeThread.title,
+          modelSelection,
+          runtimeMode: activeThread.runtimeMode,
+          interactionMode: activeThread.interactionMode,
+          messages,
+          conversation: exported?.conversation ?? null,
+        };
+        let result = await importThreadOnServer({
+          environmentId: targetEnvironmentId,
+          input: importInput,
+        });
+        // A provider session too large for the connection still copies as history.
+        if (result._tag === "Failure" && importInput.conversation !== null) {
+          result = await importThreadOnServer({
+            environmentId: targetEnvironmentId,
+            input: { ...importInput, conversation: null },
+          });
+        }
+        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        nativeHistory = result.value.nativeHistory;
+        // Without the agent's session, the target hands the agent the imported
+        // history with this first turn.
+        if (!nativeHistory && messages.length > 0) {
+          const turn = await startThreadTurn({
+            environmentId: targetEnvironmentId,
+            input: {
+              threadId,
+              message: {
+                messageId: newMessageId(),
+                role: "user",
+                text: buildCopySummaryPrompt({
+                  title: activeThread.title,
+                  copiedFrom: sourceLabel,
+                }),
+                attachments: [],
+              },
+              modelSelection,
+              runtimeMode: activeThread.runtimeMode,
+              interactionMode: activeThread.interactionMode,
+              dispatchMode: "start",
+            },
+          });
+          if (turn._tag === "Failure") throw squashAtomCommandFailure(turn);
+        }
+      } else {
+        // A target without the import RPC starts the copy with a first message
+        // that carries the conversation.
+        const turn = await startThreadTurn({
+          environmentId: targetEnvironmentId,
+          input: {
+            threadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: buildCopyHandoffMessage({
+                title: activeThread.title,
+                messages,
+                copiedFrom: sourceLabel,
+                maxChars: PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+              }),
+              attachments: [],
+            },
+            modelSelection,
+            runtimeMode: activeThread.runtimeMode,
+            interactionMode: activeThread.interactionMode,
+            bootstrap: {
+              createThread: {
+                projectId: target.projectId,
+                title: activeThread.title,
+                modelSelection,
+                runtimeMode: activeThread.runtimeMode,
+                interactionMode: activeThread.interactionMode,
+                branch: null,
+                worktreePath: null,
+                createdAt,
+              },
+            },
+          },
+        });
+        if (turn._tag === "Failure") throw squashAtomCommandFailure(turn);
+      }
+
+      toastManager.add({
+        type: "success",
+        title: `Copied to ${targetLabel}`,
+        description: nativeHistory
+          ? "The agent's session came along, so it remembers the whole chat."
+          : "The agent is reading the earlier conversation and will reply with a summary.",
+      });
+      const targetThreadRef = scopeThreadRef(targetEnvironmentId, threadId);
+      if (await waitForThreadShell(targetThreadRef)) {
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(targetThreadRef),
+        });
+      }
+    } catch (error) {
+      setThreadError(
+        activeThread.id,
+        error instanceof Error ? error.message : "Failed to copy this chat.",
+      );
+    } finally {
+      setIsCopyingThread(false);
+    }
+  };
+
+  const onCopyTargetSelected = (target: CopyTargetOption) => void onCopyToEnvironment(target);
   const onCompactContext = () => {
     if (compactDisabled) return;
     // Mid-turn /compact queues as its own turn, since the server refuses to steer
@@ -3744,6 +3948,8 @@ export default function ChatView(props: ChatViewProps) {
                                     : undefined
                                 }
                                 availableEnvironments={logicalProjectEnvironments}
+                                copyTargets={copyTargets}
+                                onCopyToEnvironment={onCopyTargetSelected}
                                 composerControlsHostRef={setRestingComposerControlsHost}
                                 contextStripVisible={showComposerContextStrip}
                               />
@@ -3812,6 +4018,8 @@ export default function ChatView(props: ChatViewProps) {
               isGitRepo={isGitRepo}
               envLocked={envLocked}
               availableEnvironments={logicalProjectEnvironments}
+              copyTargets={copyTargets}
+              onCopyToEnvironment={onCopyTargetSelected}
               autoEnvironmentLabel={autoEnvironmentLabel}
               onAutoEnvironment={
                 draftId &&
