@@ -364,6 +364,36 @@ export function spawnClaudeProcessGroup(
   return child as ClaudeSpawnedProcess;
 }
 
+// A settings change rebuilds the provider instance's adapter, but sessions the
+// old adapter opened keep running. These let a new auto-compact window reach
+// their live queries, and any query they reopen later.
+const liveQueriesByInstance = new Map<string, Set<ClaudeAgentSdkQuerySession>>();
+const latestAutoCompactWindowByInstance = new Map<string, string>();
+
+function autoCompactTokens(value: string | undefined): number | null {
+  return value === undefined || value.length === 0 ? null : Number(value);
+}
+
+const applyAutoCompactWindowToLiveQueries = Effect.fnUntraced(function* (
+  instanceId: string,
+  value: string,
+) {
+  const previous = latestAutoCompactWindowByInstance.get(instanceId);
+  latestAutoCompactWindowByInstance.set(instanceId, value);
+  if (previous === undefined || previous === value) return;
+  const tokens = autoCompactTokens(value);
+  for (const query of liveQueriesByInstance.get(instanceId) ?? []) {
+    yield* query.applyFlagSettings({ autoCompactWindow: tokens }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("orchestration-v2.claude-auto-compact-live-apply-failed", {
+          instanceId,
+          cause,
+        }),
+      ),
+    );
+  }
+});
+
 export const ClaudeProviderCapabilitiesV2 = {
   sessions: {
     supportsMultipleProviderThreadsPerSession: false,
@@ -9480,7 +9510,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
             cwd: turnInput.runtimePolicy.cwd,
             attachmentsDir,
-            settings: adapterOptions.settings,
+            settings: {
+              ...adapterOptions.settings,
+              autoCompactWindow:
+                latestAutoCompactWindowByInstance.get(adapterOptions.instanceId) ??
+                adapterOptions.settings.autoCompactWindow,
+            },
             environment: claudeQueryEnvironment(
               adapterOptions.environment,
               turnInput.appThread,
@@ -9559,6 +9594,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ),
           };
           yield* Ref.set(queryContext, context);
+          const liveQueries =
+            liveQueriesByInstance.get(adapterOptions.instanceId) ??
+            new Set<ClaudeAgentSdkQuerySession>();
+          liveQueries.add(querySession);
+          liveQueriesByInstance.set(adapterOptions.instanceId, liveQueries);
           yield* querySession.messages.pipe(
             Stream.runForEach((message) =>
               sdkMessageLock.withPermits(1)(
@@ -9609,7 +9649,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 }
               }),
             ),
-            Effect.ensuring(Deferred.succeed(closed, undefined)),
+            Effect.ensuring(
+              Effect.sync(() => liveQueries.delete(querySession)).pipe(
+                Effect.andThen(Deferred.succeed(closed, undefined)),
+              ),
+            ),
             Effect.forkIn(sessionScope),
           );
           return context;
@@ -10689,6 +10733,7 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
       claudeEnvironment,
     );
+    yield* applyAutoCompactWindowToLiveQueries(instanceId, config.autoCompactWindow ?? "");
     return yield* makeClaudeAdapterV2({
       instanceId,
       settings: { ...config, enabled, binaryPath },
