@@ -688,6 +688,59 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
   );
 
+  it.effect("keeps the thread's own model when the selection is a model alias", () =>
+    Effect.gen(function* () {
+      const providers: ReadonlyArray<ServerProvider> = [
+        {
+          ...providerSnapshot({
+            instanceId: antigravityInstanceId,
+            driver: ProviderDriverKind.make("antigravity"),
+            model: "gemini-3.8-flash-high",
+          }),
+          models: [
+            {
+              slug: "gemini-3.8-flash-high",
+              name: "Gemini 3.8 Flash (High)",
+              aliases: ["antigravity-default"],
+              isCustom: false,
+              capabilities: null,
+            },
+            { slug: "gemini-3.1-pro-low", name: "Gemini", isCustom: false, capabilities: null },
+          ],
+        },
+      ];
+      const dependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: () =>
+            Effect.succeed(
+              parentProjection([], {
+                instanceId: antigravityInstanceId,
+                model: "antigravity-default",
+              }),
+            ),
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed(providers),
+        }),
+        adapterRegistryLayer([antigravityInstanceId]),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        ServerSettings.layerTest({
+          orchestratorModels: [{ provider: codexInstanceId, model: "gpt-6.1-sol" }],
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const curated = yield* service.capabilities(scope);
+        assert.deepEqual(
+          curated.providers.map((provider) => provider.models.map((model) => model.id)),
+          [["gemini-3.8-flash-high"]],
+        );
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+    }),
+  );
+
   it.effect("lists only orchestratorModels, the thread's own model, and usable providers", () =>
     Effect.gen(function* () {
       const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
