@@ -22,7 +22,11 @@ export interface OverflowCheckInput {
 export type OverflowCheckCall<E, R> = (
   operation: PreviewAutomationOperation,
   input: Record<string, unknown>,
+  timeoutMs?: number,
 ) => Effect.Effect<unknown, E, R>;
+
+/** The broker's default operation budget; a scan's own wait is added on top. */
+const SCAN_TIMEOUT_MS = 15_000;
 
 /**
  * The page-side half of the check: load the scanner, let the layout settle,
@@ -77,10 +81,12 @@ const scanWidths = <E, R>(
     let status = 0;
     for (const [index, width] of widths.entries()) {
       yield* call("resize", { mode: "freeform", width, height });
-      const value = yield* call("evaluate", {
-        expression: overflowScanExpression(max, index === 0 ? 400 + settle : 400),
-        awaitPromise: true,
-      });
+      const waitMs = index === 0 ? 400 + settle : 400;
+      const value = yield* call(
+        "evaluate",
+        { expression: overflowScanExpression(max, waitMs), awaitPromise: true },
+        SCAN_TIMEOUT_MS + waitMs,
+      );
       if (!isScan(value)) {
         blocks.push(
           `${width}px: could not read the scanner result: ${String(value).slice(0, 400)}`,
@@ -111,10 +117,27 @@ export const runOverflowCheck = <E, R>(call: OverflowCheckCall<E, R>, input: Ove
       ? (((yield* call("status", {})) as PreviewAutomationStatus).viewportSetting ??
         FILL_PREVIEW_VIEWPORT)
       : undefined;
+    const check = checkPages(call, input, widths, height, max);
+    // Restore on failure and interruption too, so restore=true never strands the tab at a test width.
+    return yield* previous === undefined
+      ? check
+      : check.pipe(
+          Effect.ensuring(
+            Effect.ignore(Effect.suspend(() => call("resize", resizeInputFor(previous)))),
+          ),
+        );
+  });
 
+const checkPages = <E, R>(
+  call: OverflowCheckCall<E, R>,
+  input: OverflowCheckInput,
+  widths: readonly number[],
+  height: number,
+  max: number,
+) =>
+  Effect.gen(function* () {
     if (!input.urls || input.urls.length === 0) {
       const scan = yield* scanWidths(call, widths, height, max, 0);
-      if (previous) yield* call("resize", resizeInputFor(previous));
       const verdict = !scan.complete
         ? "The check did not complete at every width; see above."
         : scan.overflows > 0
@@ -155,7 +178,6 @@ export const runOverflowCheck = <E, R>(call: OverflowCheckCall<E, R>, input: Ove
       if (scan.overflows > 0) needWork += 1;
       overflows += scan.overflows;
     }
-    if (previous) yield* call("resize", resizeInputFor(previous));
     const total = input.urls.length;
     const verdict =
       needWork > 0

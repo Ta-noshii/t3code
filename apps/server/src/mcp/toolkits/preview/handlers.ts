@@ -218,8 +218,8 @@ const handlers = {
     Effect.gen(function* () {
       let toolIcon: ToolActivityIcon | undefined;
       const result = yield* runOverflowCheck(
-        (operation, operationInput) =>
-          invoke<unknown>(operation, operationInput, undefined, tabId).pipe(
+        (operation, operationInput, timeoutMs) =>
+          invoke<unknown>(operation, operationInput, timeoutMs, tabId).pipe(
             Effect.map((response) => {
               toolIcon = response.toolIcon ?? toolIcon;
               return response.result;

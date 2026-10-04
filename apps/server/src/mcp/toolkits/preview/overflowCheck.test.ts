@@ -9,17 +9,22 @@ import {
 
 const fakeBroker = (scans: ReadonlyArray<unknown>, viewportSetting?: unknown) => {
   const calls: Array<{ operation: string; input: Record<string, unknown> }> = [];
+  const timeouts: Array<number | undefined> = [];
   const pending = [...scans];
-  const call: OverflowCheckCall<{ message: string }, never> = (operation, input) => {
+  const call: OverflowCheckCall<{ message: string }, never> = (operation, input, timeoutMs) => {
     calls.push({ operation, input });
     if (operation === "status") return Effect.succeed({ viewportSetting });
-    if (operation === "evaluate") return Effect.succeed(pending.shift());
+    if (operation === "evaluate") {
+      timeouts.push(timeoutMs);
+      const next = pending.shift();
+      return next instanceof Error ? Effect.fail({ message: next.message }) : Effect.succeed(next);
+    }
     if (operation === "navigate" && String(input.url).includes("unreachable")) {
       return Effect.fail({ message: "net::ERR_CONNECTION_REFUSED\nmore detail" });
     }
     return Effect.succeed({});
   };
-  return { call, calls };
+  return { call, calls, timeouts };
 };
 
 describe("runOverflowCheck", () => {
@@ -103,6 +108,32 @@ describe("runOverflowCheck", () => {
       const unknown = fakeBroker([{ report: "375px: clean", overflows: 0 }]);
       yield* runOverflowCheck(unknown.call, { widths: [375], restore: true });
       expect(unknown.calls.at(-1)).toEqual({ operation: "resize", input: { mode: "fill" } });
+    }),
+  );
+
+  it.effect("restores the viewport even when a scan fails", () =>
+    Effect.gen(function* () {
+      const broker = fakeBroker([new Error("result too large")], { _tag: "fill" });
+      const result = yield* Effect.result(
+        runOverflowCheck(broker.call, { widths: [375], restore: true }),
+      );
+      expect(result._tag).toBe("Failure");
+      expect(broker.calls.at(-1)).toEqual({ operation: "resize", input: { mode: "fill" } });
+    }),
+  );
+
+  it.effect("gives each evaluate a budget that covers its settle wait", () =>
+    Effect.gen(function* () {
+      const broker = fakeBroker([
+        { report: "375px: clean", overflows: 0, status: 200 },
+        { report: "768px: clean", overflows: 0, status: 200 },
+      ]);
+      yield* runOverflowCheck(broker.call, {
+        urls: ["http://localhost:3000/"],
+        widths: [375, 768],
+        settle: 20_000,
+      });
+      expect(broker.timeouts).toEqual([15_000 + 20_400, 15_000 + 400]);
     }),
   );
 
