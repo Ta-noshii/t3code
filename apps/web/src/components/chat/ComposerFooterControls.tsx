@@ -15,7 +15,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { focusRequestedPermission, useComposerMenuProps } from "./composerEventScope";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
-import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
+import {
+  ContextWindowMeter,
+  ContextWindowMeterPlaceholder,
+  type ContextWindowAutoCompactTarget,
+} from "./ContextWindowMeter";
 import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { runtimeModeConfig } from "./runtimeModeConfig";
@@ -247,6 +251,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   activeContextWindow: ContextWindowSnapshot | null;
   reserveContextWindowMeter: boolean;
   activeThreadModelDisplayName: string | null;
+  autoCompactTarget: ContextWindowAutoCompactTarget | null;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -291,6 +296,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
           compactDisabled={props.compactDisabled}
           compactDisabledReason={props.compactDisabledReason}
           compactAfterTurn={props.isRunning}
+          autoCompactTarget={props.autoCompactTarget}
         />
       ) : props.reserveContextWindowMeter ? (
         <ContextWindowMeterPlaceholder />
