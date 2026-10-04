@@ -228,6 +228,7 @@ import {
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2CommandOutputError,
   OrchestrationV2GetThreadProjectionError,
+  OrchestrationV2GetThreadRecapError,
   OrchestrationV2RpcSchemas,
   OrchestrationV2ThreadLaunchError,
 } from "./orchestrationV2.ts";
@@ -1848,6 +1849,12 @@ const WsOrchestrationV2GetTurnItemRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.get
   error: Schema.Union([OrchestrationV2GetThreadProjectionError, EnvironmentAuthorizationError]),
 });
 
+const WsOrchestrationV2GetThreadRecapRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.getThreadRecap, {
+  payload: OrchestrationV2RpcSchemas.getThreadRecap.input,
+  success: OrchestrationV2RpcSchemas.getThreadRecap.output,
+  error: Schema.Union([OrchestrationV2GetThreadRecapError, EnvironmentAuthorizationError]),
+});
+
 const WsOrchestrationV2LaunchThreadRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.launchThread, {
   payload: OrchestrationV2RpcSchemas.launchThread.input,
   success: OrchestrationV2RpcSchemas.launchThread.output,
@@ -2203,6 +2210,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2StopWorkflowRpc,
   WsOrchestrationV2ForceStopThreadRpc,
   WsOrchestrationV2GetTurnItemRpc,
+  WsOrchestrationV2GetThreadRecapRpc,
   WsOrchestrationV2GetTurnDiffRpc,
   WsOrchestrationV2GetFullThreadDiffRpc,
   WsOrchestrationV2SearchThreadsRpc,

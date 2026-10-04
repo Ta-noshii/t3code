@@ -33,6 +33,7 @@ const RPC_AGGREGATES = {
   [ORCHESTRATION_V2_WS_METHODS.getOlderSettledThreads]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getThreadProjection]: "orchestrationV2",
   [ORCHESTRATION_V2_WS_METHODS.launchThread]: "orchestration",
+  [ORCHESTRATION_V2_WS_METHODS.getThreadRecap]: "orchestration",
   [THREAD_TRANSFER_WS_METHODS.exportThread]: "orchestration",
   [THREAD_TRANSFER_WS_METHODS.importThread]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: "orchestrationV2",
