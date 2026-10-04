@@ -1357,3 +1357,42 @@ export function restorePlanFollowUpComposer(input: {
     detectTrigger: true,
   });
 }
+
+export function isCompactCommandText(text: string): boolean {
+  return text.trim().toLowerCase() === "/compact";
+}
+
+export function isCompactCommandMessage(message: ChatMessage): boolean {
+  return (
+    message.role === "user" && isCompactCommandText(message.text) && !message.attachments?.length
+  );
+}
+
+/** Whether a bare /compact already waits in the queue, on the server or still in flight. */
+export function hasQueuedCompactCommand(input: {
+  readonly runs: ReadonlyArray<{ readonly status: string; readonly userMessageId: MessageId }>;
+  readonly messages: ReadonlyArray<{
+    readonly id: MessageId;
+    readonly text: string;
+    readonly attachments: ReadonlyArray<unknown>;
+  }>;
+  readonly optimisticMessages: ReadonlyArray<ChatMessage>;
+}): boolean {
+  if (
+    input.optimisticMessages.some(
+      (message) => message.inputIntent === "queued_turn" && isCompactCommandMessage(message),
+    )
+  ) {
+    return true;
+  }
+  return input.runs.some(
+    (run) =>
+      run.status === "queued" &&
+      input.messages.some(
+        (message) =>
+          message.id === run.userMessageId &&
+          message.attachments.length === 0 &&
+          isCompactCommandText(message.text),
+      ),
+  );
+}

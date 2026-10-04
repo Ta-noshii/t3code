@@ -8,7 +8,12 @@ import {
   resolveWorktreeSetupProgress,
 } from "./ChatView.logic";
 import * as DateTime from "effect/DateTime";
-import { restorePlanFollowUpComposer } from "./ChatView.logic";
+import {
+  hasQueuedCompactCommand,
+  isCompactCommandMessage,
+  isCompactCommandText,
+  restorePlanFollowUpComposer,
+} from "./ChatView.logic";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { prepareQueuedEditAttachments, recoverQueuedMessageEdit } from "./chat/queuedMessageEdit";
 import {
@@ -792,11 +797,6 @@ function formatOutgoingPrompt(params: {
 }
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
-
-function isCompactCommandMessage(message: ChatMessage): boolean {
-  const text = message.text.trim().toLowerCase();
-  return message.role === "user" && text === "/compact" && !message.attachments?.length;
-}
 
 type ChatViewProps =
   | {
@@ -7264,13 +7264,21 @@ export default function ChatView(props: ChatViewProps) {
       item.type === "user_message" &&
       (item.text.trim().toLowerCase() !== "/compact" || item.attachments.length > 0),
   );
+  // A running turn does not block compacting: the request queues behind it (see
+  // onCompactContext). One queued /compact is enough.
+  const compactQueued = hasQueuedCompactCommand({
+    runs: serverProjection?.runs ?? [],
+    messages: serverProjection?.messages ?? [],
+    optimisticMessages: optimisticUserMessages,
+  });
   const compactThreadUnavailable =
     !activeThread ||
     !activeThreadHasCompactableConversation ||
     !activeProject ||
     !isServerThread ||
     !manualCompactionProviderAvailable ||
-    isWorking ||
+    isCompacting ||
+    compactQueued ||
     isRevertingCheckpoint ||
     threadDetailLoading ||
     isPreparingWorktree ||
@@ -7285,7 +7293,9 @@ export default function ChatView(props: ChatViewProps) {
       ? "Choose a project before compacting"
       : !manualCompactionProviderAvailable
         ? "Compaction is unavailable for this provider"
-        : "Compacting is unavailable right now"
+        : compactQueued
+          ? "Compaction is queued for when the agent finishes"
+          : "Compacting is unavailable right now"
     : null;
   const resumeCompactionBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (
@@ -8201,6 +8211,9 @@ export default function ChatView(props: ChatViewProps) {
     if (!context?.providerAvailable) return;
 
     // Compaction is a standalone command; the draft and its attachments stay local.
+    // Mid-turn it queues as its own turn, since the server refuses to steer /compact
+    // into a running one. The queued row's remove button takes it back.
+    const queueBehindActiveRun = isWorking;
     const threadId = activeThread.id;
     const messageId = newMessageId();
     const createdAt = new Date().toISOString();
@@ -8217,9 +8230,10 @@ export default function ChatView(props: ChatViewProps) {
         createdAt,
         updatedAt: createdAt,
         streaming: false,
+        ...(queueBehindActiveRun ? { inputIntent: "queued_turn" as const } : {}),
       },
     ]);
-    scrollToEnd();
+    if (!queueBehindActiveRun) scrollToEnd();
     try {
       const settingsResult = await persistThreadSettingsForNextTurn({
         threadId,
@@ -8241,6 +8255,7 @@ export default function ChatView(props: ChatViewProps) {
                 modelSelection: context.selectedModelSelection,
                 runtimeMode,
                 interactionMode: context.interactionMode,
+                ...(queueBehindActiveRun ? { dispatchMode: "queue" as const } : {}),
                 createdAt,
               },
             });
@@ -8883,9 +8898,15 @@ export default function ChatView(props: ChatViewProps) {
       !hasHeldQueuedRuns &&
       multipleModelSelections === null &&
       messageTextForSend.toLowerCase() !== "/compact";
-    const turnDispatchMode = compactBeforeSend ? "queue" : dispatchMode;
+    // The server refuses to steer /compact into a running turn, so a typed one
+    // always queues as its own turn.
+    const queueCompactCommand =
+      phase === "running" &&
+      isCompactCommandText(messageTextForSend) &&
+      composerAttachmentsSnapshot.length === 0;
+    const turnDispatchMode = compactBeforeSend || queueCompactCommand ? "queue" : dispatchMode;
     const shouldQueueBehindActiveRun =
-      compactBeforeSend || (phase === "running" && dispatchMode === "queue");
+      compactBeforeSend || queueCompactCommand || (phase === "running" && dispatchMode === "queue");
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,

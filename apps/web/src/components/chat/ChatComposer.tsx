@@ -1391,6 +1391,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           onCompact={props.onCompactContext}
           compactDisabled={props.compactDisabled}
           compactDisabledReason={props.compactDisabledReason}
+          compactAfterTurn={props.isRunning}
         />
       ) : props.reserveContextWindowMeter ? (
         <ContextWindowMeterPlaceholder />
@@ -4241,7 +4242,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       noProviderAvailable ||
       activePendingApproval !== null ||
       pendingUserInputs.length > 0 ||
-      phase === "running" ||
       isSendBusy ||
       isConnecting ||
       !activeThreadId
@@ -4258,7 +4258,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     noProviderAvailable,
     onCompactContext,
     pendingUserInputs.length,
-    phase,
   ]);
   const expandMobileComposer = useCallback(() => {
     if (composerBlurFrameRef.current !== null) {
