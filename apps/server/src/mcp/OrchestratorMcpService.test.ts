@@ -36,6 +36,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 import { idleThreadProjection, liveThreadShell } from "./McpToolAccess.testkit.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
@@ -954,7 +955,7 @@ describe("OrchestratorMcpService provider resolution", () => {
 
         yield* Effect.gen(function* () {
           const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-          const capabilities = yield* service.capabilities(scope);
+          const capabilities = yield* service.capabilities(scope, { all: true });
           const byId = new Map(
             capabilities.providers.map((provider) => [provider.providerInstanceId, provider]),
           );
@@ -977,7 +978,7 @@ describe("OrchestratorMcpService provider resolution", () => {
               },
             ],
           }));
-          const refreshed = yield* service.capabilities(scope);
+          const refreshed = yield* service.capabilities(scope, { all: true });
           for (const provider of providers) {
             assert.deepEqual(
               refreshed.providers
@@ -1067,6 +1068,89 @@ describe("OrchestratorMcpService provider resolution", () => {
           ["gpt-5.4", "my-model"],
         );
       }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
+  it.effect("lists only orchestratorModels, the thread's own model, and usable providers", () =>
+    Effect.gen(function* () {
+      const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
+      const disabledInstanceId = ProviderInstanceId.make("antigravity-alt");
+      const withModels = (base: ServerProvider, slugs: ReadonlyArray<string>): ServerProvider => ({
+        ...base,
+        models: slugs.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+      });
+      const providers: ReadonlyArray<ServerProvider> = [
+        withModels(
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: "gpt-5.4",
+          }),
+          ["gpt-5.4", "gpt-6.1-sol", "gpt-5.2"],
+        ),
+        withModels(
+          providerSnapshot({
+            instanceId: claudeInstanceId,
+            driver: ProviderDriverKind.make("claudeAgent"),
+            model: "claude-opus-5-5",
+          }),
+          ["claude-opus-5-5", "claude-opus-4-5"],
+        ),
+        withModels(
+          providerSnapshot({
+            instanceId: disabledInstanceId,
+            driver: ProviderDriverKind.make("antigravity"),
+            model: "ant-model",
+            enabled: false,
+          }),
+          ["ant-model"],
+        ),
+      ];
+      const dependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: () => Effect.succeed(parentProjection([])),
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed(providers),
+        }),
+        adapterRegistryLayer([codexInstanceId, claudeInstanceId, disabledInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        ServerSettings.layerTest({
+          orchestratorModels: [
+            { provider: codexInstanceId, model: "gpt-6.1-sol" },
+            { provider: claudeInstanceId, model: "claude-opus-5-5" },
+            { provider: disabledInstanceId, model: "ant-model" },
+            { provider: claudeInstanceId, model: "not-in-catalog" },
+          ],
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const curated = yield* service.capabilities(scope);
+        assert.deepEqual(
+          curated.providers.map((provider) => [
+            provider.providerInstanceId,
+            provider.models.map((model) => model.id),
+          ]),
+          [
+            // gpt-5.4 is the parent thread's own model, so it stays listed.
+            [codexInstanceId, ["gpt-5.4", "gpt-6.1-sol"]],
+            [claudeInstanceId, ["claude-opus-5-5"]],
+          ],
+        );
+        assert.strictEqual(curated.hiddenModelCount, 3);
+
+        const everything = yield* service.capabilities(scope, { all: true });
+        assert.deepEqual(
+          everything.providers.map((provider) => provider.models.length),
+          [3, 2, 1],
+        );
+        assert.isUndefined(everything.hiddenModelCount);
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
     }),
   );
 
