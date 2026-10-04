@@ -84,6 +84,8 @@ export interface TimelineRowSharedState {
   onForkFromRun:
     | ((input: { readonly sourceThreadId: ThreadId; readonly runId: RunId }) => Promise<void>)
     | undefined;
+  /** Opens a new thread with the history before this user message and the message in its composer. Absent hides the button. */
+  onEditInNewThread: ((messageId: MessageId) => Promise<void>) | undefined;
   onToggleTurnFold: (runId: RunId) => void;
   onToggleAttemptFold: (attemptId: RunAttemptId) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;

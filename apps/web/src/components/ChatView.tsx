@@ -2718,8 +2718,12 @@ export default function ChatView(props: ChatViewProps) {
   }, [toggleRightPanelStable, toggleRightPanelMaximizedStable]);
 
   usePasteToFocusComposer(activeThreadId, composerRef);
-  const { onConfirmRevertStable, onForkFromRunStable, onRevertTimelineTurnStable } =
-    useTimelineRewind({
+  const {
+    onConfirmRevertStable,
+    onForkFromRunStable,
+    onEditInNewThreadStable,
+    onRevertTimelineTurnStable,
+  } = useTimelineRewind({
       environmentId,
       routeThreadRef,
       routeThreadKey,
@@ -3371,6 +3375,7 @@ export default function ChatView(props: ChatViewProps) {
                 parentThreadLink={parentThreadLink}
                 workflowOpening={workflowOpening}
                 onForkFromRun={onForkFromRunStable}
+                onEditInNewThread={onEditInNewThreadStable}
                 supportsConversationRollback={supportsConversationRollback}
                 threadStartCheckpointReady={threadStartCheckpointReady}
                 availableRevertTurnCounts={availableRevertTurnCounts}
