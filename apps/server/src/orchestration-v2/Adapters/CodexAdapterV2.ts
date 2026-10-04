@@ -1196,6 +1196,12 @@ export class CodexAppServerClientFactory extends Context.Service<
  */
 export const CODEX_THREAD_CONFIG = { "tools.update_plan.enabled": true } as const;
 
+// Codex gives each MCP tool call 60 s unless the server config sets
+// `tool_timeout_sec`. T3's wait tools (t3_thread_wait, delegate_task mode=wait)
+// block for up to an hour (MAX_WAIT_TIMEOUT_MS in OrchestratorMcpService), so
+// this sits just above that, matching CLAUDE_T3_MCP_TOOL_TIMEOUT_MS.
+export const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
+
 export function codexThreadRuntimeParams(input: {
   readonly threadId: ThreadId | null;
   readonly modelSelection?: { readonly model: string };
@@ -1221,6 +1227,7 @@ export function codexThreadRuntimeParams(input: {
                 http_headers: {
                   Authorization: mcpSession.authorizationHeader,
                 },
+                tool_timeout_sec: CODEX_T3_MCP_TOOL_TIMEOUT_SEC,
               },
             },
           }),
