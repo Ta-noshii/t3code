@@ -366,6 +366,7 @@ import { useDraftHeroLayoutTransition } from "./chat/useDraftHeroLayoutTransitio
 import { useLocalDispatchState } from "./chat/useLocalDispatchState";
 import { draftFanoutSelectionsAtom, draftSendState } from "./chat/chatViewSend";
 import {
+  hasQueuedCompactCommand,
   isCompactCommandMessage,
   type LocalThreadErrorEntry,
   makeThreadErrorSetter,
@@ -2413,6 +2414,13 @@ export default function ChatView(props: ChatViewProps) {
     pendingHandoffSelectionUsable ? pendingHandoffSelection : null,
     providerStatuses,
   );
+  // A running turn does not block compacting: the request queues behind it (see
+  // onCompactContext). One queued /compact is enough.
+  const compactQueued = hasQueuedCompactCommand({
+    runs: serverProjection?.runs ?? [],
+    messages: serverProjection?.messages ?? [],
+    optimisticMessages: optimisticUserMessages,
+  });
   const compactThreadUnavailable =
     !canOperateThread ||
     !activeThread ||
@@ -2420,7 +2428,8 @@ export default function ChatView(props: ChatViewProps) {
     !activeProject ||
     !isServerThread ||
     !manualCompactionProviderAvailable ||
-    isWorking ||
+    isCompacting ||
+    compactQueued ||
     isRevertingCheckpoint ||
     threadDetailLoading ||
     isPreparingWorktree ||
@@ -2437,7 +2446,9 @@ export default function ChatView(props: ChatViewProps) {
         ? "Choose a project before compacting"
         : !manualCompactionProviderAvailable
           ? "Compaction is unavailable for this provider"
-          : "Compacting is unavailable right now"
+          : compactQueued
+            ? "Compaction is queued for when the agent finishes"
+            : "Compacting is unavailable right now"
     : null;
   const resumeCompactionTokens =
     activeContextWindow &&
@@ -2727,7 +2738,9 @@ export default function ChatView(props: ChatViewProps) {
     });
   const onCompactContext = () => {
     if (compactDisabled) return;
-    void sendStandaloneCommand("/compact", "Failed to compact context.");
+    // Mid-turn /compact queues as its own turn, since the server refuses to steer
+    // it into a running one. The queued row's remove button takes it back.
+    void sendStandaloneCommand("/compact", "Failed to compact context.", { queue: isWorking });
   };
 
   const {
