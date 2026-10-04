@@ -253,6 +253,24 @@ export function formatDiagnosticsDescription(input: {
   return `${mode}.`;
 }
 
+/**
+ * The config an instance edit starts from. A custom instance lives only in
+ * `providerInstances`; an unconfigured default slot runs with the driver's
+ * default config.
+ */
+export function resolveEditableProviderInstance(input: {
+  readonly settings: Pick<ServerSettings, "providerInstances">;
+  readonly instanceId: ProviderInstanceId;
+  readonly driver: ProviderDriverKind;
+  readonly isDefault: boolean;
+}): ProviderInstanceConfig | undefined {
+  const explicitInstance = input.settings.providerInstances?.[input.instanceId];
+  if (explicitInstance !== undefined || !input.isDefault) {
+    return explicitInstance;
+  }
+  return { driver: input.driver };
+}
+
 export function buildProviderInstanceUpdatePatch(input: {
   readonly settings: Pick<ServerSettings, "providerInstances">;
   readonly instanceId: ProviderInstanceId;
