@@ -3503,6 +3503,8 @@ export default function ChatView(props: ChatViewProps) {
   const compactRequestIsActive =
     (isSendBusy &&
       optimisticCompactionMessage !== undefined &&
+      // A /compact queued behind the running turn has not started compacting yet.
+      optimisticCompactionMessage.inputIntent !== "queued_turn" &&
       isCompactCommandMessage(optimisticCompactionMessage)) ||
     (latestServerUserItem?.type === "user_message" &&
       latestServerUserItem.text.trim().toLowerCase() === "/compact" &&
