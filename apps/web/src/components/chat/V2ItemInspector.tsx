@@ -9,6 +9,10 @@ import {
 } from "@t3tools/client-runtime/work-log/item-detail";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
+import {
+  type ToolOutputBlock,
+  turnItemOutputBlocks,
+} from "@t3tools/client-runtime/work-log/tool-value";
 import { ExternalLinkIcon } from "lucide-react";
 import { memo, type ReactNode, Suspense, use } from "react";
 
@@ -27,6 +31,7 @@ import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
 import type { TurnItemSource } from "./timelineRowContext";
+import { ToolOutputView } from "./ToolOutputView";
 
 interface V2ItemInspectorProps {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
@@ -125,6 +130,8 @@ function useFetchedTurnItem(
   return {
     item,
     output: {
+      blocks: turnItemOutputBlocks(item),
+      raw: item.type === "dynamic_tool" ? item.output : undefined,
       output: turnItemOutputText(item),
       images: turnItemOutputImages(item),
       environmentId,
@@ -141,6 +148,10 @@ function useFetchedTurnItem(
 }
 
 interface ToolOutputState {
+  /** Structured result for tool items; `output` is the text fallback for the rest. */
+  readonly blocks: readonly ToolOutputBlock[] | null;
+  readonly raw: unknown;
+  readonly hideImages?: boolean | undefined;
   readonly output: string | null;
   readonly images: ReturnType<typeof turnItemOutputImages>;
   readonly environmentId: EnvironmentId;
@@ -151,7 +162,9 @@ interface ToolOutputState {
 }
 
 function ToolOutput(props: ToolOutputState) {
-  const images = props.images.map((resource) => (
+  // Images load as assets below; the detail read carries no image bytes.
+  const blocks = props.blocks?.filter((block) => block.kind !== "image") ?? [];
+  const images = (props.hideImages ? [] : props.images).map((resource) => (
     <ChatMarkdownAssetImage
       key={resource.index}
       environmentId={props.environmentId}
@@ -161,15 +174,18 @@ function ToolOutput(props: ToolOutputState) {
       onImageExpand={props.onImageExpand}
     />
   ));
-  const text = props.output ? (
-    <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
-  ) : props.pending ? (
-    <div className="text-muted-foreground italic">Loading output…</div>
-  ) : props.error ? (
-    <div className="text-destructive">Couldn&apos;t load output: {props.error}</div>
-  ) : props.empty && images.length === 0 ? (
-    <div className="text-muted-foreground italic">No output.</div>
-  ) : null;
+  const text =
+    blocks.length > 0 ? (
+      <ToolOutputView blocks={blocks} raw={props.raw} />
+    ) : props.output ? (
+      <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
+    ) : props.pending ? (
+      <div className="text-muted-foreground italic">Loading output…</div>
+    ) : props.error ? (
+      <div className="text-destructive">Couldn&apos;t load output: {props.error}</div>
+    ) : props.empty && images.length === 0 ? (
+      <div className="text-muted-foreground italic">No output.</div>
+    ) : null;
   return (
     <>
       {images}
@@ -183,11 +199,13 @@ export function FetchedToolOutput(props: {
   readonly environmentId: EnvironmentId;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
   readonly source?: TurnItemSource | undefined;
+  /** The row already previews the image the tool read. */
+  readonly hideImages?: boolean | undefined;
 }) {
   const { output } = useFetchedTurnItem(props.projectedItem, props.environmentId, props.source);
   return (
     <div className={cn("mt-1.5 space-y-1.5", monoClassName)}>
-      <ToolOutput {...output} onImageExpand={props.onImageExpand} />
+      <ToolOutput {...output} onImageExpand={props.onImageExpand} hideImages={props.hideImages} />
     </div>
   );
 }
