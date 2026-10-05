@@ -133,7 +133,6 @@ export function ConnectionEnvironmentRow(props: {
 
         <ThemedSwitch
           style={{ alignSelf: "center" }}
-          disabled={unsupported}
           onValueChange={(next) => props.onSetEnabled(props.environment.environmentId, next)}
           value={enabled}
         />
