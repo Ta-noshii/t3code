@@ -760,14 +760,19 @@ export const make = Effect.gen(function* () {
     yield* withLeaseLock(
       environmentId,
       Effect.gen(function* () {
-        const entry = yield* getEntry(environmentId);
-        if (enabled && entry.unsupportedReason !== undefined) {
-          return yield* new ConnectionBlockedError({
-            reason: "unsupported",
-            detail: entry.unsupportedReason,
-          });
-        }
-        if (entry.enabled === enabled) {
+        const saved = yield* getEntry(environmentId);
+        // Switching an environment on is a request to try again. The block can
+        // be stale (the host was updated, but discovery has not reported it),
+        // and the socket handshake re-checks the protocol and blocks again if
+        // the host really is incompatible.
+        const {
+          unsupportedReason: _staleReason,
+          serverUpdateRequired: _staleUpdateRequired,
+          ...unblocked
+        } = saved;
+        const entry: ConnectionCatalogEntry =
+          enabled && saved.unsupportedReason !== undefined ? unblocked : saved;
+        if (saved.enabled === enabled && entry === saved) {
           return;
         }
         // Platform-managed environments are reconciled from the host and are

@@ -912,6 +912,33 @@ describe("EnvironmentRegistry", () => {
     }),
   );
 
+  it.effect("switching a blocked environment on clears a stale block and connects", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([RELAY_TARGET], [], [], {
+        initialDisabled: [RELAY_TARGET.environmentId],
+      });
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        yield* registry.setCompatibility(
+          RELAY_TARGET.environmentId,
+          new ConnectionBlockedError({ reason: "unsupported", detail: "Update the host." }),
+        );
+        yield* registry.setEnabled(RELAY_TARGET.environmentId, true);
+        const entry = (yield* SubscriptionRef.get(registry.entries)).get(
+          RELAY_TARGET.environmentId,
+        );
+        expect(entry?.enabled).toBe(true);
+        expect(entry?.unsupportedReason).toBeUndefined();
+        yield* awaitConnectionState(
+          registry,
+          RELAY_TARGET.environmentId,
+          (state) => state.phase === "connected",
+        );
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
+
   it.effect("discovery keeps unsupported environments off until compatibility changes", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness([RELAY_TARGET], [], [], {
@@ -929,9 +956,6 @@ describe("EnvironmentRegistry", () => {
           RELAY_TARGET.environmentId,
         );
         expect(entry).toMatchObject({ enabled: false, unsupportedReason: error.message });
-        expect(
-          yield* Effect.flip(registry.setEnabled(RELAY_TARGET.environmentId, true)),
-        ).toMatchObject({ reason: "unsupported" });
         expect(yield* Ref.get(harness.sessions)).toHaveLength(0);
         yield* registry.setCompatibility(RELAY_TARGET.environmentId, null);
         expect(
