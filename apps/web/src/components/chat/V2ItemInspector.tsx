@@ -10,6 +10,7 @@ import {
   turnItemNeedsDetailFetch,
   turnItemOutputText,
 } from "@t3tools/client-runtime/work-log/item-detail";
+import { toolCallDigest, toolResultDigest } from "@t3tools/client-runtime/work-log/tool-digest";
 import {
   type ToolOutputBlock,
   turnItemOutputBlocks,
@@ -28,7 +29,7 @@ import { Button } from "../ui/button";
 import ChatMarkdown from "../ChatMarkdown";
 import { RenderErrorBoundary } from "../RenderErrorBoundary";
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
-import { ToolOutputView } from "./ToolOutputView";
+import { ToolCallDigestView, ToolOutputView, type ToolViewContext } from "./ToolOutputView";
 
 interface V2ItemInspectorProps {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
@@ -124,6 +125,8 @@ function useFetchedTurnItem(
     output: {
       blocks: turnItemOutputBlocks(item),
       raw: item.type === "dynamic_tool" ? item.output : undefined,
+      toolName: item.type === "dynamic_tool" ? item.toolName : undefined,
+      input: item.type === "dynamic_tool" ? item.input : undefined,
       output: turnItemOutputText(item),
       pending: item === wireItem && detail.isPending,
       error:
@@ -141,6 +144,8 @@ interface ToolOutputState {
   /** Structured result for tool items; `output` is the text fallback for the rest. */
   readonly blocks: readonly ToolOutputBlock[] | null;
   readonly raw: unknown;
+  readonly toolName: string | null | undefined;
+  readonly input: unknown;
   readonly hideImages?: boolean | undefined;
   readonly output: string | null;
   readonly pending: boolean;
@@ -148,9 +153,22 @@ interface ToolOutputState {
   readonly empty: boolean;
 }
 
-function ToolOutput(props: ToolOutputState) {
-  return props.blocks && props.blocks.length > 0 ? (
-    <ToolOutputView blocks={props.blocks} raw={props.raw} hideImages={props.hideImages} />
+const NO_CONTEXT: ToolViewContext = { cwd: undefined, threadRef: undefined };
+
+function ToolOutput(props: ToolOutputState & { readonly context?: ToolViewContext | undefined }) {
+  // Some tools answer with nothing on purpose, such as a thread wait that ran out.
+  const hasResult =
+    props.blocks !== null &&
+    (props.blocks.length > 0 || toolResultDigest(props.toolName, null, props.input) !== null);
+  return props.blocks && hasResult ? (
+    <ToolOutputView
+      blocks={props.blocks}
+      raw={props.raw}
+      toolName={props.toolName}
+      input={props.input}
+      context={props.context ?? NO_CONTEXT}
+      hideImages={props.hideImages}
+    />
   ) : props.output ? (
     <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
   ) : props.pending ? (
@@ -183,8 +201,20 @@ function ToolCallBody(
     readonly command?: string;
     readonly args?: unknown;
     readonly exitCode?: number | undefined;
+    readonly context?: ToolViewContext | undefined;
   },
 ) {
+  const digest = props.toolName ? toolCallDigest(props.toolName, props.args) : null;
+  if (digest) {
+    return (
+      <div className="space-y-3">
+        <ToolCallDigestView digest={digest} context={props.context ?? NO_CONTEXT} />
+        <div className="border-t border-border/40 pt-2">
+          <ToolOutput {...props} />
+        </div>
+      </div>
+    );
+  }
   const call = toolCallLines({ command: props.command, args: props.args });
   return (
     <div className={cn("space-y-1.5", monoClassName)}>
@@ -331,7 +361,20 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
         </ul>
       ) : null}
 
-      {item.type === "dynamic_tool" ? <ToolCallBody args={item.input} {...outputState} /> : null}
+      {item.type === "dynamic_tool" ? (
+        <ToolCallBody
+          args={item.input}
+          {...outputState}
+          context={{
+            cwd: props.cwd,
+            threadRef: {
+              environmentId: props.environmentId,
+              threadId: props.projectedItem.sourceThreadId,
+            },
+            onOpenThread: props.onOpenThread,
+          }}
+        />
+      ) : null}
 
       {item.type === "approval_request" ? <StructuredValue value={item.prompt} /> : null}
       {item.type === "user_input_request" ? (

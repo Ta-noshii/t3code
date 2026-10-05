@@ -1,6 +1,9 @@
 import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
+import { toolDigestText, toolResultDigest } from "./toolDigest.ts";
+import { toolOutputBlocks } from "./toolValue.ts";
+
 const MAX_TEXT_BLOCK_DEPTH = 4;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -161,13 +164,36 @@ function commandOutputText(output: string): string {
     .join("\n");
 }
 
+/** A tool result as its digest text where it has one, so plain-text clients skip the JSON too. */
+function dynamicToolOutputText(
+  item: Extract<OrchestrationV2TurnItem, { type: "dynamic_tool" }>,
+): string | null {
+  const blocks = toolOutputBlocks(item.output);
+  if (blocks.length === 0) {
+    const digest = toolResultDigest(item.toolName, null, item.input);
+    return digest ? toolDigestText(digest) : null;
+  }
+  const parts = blocks.map((block) => {
+    if (block.kind === "image") return "[image]";
+    const digest = toolResultDigest(
+      item.toolName,
+      block.kind === "data" ? block.value : block.text,
+      item.input,
+    );
+    if (digest) return toolDigestText(digest);
+    return block.kind === "text" ? block.text : formatToolValue(block.value);
+  });
+  const text = parts.filter((part): part is string => Boolean(part?.trim())).join("\n\n");
+  return text || formatToolValue(item.output);
+}
+
 /** The tool output carried by a fetched item, formatted for display. */
 export function turnItemOutputText(item: OrchestrationV2TurnItem): string | null {
   switch (item.type) {
     case "command_execution":
       return item.output?.trim() ? commandOutputText(item.output) || null : null;
     case "dynamic_tool":
-      return item.outputOmitted === true ? null : formatToolValue(item.output);
+      return item.outputOmitted === true ? null : dynamicToolOutputText(item);
     case "file_search":
       return item.results?.length
         ? item.results

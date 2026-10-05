@@ -332,6 +332,12 @@ function resolveT3McpToolName(value: string): string | null {
   return Object.hasOwn(T3_MCP_TOOLS, candidate) ? candidate : null;
 }
 
+/** The bare T3 tool name (`task_status`) behind any provider's prefixed form, or null. */
+export function resolveT3McpToolKey(toolName: string | null | undefined): string | null {
+  const name = toolName == null ? null : resolveT3McpToolName(toolName);
+  return name !== null && Object.hasOwn(T3_MCP_TOOLS, name) ? name : null;
+}
+
 export function resolveT3McpToolDefinition(
   toolName: string | null | undefined,
 ): T3McpToolDefinition | null {
