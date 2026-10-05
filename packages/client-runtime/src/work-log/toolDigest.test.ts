@@ -37,7 +37,10 @@ describe("toolResultDigest", () => {
     expect(digest).toMatchObject({
       status: { label: "Running", tone: "info" },
       title: "wiki-perf-1",
-      meta: ["Codex gpt-6.1-sol", "Still running after 5 min"],
+      meta: [
+        { kind: "model", providerInstanceId: "codex", model: "gpt-6.1-sol" },
+        { kind: "fact", text: "Still running after 5 min", icon: "clock" },
+      ],
       threads: [{ threadId: CHILD_THREAD_ID, label: "Open task thread" }],
     });
     expect(digest?.details.map(([label]) => label)).toEqual([
@@ -64,7 +67,7 @@ describe("toolResultDigest", () => {
       status: { label: "Completed", tone: "success" },
       text: "Saved 3 screenshots.",
       textLabel: "Result",
-      meta: ["Codex gpt-6.1-sol"],
+      meta: [{ kind: "model", providerInstanceId: "codex", model: "gpt-6.1-sol" }],
     });
   });
 
@@ -94,7 +97,10 @@ describe("toolResultDigest", () => {
     ).toMatchObject({
       title: "Wiki",
       href: "https://example.com/wiki",
-      meta: ["https://example.com/wiki", "375×812"],
+      meta: [
+        { kind: "fact", text: "example.com/wiki", icon: "link" },
+        { kind: "fact", text: "375×812", icon: "viewport" },
+      ],
       details: [],
     });
   });
@@ -113,7 +119,7 @@ describe("toolResultDigest", () => {
       { prompt },
     );
     expect(digest?.text).toBeUndefined();
-    expect(digest?.meta).toContain("Every 5 min");
+    expect(digest?.meta).toContainEqual({ kind: "fact", text: "Every 5 min", icon: "repeat" });
   });
 
   it("leaves plain text to the caller", () => {
@@ -135,7 +141,14 @@ describe("toolCallDigest", () => {
         clientRequestId: "proof-1",
       }),
     ).toEqual({
-      meta: ["Codex gpt-6.1-sol, medium effort"],
+      meta: [
+        {
+          kind: "model",
+          providerInstanceId: "codex",
+          model: "gpt-6.1-sol",
+          effort: "medium",
+        },
+      ],
       text: "Take proof screenshots.",
       textLabel: "Task",
       args: [["Mode", "async"]],
@@ -144,6 +157,14 @@ describe("toolCallDigest", () => {
     expect(
       toolCallDigest("mcp__t3-code__task_status", { taskId: TASK_ID, waitMs: "300000" }),
     ).toMatchObject({ args: [["Wait", "5 min"]] });
+  });
+
+  it("leaves the model to the call when the result repeats its target", () => {
+    const digest = toolResultDigest("mcp__t3-code__delegate_task", taskStatus, {
+      task: "Take proof screenshots.",
+      target: { providerInstanceId: "codex", model: "gpt-6.1-sol" },
+    });
+    expect(digest?.meta.some((meta) => meta.kind === "model")).toBe(false);
   });
 
   it("ignores tools that are not T3's", () => {

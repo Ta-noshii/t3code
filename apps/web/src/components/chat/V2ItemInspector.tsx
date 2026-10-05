@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   OrchestrationV2ProjectedTurnItem,
   RunId,
+  ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -37,6 +38,8 @@ interface V2ItemInspectorProps {
   readonly cwd?: string | undefined;
   readonly workspaceRoot?: string | undefined;
   readonly onOpenThread: (threadId: ThreadId) => void;
+  /** Provider statuses, for logos and model names in tool results. */
+  readonly providers?: ReadonlyArray<ServerProvider> | undefined;
   readonly onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   readonly onRollbackCheckpoint?: (input: {
     readonly checkpointId: string;
@@ -372,6 +375,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
               threadId: props.projectedItem.sourceThreadId,
             },
             onOpenThread: props.onOpenThread,
+            providers: props.providers,
           }}
         />
       ) : null}
