@@ -32,6 +32,7 @@ import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
 import type { TurnItemSource } from "./timelineRowContext";
+import { useEnvironmentProviders } from "../../state/environments";
 import { ToolCallDigestView, ToolOutputView, type ToolViewContext } from "./ToolOutputView";
 
 interface V2ItemInspectorProps {
@@ -287,6 +288,9 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
     props.source,
     streamsOutput,
   );
+  // Provider statuses give tool results their logos and model names. Read here,
+  // in the expanded inspector, so status pushes do not re-render every row.
+  const providers = useEnvironmentProviders().get(props.environmentId);
   const item = fetched.item;
   const outputState = fetched.output;
   return (
@@ -436,6 +440,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
               threadId: props.projectedItem.sourceThreadId,
             },
             onOpenThread: props.onOpenThread,
+            providers,
           }}
         />
       ) : null}
