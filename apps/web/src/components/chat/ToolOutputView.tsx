@@ -1,14 +1,55 @@
-import { type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ScopedThreadRef,
+  type ServerProvider,
+  ThreadId,
+} from "@t3tools/contracts";
 import type { ToolImage } from "@t3tools/shared/toolMedia";
 import { toolImageDataUrl } from "@t3tools/shared/toolMedia";
 import {
+  providerLabel,
   type ToolCallDigest,
   type ToolDigest,
+  type ToolDigestIcon,
+  type ToolDigestKind,
+  type ToolDigestMeta,
   type ToolDigestStatus,
   toolResultDigest,
 } from "@t3tools/client-runtime/work-log/tool-digest";
 import type { ToolOutputBlock, ToolStatusTone } from "@t3tools/client-runtime/work-log/tool-value";
-import { ArrowUpRightIcon, CheckIcon, ChevronRightIcon, ImageIcon } from "lucide-react";
+import {
+  ArrowUpRightIcon,
+  BanIcon,
+  BotIcon,
+  BoxesIcon,
+  CalendarClockIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
+  CircleDotIcon,
+  CircleHelpIcon,
+  CirclePauseIcon,
+  CircleXIcon,
+  ClockIcon,
+  FolderIcon,
+  GitBranchIcon,
+  GlobeIcon,
+  HourglassIcon,
+  ImageIcon,
+  InfoIcon,
+  LinkIcon,
+  ListIcon,
+  type LucideIcon,
+  MessageSquareTextIcon,
+  MonitorSmartphoneIcon,
+  MousePointerClickIcon,
+  PauseIcon,
+  RepeatIcon,
+  RotateCwIcon,
+  SendIcon,
+} from "lucide-react";
 import { memo, useState } from "react";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
@@ -17,6 +58,9 @@ import ChatMarkdown from "../ChatMarkdown";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { MiddleTruncate } from "../ui/middle-truncate";
+import { getProviderInstanceEntry } from "../../providerInstances";
+import { getTriggerDisplayModelName } from "./providerIconUtils";
+import { ProviderInstanceIcon, providerTextColorClassName } from "./ProviderInstanceIcon";
 
 const TONE_VARIANT = {
   success: "success",
@@ -30,6 +74,118 @@ export interface ToolViewContext {
   readonly cwd: string | undefined;
   readonly threadRef: ScopedThreadRef | undefined;
   readonly onOpenThread?: ((threadId: ThreadId) => void) | undefined;
+  /** Resolves provider instances to their logo and model names. */
+  readonly providers?: ReadonlyArray<ServerProvider> | undefined;
+}
+
+const KIND_ICON: Record<ToolDigestKind, LucideIcon> = {
+  task: BotIcon,
+  thread: MessageSquareTextIcon,
+  message: SendIcon,
+  page: GlobeIcon,
+  models: BoxesIcon,
+  schedule: CalendarClockIcon,
+  project: FolderIcon,
+  request: CircleHelpIcon,
+  list: ListIcon,
+};
+
+const FACT_ICON: Record<ToolDigestIcon, LucideIcon> = {
+  clock: HourglassIcon,
+  viewport: MonitorSmartphoneIcon,
+  branch: GitBranchIcon,
+  runs: RotateCwIcon,
+  folder: FolderIcon,
+  repeat: RepeatIcon,
+  calendar: ClockIcon,
+  pointer: MousePointerClickIcon,
+  alert: CircleAlertIcon,
+  link: LinkIcon,
+  pause: PauseIcon,
+  loading: ClockIcon,
+  info: InfoIcon,
+};
+
+const TONE_ICON: Record<ToolStatusTone, LucideIcon> = {
+  success: CircleCheckIcon,
+  error: CircleXIcon,
+  info: CircleDotIcon,
+  warning: CirclePauseIcon,
+  neutral: CircleDotIcon,
+};
+
+function statusIcon(status: ToolDigestStatus): LucideIcon {
+  return /cancel/iu.test(status.label) ? BanIcon : TONE_ICON[status.tone];
+}
+
+function KindIcon({ kind }: { readonly kind: ToolDigestKind | undefined }) {
+  const Icon = kind ? KIND_ICON[kind] : null;
+  return Icon ? <Icon className="size-3.5 shrink-0 self-center text-muted-foreground" /> : null;
+}
+
+/** Instance ids name a driver kind directly unless the user made a custom instance. */
+function useProviderView(context: ToolViewContext, instanceId: string) {
+  const entry = context.providers
+    ? getProviderInstanceEntry(context.providers, ProviderInstanceId.make(instanceId))
+    : undefined;
+  return {
+    entry,
+    driverKind: entry?.driverKind ?? ProviderDriverKind.make(instanceId),
+    displayName: entry?.displayName ?? providerLabel(instanceId),
+  };
+}
+
+function ProviderLogo({
+  instanceId,
+  context,
+}: {
+  readonly instanceId: string;
+  readonly context: ToolViewContext;
+}) {
+  const provider = useProviderView(context, instanceId);
+  return (
+    <ProviderInstanceIcon
+      driverKind={provider.driverKind}
+      displayName={provider.displayName}
+      acpRegistryAgentId={provider.entry?.acpRegistryAgentId}
+      acpRegistryIconUrl={provider.entry?.acpRegistryIconUrl}
+      className="z-auto"
+      iconClassName="size-3.5"
+    />
+  );
+}
+
+/** Provider logo, the model's display name in the provider's color, and the effort. */
+function ModelMeta({
+  meta,
+  context,
+}: {
+  readonly meta: Extract<ToolDigestMeta, { kind: "model" }>;
+  readonly context: ToolViewContext;
+}) {
+  const provider = useProviderView(context, meta.providerInstanceId ?? "");
+  const known = meta.model
+    ? provider.entry?.models.find((candidate) => candidate.slug === meta.model)
+    : undefined;
+  const name = known ? getTriggerDisplayModelName(known) : (meta.model ?? provider.displayName);
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      {meta.providerInstanceId ? (
+        <ProviderLogo instanceId={meta.providerInstanceId} context={context} />
+      ) : null}
+      <span
+        className={cn(
+          "min-w-0 font-medium break-words",
+          meta.providerInstanceId
+            ? providerTextColorClassName(provider.driverKind)
+            : "text-foreground",
+        )}
+      >
+        {name}
+      </span>
+      {meta.effort ? <span className="text-muted-foreground">{meta.effort}</span> : null}
+    </span>
+  );
 }
 
 function formatBytes(bytes: number): string {
@@ -45,8 +201,10 @@ function imageCaption(image: ToolImage): string {
 }
 
 function StatusBadge({ status }: { readonly status: ToolDigestStatus }) {
+  const Icon = statusIcon(status);
   return (
     <Badge variant={TONE_VARIANT[status.tone]} size="sm">
+      <Icon />
       {status.label}
     </Badge>
   );
@@ -83,6 +241,7 @@ function ThreadButtons({
       size="micro"
       onClick={() => onOpenThread(ThreadId.make(thread.threadId))}
     >
+      <MessageSquareTextIcon />
       {thread.label}
       <ArrowUpRightIcon />
     </Button>
@@ -133,15 +292,28 @@ function LongText({
   );
 }
 
-function Meta({ items }: { readonly items: readonly string[] }) {
+function Meta({
+  items,
+  context,
+}: {
+  readonly items: readonly ToolDigestMeta[];
+  readonly context: ToolViewContext;
+}) {
   if (items.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
-      {items.map((item) => (
-        <span key={item} className="min-w-0 break-words">
-          {item}
-        </span>
-      ))}
+    <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-muted-foreground">
+      {items.map((item, index) => {
+        if (item.kind === "model") {
+          return <ModelMeta key={`model-${index}`} meta={item} context={context} />;
+        }
+        const Icon = item.icon ? FACT_ICON[item.icon] : null;
+        return (
+          <span key={item.text} className="inline-flex min-w-0 items-center gap-1">
+            {Icon ? <Icon className="size-3 shrink-0 opacity-80" /> : null}
+            <span className="min-w-0 break-words">{item.text}</span>
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -154,15 +326,18 @@ export function ToolCallDigestView({
   readonly digest: ToolCallDigest;
   readonly context: ToolViewContext;
 }) {
-  const settings = [
+  const settings: ToolDigestMeta[] = [
     ...digest.meta,
-    ...digest.args.map(([label, value]) => (value ? `${label} ${value}` : label)),
+    ...digest.args.map(([label, value]) => ({
+      kind: "fact" as const,
+      text: value ? `${label} ${value}` : label,
+    })),
   ];
   if (!digest.title && !digest.text && settings.length === 0) return null;
   return (
     <div className="space-y-1.5 font-sans">
       {digest.title ? <div className="font-medium text-foreground">{digest.title}</div> : null}
-      <Meta items={settings} />
+      <Meta items={settings} context={context} />
       {digest.text ? (
         <LongText label={digest.textLabel} text={digest.text} context={context} muted />
       ) : null}
@@ -183,43 +358,56 @@ function DigestRows({
     <div className="space-y-1">
       <ul className="divide-y divide-border/50 rounded-md border border-border/50">
         {shown.map((row, index) => (
-          <li
-            key={`${row.title}-${index}`}
-            className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 px-2 py-1.5"
-          >
-            {row.status ? <StatusBadge status={row.status} /> : null}
-            {row.href ? (
-              <a
-                href={row.href}
-                target="_blank"
-                rel="noreferrer"
-                className="min-w-0 break-words text-foreground hover:underline"
-              >
-                {row.title}
-              </a>
-            ) : row.threadId && context.onOpenThread ? (
-              <button
-                type="button"
-                className="min-w-0 text-left break-words text-foreground hover:underline"
-                onClick={() => context.onOpenThread?.(ThreadId.make(row.threadId!))}
-              >
-                {row.title}
-              </button>
-            ) : (
-              <span className="min-w-0 break-words text-foreground">{row.title}</span>
-            )}
-            {row.detail ? (
-              <span className="min-w-0 break-words text-muted-foreground">{row.detail}</span>
-            ) : null}
-            {row.chips?.length ? (
-              <span className="flex basis-full flex-wrap gap-1">
-                {row.chips.map((chip) => (
-                  <Badge key={chip} variant="outline" size="sm">
-                    {chip}
-                  </Badge>
-                ))}
-              </span>
-            ) : null}
+          <li key={`${row.title}-${index}`} className="flex min-w-0 gap-2 px-2 py-1.5">
+            <span className="flex h-4 shrink-0 items-center">
+              {row.providerInstanceId ? (
+                <ProviderLogo instanceId={row.providerInstanceId} context={context} />
+              ) : (
+                <KindIcon kind={row.kind} />
+              )}
+            </span>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+              {row.href ? (
+                <a
+                  href={row.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 break-words text-foreground hover:underline"
+                >
+                  {row.title}
+                </a>
+              ) : row.threadId && context.onOpenThread ? (
+                <button
+                  type="button"
+                  className="min-w-0 text-left break-words text-foreground hover:underline"
+                  onClick={() => context.onOpenThread?.(ThreadId.make(row.threadId!))}
+                >
+                  {row.title}
+                </button>
+              ) : (
+                <span
+                  className={cn(
+                    "min-w-0 break-words text-foreground",
+                    row.providerInstanceId && "font-medium",
+                  )}
+                >
+                  {row.title}
+                </span>
+              )}
+              {row.status ? <StatusBadge status={row.status} /> : null}
+              {row.detail ? (
+                <span className="basis-full text-muted-foreground">{row.detail}</span>
+              ) : null}
+              {row.chips?.length ? (
+                <span className="flex basis-full flex-wrap gap-1">
+                  {row.chips.map((chip) => (
+                    <Badge key={chip} variant="outline" size="sm">
+                      {chip}
+                    </Badge>
+                  ))}
+                </span>
+              ) : null}
+            </div>
           </li>
         ))}
       </ul>
@@ -244,7 +432,7 @@ function DigestView({
     <div className="space-y-2">
       {hasHead ? (
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          {digest.status ? <StatusBadge status={digest.status} /> : null}
+          <KindIcon kind={digest.kind} />
           {digest.title ? (
             digest.href ? (
               <a
@@ -261,12 +449,13 @@ function DigestView({
               </span>
             )
           ) : null}
+          {digest.status ? <StatusBadge status={digest.status} /> : null}
           <span className="ml-auto flex gap-1">
             <ThreadButtons threads={digest.threads} context={context} />
           </span>
         </div>
       ) : null}
-      <Meta items={digest.meta} />
+      <Meta items={digest.meta} context={context} />
       {digest.error ? <div className="text-destructive">{digest.error}</div> : null}
       {digest.text ? (
         <LongText label={digest.textLabel} text={digest.text} context={context} />
