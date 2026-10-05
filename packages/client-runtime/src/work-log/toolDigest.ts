@@ -17,8 +17,49 @@ export interface ToolDigestStatus {
   readonly tone: ToolStatusTone;
 }
 
+/** What a digest is about, so clients can mark it with an icon. */
+export type ToolDigestKind =
+  | "task"
+  | "thread"
+  | "message"
+  | "page"
+  | "models"
+  | "schedule"
+  | "project"
+  | "request"
+  | "list";
+
+/** Icons for facts in a digest's meta line. Clients map them to their own glyphs. */
+export type ToolDigestIcon =
+  | "clock"
+  | "viewport"
+  | "branch"
+  | "runs"
+  | "folder"
+  | "repeat"
+  | "calendar"
+  | "pointer"
+  | "alert"
+  | "link"
+  | "pause"
+  | "loading"
+  | "info";
+
+/** One fact beside the title: a model (drawn with its provider's logo) or a short line. */
+export type ToolDigestMeta =
+  | {
+      readonly kind: "model";
+      readonly providerInstanceId?: string | undefined;
+      readonly model?: string | undefined;
+      readonly effort?: string | undefined;
+    }
+  | { readonly kind: "fact"; readonly text: string; readonly icon?: ToolDigestIcon | undefined };
+
 export interface ToolDigestRow {
   readonly title: string;
+  readonly kind?: ToolDigestKind | undefined;
+  /** Provider instance the row stands for, drawn with its logo. */
+  readonly providerInstanceId?: string | undefined;
   readonly detail?: string | undefined;
   readonly status?: ToolDigestStatus | undefined;
   readonly threadId?: string | undefined;
@@ -27,12 +68,13 @@ export interface ToolDigestRow {
 }
 
 export interface ToolDigest {
+  readonly kind?: ToolDigestKind | undefined;
   readonly status?: ToolDigestStatus | undefined;
   /** The thing the call acted on or produced: a task name, page title, thread title. */
   readonly title?: string | undefined;
   readonly href?: string | undefined;
   /** Short facts read alongside the title: model, viewport, counts. */
-  readonly meta: readonly string[];
+  readonly meta: readonly ToolDigestMeta[];
   readonly threads: ReadonlyArray<{ readonly threadId: string; readonly label: string }>;
   /** Text worth reading in full, rendered as markdown. */
   readonly text?: string | undefined;
@@ -100,18 +142,44 @@ export function providerLabel(providerInstanceId: string): string {
   return toolFieldLabel(providerInstanceId);
 }
 
-/** "Codex gpt-6.1-sol", "Codex gpt-6.1-sol, medium effort". */
+function fact(text: string, icon?: ToolDigestIcon): ToolDigestMeta {
+  return { kind: "fact", text, ...(icon ? { icon } : {}) };
+}
+
+function facts(...items: Array<ToolDigestMeta | undefined>): ToolDigestMeta[] {
+  return items.filter((item): item is ToolDigestMeta => item !== undefined);
+}
+
+/** The model a task or thread runs on, with its provider and reasoning effort. */
 function modelMeta(
   fields: Fields,
   providerKey = "providerInstanceId",
   modelKey = "model",
-): string[] {
-  const provider = str(fields[providerKey]);
+): ToolDigestMeta[] {
+  const providerInstanceId = str(fields[providerKey]);
   const model = str(fields[modelKey]);
   const effort = isRecord(fields.options) ? str(fields.options.reasoningEffort) : undefined;
-  const label = [provider ? providerLabel(provider) : undefined, model].filter(Boolean).join(" ");
-  if (!label) return [];
-  return [effort ? `${label}, ${effort} effort` : label];
+  if (!providerInstanceId && !model) return [];
+  return [
+    {
+      kind: "model",
+      ...(providerInstanceId ? { providerInstanceId } : {}),
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
+    },
+  ];
+}
+
+/** "Codex gpt-6.1-sol, medium effort", or the fact's text. */
+export function toolDigestMetaText(meta: ToolDigestMeta): string {
+  if (meta.kind === "fact") return meta.text;
+  const label = [
+    meta.providerInstanceId ? providerLabel(meta.providerInstanceId) : undefined,
+    meta.model,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return meta.effort ? `${label}, ${meta.effort} effort` : label;
 }
 
 export function durationLabel(ms: number): string {
@@ -147,6 +215,17 @@ const TIME_FORMAT = new Intl.DateTimeFormat("en-US", {
 export function timeLabel(iso: string): string {
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? iso : TIME_FORMAT.format(ms);
+}
+
+/** "https://host/path?query" → "host/path"; the full URL stays on the title link. */
+export function shortUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    return `${parsed.host}${path}`;
+  } catch {
+    return url;
+  }
 }
 
 function firstLine(text: string, max = 120): string {
@@ -223,13 +302,21 @@ function rowFrom(value: unknown): ToolDigestRow | undefined {
   const rawTime = str(value.updatedAt) ?? str(value.messageCreatedAt) ?? str(value.createdAt);
   const time = rawTime ? timeLabel(rawTime) : undefined;
   const detailParts = [
-    ...modelMeta(value),
+    ...modelMeta(value).map(toolDigestMetaText),
     path && path !== title ? path : undefined,
     url && url !== title ? url : undefined,
     str(value.branch),
   ].filter((part): part is string => part !== undefined);
+  const kind: ToolDigestKind | undefined = threadKey
+    ? "thread"
+    : str(value.workspaceRoot)
+      ? "project"
+      : url
+        ? "page"
+        : undefined;
   return {
     title,
+    ...(kind ? { kind } : {}),
     ...(detailParts.length > 0 ? { detail: detailParts.join("  ") } : {}),
     ...(status ? { status } : {}),
     ...(threadKey ? { threadId: str(value[threadKey])! } : {}),
@@ -286,10 +373,10 @@ function genericDigest(fields: Fields): ToolDigest {
     if (used.has(key) || NOISE_KEYS.has(key) || isOpaqueId(key, value)) continue;
     if (typeof value === "boolean") {
       used.add(key);
-      if (value) meta.push(toolFieldLabel(key));
+      if (value) meta.push(fact(toolFieldLabel(key)));
     } else if (typeof value === "number" && meta.length < 6) {
       used.add(key);
-      meta.push(`${toolFieldLabel(key)} ${value.toLocaleString("en-US")}`);
+      meta.push(fact(`${toolFieldLabel(key)} ${value.toLocaleString("en-US")}`));
     } else if (
       typeof value === "string" &&
       value.length <= 60 &&
@@ -297,7 +384,7 @@ function genericDigest(fields: Fields): ToolDigest {
       meta.length < 6
     ) {
       used.add(key);
-      meta.push(`${toolFieldLabel(key)} ${value}`);
+      meta.push(fact(`${toolFieldLabel(key)} ${value}`));
     }
   }
   return {
@@ -332,12 +419,16 @@ function taskDigest(fields: Fields, input: Fields | undefined, tool: string): To
   const waitMs = num(Number(input?.waitMs));
   if (fields.waitTimedOut === true) {
     meta.push(
-      waitMs ? `Still running after ${durationLabel(waitMs)}` : "Still running after the wait",
+      fact(
+        waitMs ? `Still running after ${durationLabel(waitMs)}` : "Still running after the wait",
+        "clock",
+      ),
     );
   }
   const text = str(fields.summary) ?? str(fields.latestTerminalSummary);
   const childThreadId = str(fields.childThreadId);
   return {
+    kind: "task",
     ...(status ? { status } : {}),
     ...(name ? { title: name } : {}),
     meta,
@@ -362,16 +453,21 @@ function taskDigest(fields: Fields, input: Fields | undefined, tool: string): To
 
 function threadDigest(thread: Fields): ToolDigest {
   const digest = genericDigest(thread);
-  const counts = [
-    num(thread.runCount) !== undefined
-      ? `${thread.runCount} ${thread.runCount === 1 ? "run" : "runs"}`
-      : undefined,
-    num(thread.pendingRequestCount) ? `${thread.pendingRequestCount} pending requests` : undefined,
-  ].filter((part): part is string => part !== undefined);
+  const runs = num(thread.runCount);
+  const pending = num(thread.pendingRequestCount);
+  const branch = str(thread.branch);
   const threadId = str(thread.threadId);
   return {
     ...digest,
-    meta: [...modelMeta(thread), ...(str(thread.branch) ? [str(thread.branch)!] : []), ...counts],
+    kind: "thread",
+    meta: [
+      ...modelMeta(thread),
+      ...facts(
+        branch ? fact(branch, "branch") : undefined,
+        runs !== undefined ? fact(`${runs} ${runs === 1 ? "run" : "runs"}`, "runs") : undefined,
+        pending ? fact(`${pending} pending requests`, "alert") : undefined,
+      ),
+    ],
     threads: threadId ? [{ threadId, label: "Open thread" }] : digest.threads,
   };
 }
@@ -390,15 +486,16 @@ function previewDigest(fields: Fields): ToolDigest {
     : 0;
   const url = str(fields.url);
   const title = str(fields.title);
-  const meta = [
-    title && url ? url : undefined,
-    size,
-    fields.loading === true ? "Loading" : undefined,
-    elements ? `${elements} interactive elements` : undefined,
-    consoleErrors ? `${consoleErrors} console errors` : undefined,
-  ].filter((part): part is string => part !== undefined);
+  const meta = facts(
+    title && url ? fact(shortUrl(url), "link") : undefined,
+    size ? fact(size, "viewport") : undefined,
+    fields.loading === true ? fact("Loading", "loading") : undefined,
+    elements ? fact(`${elements} interactive elements`, "pointer") : undefined,
+    consoleErrors ? fact(`${consoleErrors} console errors`, "alert") : undefined,
+  );
   const value = "value" in fields ? fields.value : undefined;
   return {
+    ...(title || url ? { kind: "page" as const } : {}),
     ...(title ? { title } : url ? { title: url } : {}),
     ...(url ? { href: url } : {}),
     meta,
@@ -435,13 +532,16 @@ function scheduleLabel(schedule: unknown): string | undefined {
 
 function scheduledTaskDigest(fields: Fields): ToolDigest {
   const digest = genericDigest(fields);
-  const meta = [
-    scheduleLabel(fields.schedule),
-    fields.enabled === false ? "Paused" : undefined,
-    str(fields.nextRunAt) ? `Next run ${timeLabel(str(fields.nextRunAt)!)}` : undefined,
-  ].filter((part): part is string => part !== undefined);
+  const every = scheduleLabel(fields.schedule);
+  const nextRunAt = str(fields.nextRunAt);
+  const meta = facts(
+    every ? fact(every, "repeat") : undefined,
+    fields.enabled === false ? fact("Paused", "pause") : undefined,
+    nextRunAt ? fact(`Next run ${timeLabel(nextRunAt)}`, "calendar") : undefined,
+  );
   return {
     ...digest,
+    kind: "schedule",
     status: digestStatus(fields.lastRunStatus === "never" ? undefined : fields.lastRunStatus) ?? {
       label: "Scheduled",
       tone: "info",
@@ -455,19 +555,21 @@ function capabilitiesDigest(fields: Fields): ToolDigest {
   const providers = Array.isArray(fields.providers) ? fields.providers.filter(isRecord) : [];
   const rows = providers.map((provider) => {
     const models = Array.isArray(provider.models) ? provider.models.filter(isRecord) : [];
+    const providerInstanceId = str(provider.providerInstanceId);
     return {
-      title:
-        str(provider.displayName) ?? providerLabel(str(provider.providerInstanceId) ?? "provider"),
+      title: str(provider.displayName) ?? providerLabel(providerInstanceId ?? "provider"),
+      ...(providerInstanceId ? { providerInstanceId } : {}),
       chips: models.map((model) => str(model.label) ?? str(model.id) ?? "model"),
     };
   });
   const inherited = modelMeta(fields, "inheritedProviderInstanceId", "inheritedModel");
   const hidden = num(fields.hiddenModelCount);
   return {
+    kind: "models",
     title: `${rows.reduce((total, row) => total + row.chips.length, 0)} models available`,
     meta: [
-      ...(inherited.length ? [`This thread: ${inherited[0]}`] : []),
-      ...(hidden ? [`${hidden} hidden`] : []),
+      ...(inherited.length ? [fact("This thread"), ...inherited] : []),
+      ...facts(hidden ? fact(`${hidden} hidden`) : undefined),
     ],
     threads: [],
     rows,
@@ -488,6 +590,7 @@ function presenterDigest(tool: string, fields: Fields, input: Fields | undefined
       const delivery = str(fields.delivery);
       return {
         ...digest,
+        kind: "message",
         title: delivery === "queued" ? "Message queued" : "Message sent",
         meta: [],
         threads: digest.threads.map((thread) => ({ ...thread, label: "Open thread" })),
@@ -505,6 +608,7 @@ function presenterDigest(tool: string, fields: Fields, input: Fields | undefined
       const total = num(fields.total) ?? digest.rows?.length ?? 0;
       return {
         ...digest,
+        kind: "list",
         title: digest.rows?.length
           ? `${total} ${total === 1 ? "result" : "results"}`
           : (digest.title ?? ""),
@@ -517,7 +621,8 @@ function presenterDigest(tool: string, fields: Fields, input: Fields | undefined
     case "t3_project_update": {
       const project = isRecord(fields.project) ? fields.project : fields;
       const digest = genericDigest(project);
-      return { ...digest, meta: str(project.workspaceRoot) ? [str(project.workspaceRoot)!] : [] };
+      const root = str(project.workspaceRoot);
+      return { ...digest, kind: "project", meta: root ? [fact(root, "folder")] : [] };
     }
     case "orchestrator_capabilities":
       return capabilitiesDigest(fields);
@@ -529,6 +634,7 @@ function presenterDigest(tool: string, fields: Fields, input: Fields | undefined
       return ids.length
         ? {
             ...base(),
+            kind: "request",
             title: `${ids.length} pending ${ids.length === 1 ? "request" : "requests"}`,
             details: ids.map((id, index) => [`Request ${index + 1}`, String(id)] as const),
           }
@@ -538,13 +644,19 @@ function presenterDigest(tool: string, fields: Fields, input: Fields | undefined
       const questions = Array.isArray(fields.questions) ? fields.questions.filter(isRecord) : [];
       return {
         ...base(),
+        kind: "request",
         title: questions.length === 1 ? "1 question" : `${questions.length} questions`,
         text: questions.map((question) => `> ${str(question.question) ?? ""}`).join("\n\n"),
         details: restDetails(fields, new Set(["questions"])),
       };
     }
     case "t3_pending_request_respond":
-      return { ...base(), title: "Answer sent", details: restDetails(fields, new Set()) };
+      return {
+        ...base(),
+        kind: "request",
+        title: "Answer sent",
+        details: restDetails(fields, new Set()),
+      };
     default:
       if (tool.startsWith("preview_") || tool.startsWith("device_")) return previewDigest(fields);
       return genericDigest(fields);
@@ -569,8 +681,9 @@ export function toolResultDigest(
     if (t3Tool === "t3_thread_wait")
       return {
         ...base(),
+        kind: "thread",
         status: { label: "Still running", tone: "info" },
-        meta: ["The wait ended before the thread stopped"],
+        meta: [fact("The wait ended before the thread stopped", "clock")],
       };
     return null;
   }
@@ -580,17 +693,26 @@ export function toolResultDigest(
   }
   if (!isRecord(value)) return null;
   const digest = t3Tool ? presenterDigest(t3Tool, value, inputFields) : genericDigest(value);
-  // A result that echoes the prompt it was given (a scheduled task) shows it once, in the call.
+  // What the call already shows (the prompt a scheduled task echoes, the
+  // model a delegated task was sent to) is not repeated in the result.
   const echoed =
     digest.text !== undefined &&
     inputFields !== undefined &&
     CALL_TEXT_KEYS.some((key) => str(inputFields[key]) === digest.text);
-  return echoed ? { ...digest, text: undefined, textLabel: undefined } : digest;
+  const target = isRecord(inputFields?.target) ? inputFields.target : undefined;
+  const targetModel = target ? str(target.model) : undefined;
+  const sameTitle = digest.title !== undefined && digest.title === str(inputFields?.title);
+  return {
+    ...digest,
+    ...(echoed ? { text: undefined, textLabel: undefined } : {}),
+    ...(sameTitle ? { title: undefined } : {}),
+    meta: digest.meta.filter((meta) => meta.kind !== "model" || meta.model !== targetModel),
+  };
 }
 
 export interface ToolCallDigest {
   readonly title?: string | undefined;
-  readonly meta: readonly string[];
+  readonly meta: readonly ToolDigestMeta[];
   readonly text?: string | undefined;
   readonly textLabel?: string | undefined;
   readonly args: ReadonlyArray<readonly [string, string]>;
@@ -646,7 +768,7 @@ export function toolCallDigest(
 export function toolDigestText(digest: ToolDigest): string {
   return [
     [digest.status?.label, digest.title].filter(Boolean).join(": "),
-    digest.meta.join(", "),
+    digest.meta.map(toolDigestMetaText).join(", "),
     digest.error,
     digest.text,
     ...(digest.rows ?? []).map((row) =>
