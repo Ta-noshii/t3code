@@ -8,8 +8,11 @@ import type {
   RelayClientEnvironmentRecord,
   RelayEnvironmentStatusResponse,
 } from "@t3tools/contracts/relay";
+import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { useCallback, useMemo } from "react";
+import { Alert } from "react-native";
+import { AsyncResult } from "effect/unstable/reactivity";
 
 import { environmentCatalog } from "../../connection/catalog";
 import {
@@ -93,8 +96,24 @@ export function useConnectionController() {
     [retryEnvironmentMutation],
   );
   const setEnvironmentEnabled = useCallback(
-    (environmentId: EnvironmentId, enabled: boolean) =>
-      setEnvironmentEnabledMutation({ environmentId, enabled }),
+    async (environmentId: EnvironmentId, enabled: boolean) => {
+      const result = await setEnvironmentEnabledMutation({ environmentId, enabled });
+      // The switch snaps back on failure; say why instead of only logging it.
+      if (AsyncResult.isFailure(result) && !Cause.hasInterruptsOnly(result.cause)) {
+        const error: unknown = Cause.squash(result.cause);
+        const detail =
+          typeof error === "object" && error !== null && "detail" in error
+            ? String(error.detail)
+            : error instanceof Error
+              ? error.message
+              : String(error);
+        Alert.alert(
+          enabled ? "Could not turn this environment on" : "Could not turn this environment off",
+          detail,
+        );
+      }
+      return result;
+    },
     [setEnvironmentEnabledMutation],
   );
   const updateEnvironment = useCallback(
