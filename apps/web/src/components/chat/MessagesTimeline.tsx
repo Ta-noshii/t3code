@@ -3334,6 +3334,7 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               cwd={ctx.markdownCwd}
               workspaceRoot={ctx.workspaceRoot}
               onOpenThread={ctx.onOpenThread}
+              providers={ctx.providerStatuses}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
               onRollbackCheckpoint={ctx.onRollbackCheckpoint}
               onImageExpand={ctx.onImageExpand}
@@ -3409,6 +3410,7 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               cwd={ctx.markdownCwd}
               workspaceRoot={ctx.workspaceRoot}
               onOpenThread={ctx.onOpenThread}
+              providers={ctx.providerStatuses}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
               onRollbackCheckpoint={ctx.onRollbackCheckpoint}
               onImageExpand={ctx.onImageExpand}
@@ -6078,6 +6080,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               cwd={ctx.markdownCwd}
               workspaceRoot={workspaceRoot}
               onOpenThread={ctx.onOpenThread}
+              providers={ctx.providerStatuses}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
               onRollbackCheckpoint={ctx.onRollbackCheckpoint}
               onImageExpand={ctx.onImageExpand}
