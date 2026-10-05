@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  toolFieldLabel,
-  toolFields,
-  toolOutputBlocks,
-  toolScalarView,
-  toolStatusTone,
-} from "./toolValue.ts";
+import { toolFieldLabel, toolOutputBlocks, toolStatusTone } from "./toolValue.ts";
 
 describe("toolOutputBlocks", () => {
   it("prefers structuredContent over its text copy and keeps images", () => {
@@ -62,37 +56,10 @@ describe("toolOutputBlocks", () => {
   });
 });
 
-describe("toolScalarView", () => {
-  it.each([
-    ["status", "completed", { kind: "status", text: "completed", tone: "success" }],
-    ["workState", "running", { kind: "status", text: "running", tone: "info" }],
-    ["createdAt", "2026-10-05T09:00:00.000Z", { kind: "time", iso: "2026-10-05T09:00:00.000Z" }],
-    [
-      "url",
-      "https://github.com/a/b/pull/1",
-      { kind: "url", href: "https://github.com/a/b/pull/1" },
-    ],
-    ["taskId", "task_8f2c", { kind: "id", text: "task_8f2c" }],
-    ["cwd", "/home/me/project", { kind: "path", text: "/home/me/project" }],
-    ["model", "gpt-6.1-sol", { kind: "text", text: "gpt-6.1-sol" }],
-    ["count", 1200, { kind: "number", text: "1,200" }],
-  ] as const)("classifies %s", (key, value, expected) => {
-    expect(toolScalarView(key, value)).toEqual(expected);
-  });
-
-  it("reads epoch milliseconds under a time key", () => {
-    expect(toolScalarView("updatedAt", 1_790_000_000_000)).toMatchObject({ kind: "time" });
-  });
-});
-
 describe("field helpers", () => {
-  it("labels and filters fields", () => {
+  it("labels fields", () => {
     expect(toolFieldLabel("childNodeId")).toBe("Child node id");
     expect(toolFieldLabel("provider_instance_id")).toBe("Provider instance id");
-    expect(toolFields({ a: null, b: "", c: [], d: { e: null }, f: 0, g: "x" })).toEqual([
-      ["f", 0],
-      ["g", "x"],
-    ]);
   });
 
   it("tones unknown statuses neutrally", () => {

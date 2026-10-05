@@ -1,26 +1,22 @@
+import { type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { ToolImage } from "@t3tools/shared/toolMedia";
 import { toolImageDataUrl } from "@t3tools/shared/toolMedia";
 import {
-  type ToolOutputBlock,
-  type ToolStatusTone,
-  toolFieldLabel,
-  toolFields,
-  toolListIsInline,
-  toolRecordTitle,
-  toolScalarView,
-} from "@t3tools/client-runtime/work-log/tool-value";
-import { CheckIcon, ImageIcon } from "lucide-react";
-import { memo, useState, type ReactNode } from "react";
+  type ToolCallDigest,
+  type ToolDigest,
+  type ToolDigestStatus,
+  toolResultDigest,
+} from "@t3tools/client-runtime/work-log/tool-digest";
+import type { ToolOutputBlock, ToolStatusTone } from "@t3tools/client-runtime/work-log/tool-value";
+import { ArrowUpRightIcon, CheckIcon, ChevronRightIcon, ImageIcon } from "lucide-react";
+import { memo, useState } from "react";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
-import { formatRelativeTimeLabel } from "../../timestampFormat";
+import ChatMarkdown from "../ChatMarkdown";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { MiddleTruncate } from "../ui/middle-truncate";
-
-const MAX_DEPTH = 4;
-const MAX_LIST_ITEMS = 50;
 
 const TONE_VARIANT = {
   success: "success",
@@ -30,8 +26,10 @@ const TONE_VARIANT = {
   neutral: "outline",
 } as const satisfies Record<ToolStatusTone, string>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+export interface ToolViewContext {
+  readonly cwd: string | undefined;
+  readonly threadRef: ScopedThreadRef | undefined;
+  readonly onOpenThread?: ((threadId: ThreadId) => void) | undefined;
 }
 
 function formatBytes(bytes: number): string {
@@ -46,186 +44,235 @@ function imageCaption(image: ToolImage): string {
   return `${size}${format}${image.byteLength ? `, ${formatBytes(image.byteLength)}` : ""}`;
 }
 
-const timeFormatter = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
+function StatusBadge({ status }: { readonly status: ToolDigestStatus }) {
+  return (
+    <Badge variant={TONE_VARIANT[status.tone]} size="sm">
+      {status.label}
+    </Badge>
+  );
+}
 
-function CopyableId({ text }: { readonly text: string }) {
+function CopyableValue({ text }: { readonly text: string }) {
   const { copyToClipboard, isCopied } = useCopyToClipboard();
   return (
     <button
       type="button"
-      className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-sm font-mono text-foreground/85 hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring"
+      className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-sm font-mono text-foreground/80 hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring"
       aria-label={`Copy ${text}`}
       onClick={() => copyToClipboard(text, undefined)}
     >
-      <MiddleTruncate value={text} tail={6} />
+      <MiddleTruncate value={text} tail={12} />
       {isCopied ? <CheckIcon className="size-3 shrink-0 text-success" /> : null}
     </button>
   );
 }
 
-function ScalarValue({
-  fieldKey,
-  value,
+function ThreadButtons({
+  threads,
+  context,
 }: {
-  readonly fieldKey: string;
-  readonly value: string | number | boolean;
+  readonly threads: ToolDigest["threads"];
+  readonly context: ToolViewContext;
 }) {
-  const view = toolScalarView(fieldKey, value);
-  switch (view.kind) {
-    case "status":
-      return (
-        <Badge variant={TONE_VARIANT[view.tone]} size="sm">
-          {view.text.replace(/_/gu, " ")}
-        </Badge>
-      );
-    case "time": {
-      const date = new Date(view.iso);
-      return (
-        <span>
-          {timeFormatter.format(date)}
-          <span className="text-muted-foreground"> ({formatRelativeTimeLabel(view.iso)})</span>
-        </span>
-      );
-    }
-    case "url":
-      return (
-        <a
-          href={view.href}
-          target="_blank"
-          rel="noreferrer"
-          className="break-all text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground"
-        >
-          {view.href}
-        </a>
-      );
-    case "id":
-      return <CopyableId text={view.text} />;
-    case "path":
-      return <span className="font-mono break-all">{view.text}</span>;
-    case "longText":
-      return (
-        <pre className="max-h-48 overflow-auto font-mono whitespace-pre-wrap break-words text-foreground/85">
-          {view.text}
-        </pre>
-      );
-    case "boolean":
-      return (
-        <span className={view.value ? "" : "text-muted-foreground"}>
-          {view.value ? "Yes" : "No"}
-        </span>
-      );
-    case "number":
-    case "text":
-      return <span className="break-words">{view.text}</span>;
-  }
+  const onOpenThread = context.onOpenThread;
+  if (!onOpenThread || threads.length === 0) return null;
+  return threads.map((thread) => (
+    <Button
+      key={thread.threadId}
+      variant="outline"
+      size="micro"
+      onClick={() => onOpenThread(ThreadId.make(thread.threadId))}
+    >
+      {thread.label}
+      <ArrowUpRightIcon />
+    </Button>
+  ));
 }
 
-function FieldValue({
-  fieldKey,
-  value,
-  depth,
+/** Prompt-sized text, cut to a few lines until opened. */
+function LongText({
+  label,
+  text,
+  context,
+  muted = false,
 }: {
-  readonly fieldKey: string;
-  readonly value: unknown;
-  readonly depth: number;
-}): ReactNode {
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return <ScalarValue fieldKey={fieldKey} value={value} />;
-  }
-  if (depth >= MAX_DEPTH) {
-    return <pre className="font-mono whitespace-pre-wrap break-words">{JSON.stringify(value)}</pre>;
-  }
-  if (Array.isArray(value)) {
-    if (toolListIsInline(value)) {
-      return (
-        <span className="flex flex-wrap gap-1">
-          {value.map((entry, index) => (
-            <Badge key={index} variant="outline" size="sm">
-              {String(entry)}
-            </Badge>
-          ))}
-        </span>
-      );
-    }
-    const shown = value.slice(0, MAX_LIST_ITEMS);
-    return (
-      <div className="space-y-1.5">
-        {shown.map((entry, index) =>
-          isRecord(entry) ? (
-            <RecordCard key={index} value={entry} depth={depth + 1} />
-          ) : (
-            <div key={index}>
-              <FieldValue fieldKey={fieldKey} value={entry} depth={depth + 1} />
-            </div>
-          ),
-        )}
-        {value.length > shown.length ? (
-          <div className="text-muted-foreground">{value.length - shown.length} more not shown</div>
-        ) : null}
-      </div>
-    );
-  }
-  if (isRecord(value)) {
-    return (
-      <div className="border-l border-border/60 pl-2">
-        <RecordFields value={value} depth={depth + 1} />
-      </div>
-    );
-  }
-  return null;
-}
-
-function RecordFields({
-  value,
-  depth,
-  skipKey,
-}: {
-  readonly value: Record<string, unknown>;
-  readonly depth: number;
-  readonly skipKey?: string | undefined;
+  readonly label: string | undefined;
+  readonly text: string;
+  readonly context: ToolViewContext;
+  readonly muted?: boolean;
 }) {
-  const fields = toolFields(value).filter(([key]) => key !== skipKey);
-  if (fields.length === 0) return null;
+  const [open, setOpen] = useState(false);
+  const long = text.length > 280 || text.split("\n").length > 5;
   return (
-    <dl className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1">
-      {fields.map(([key, entry]) => {
-        const nested = isRecord(entry) || (Array.isArray(entry) && !toolListIsInline(entry));
-        return (
-          <div
-            key={key}
-            className={cn("contents", nested && "[&>dd]:col-span-2 [&>dt]:col-span-2")}
-          >
-            <dt className="max-w-40 truncate text-muted-foreground">{toolFieldLabel(key)}</dt>
-            <dd className="min-w-0 text-foreground/90">
-              <FieldValue fieldKey={key} value={entry} depth={depth} />
-            </dd>
-          </div>
-        );
-      })}
-    </dl>
+    <div className="space-y-0.5">
+      {label ? <div className="text-muted-foreground">{label}</div> : null}
+      <div
+        className={cn(
+          "border-l-2 border-border pl-2.5",
+          long && !open && "max-h-28 overflow-hidden mask-b-from-60% [&_.chat-markdown>*]:my-1",
+        )}
+        // The fade marks the cut; "Show all" opens the rest.
+        data-overflow-ok={long && !open ? "" : undefined}
+      >
+        <ChatMarkdown
+          text={text}
+          cwd={context.cwd}
+          threadRef={context.threadRef}
+          className={cn(
+            "text-xs leading-normal",
+            muted ? "text-muted-foreground" : "text-foreground/90",
+          )}
+        />
+      </div>
+      {long ? (
+        <Button variant="ghost-muted" size="micro" onClick={() => setOpen((value) => !value)}>
+          {open ? "Show less" : "Show all"}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
-/** One object in a list, headed by its name-like field. */
-function RecordCard({
-  value,
-  depth,
-}: {
-  readonly value: Record<string, unknown>;
-  readonly depth: number;
-}) {
-  const title = toolRecordTitle(value);
-  const titleKey =
-    title === undefined ? undefined : Object.keys(value).find((key) => value[key] === title);
+function Meta({ items }: { readonly items: readonly string[] }) {
+  if (items.length === 0) return null;
   return (
-    <div className="rounded-md border border-border/50 px-2 py-1.5">
-      {title ? <div className="mb-1 truncate font-medium text-foreground">{title}</div> : null}
-      <RecordFields value={value} depth={depth} skipKey={titleKey} />
+    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
+      {items.map((item) => (
+        <span key={item} className="min-w-0 break-words">
+          {item}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** The arguments a T3 tool was called with, as the prompt and a line of settings. */
+export function ToolCallDigestView({
+  digest,
+  context,
+}: {
+  readonly digest: ToolCallDigest;
+  readonly context: ToolViewContext;
+}) {
+  const settings = [
+    ...digest.meta,
+    ...digest.args.map(([label, value]) => (value ? `${label} ${value}` : label)),
+  ];
+  if (!digest.title && !digest.text && settings.length === 0) return null;
+  return (
+    <div className="space-y-1.5 font-sans">
+      {digest.title ? <div className="font-medium text-foreground">{digest.title}</div> : null}
+      <Meta items={settings} />
+      {digest.text ? (
+        <LongText label={digest.textLabel} text={digest.text} context={context} muted />
+      ) : null}
+    </div>
+  );
+}
+
+function DigestRows({
+  rows,
+  context,
+}: {
+  readonly rows: NonNullable<ToolDigest["rows"]>;
+  readonly context: ToolViewContext;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? rows : rows.slice(0, 8);
+  return (
+    <div className="space-y-1">
+      <ul className="divide-y divide-border/50 rounded-md border border-border/50">
+        {shown.map((row, index) => (
+          <li
+            key={`${row.title}-${index}`}
+            className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 px-2 py-1.5"
+          >
+            {row.status ? <StatusBadge status={row.status} /> : null}
+            {row.href ? (
+              <a
+                href={row.href}
+                target="_blank"
+                rel="noreferrer"
+                className="min-w-0 break-words text-foreground hover:underline"
+              >
+                {row.title}
+              </a>
+            ) : row.threadId && context.onOpenThread ? (
+              <button
+                type="button"
+                className="min-w-0 text-left break-words text-foreground hover:underline"
+                onClick={() => context.onOpenThread?.(ThreadId.make(row.threadId!))}
+              >
+                {row.title}
+              </button>
+            ) : (
+              <span className="min-w-0 break-words text-foreground">{row.title}</span>
+            )}
+            {row.detail ? (
+              <span className="min-w-0 break-words text-muted-foreground">{row.detail}</span>
+            ) : null}
+            {row.chips?.length ? (
+              <span className="flex basis-full flex-wrap gap-1">
+                {row.chips.map((chip) => (
+                  <Badge key={chip} variant="outline" size="sm">
+                    {chip}
+                  </Badge>
+                ))}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {rows.length > shown.length ? (
+        <Button variant="ghost-muted" size="micro" onClick={() => setShowAll(true)}>
+          Show {rows.length - shown.length} more
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function DigestView({
+  digest,
+  context,
+}: {
+  readonly digest: ToolDigest;
+  readonly context: ToolViewContext;
+}) {
+  const hasHead = Boolean(digest.status || digest.title || digest.threads.length);
+  return (
+    <div className="space-y-2">
+      {hasHead ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          {digest.status ? <StatusBadge status={digest.status} /> : null}
+          {digest.title ? (
+            digest.href ? (
+              <a
+                href={digest.href}
+                target="_blank"
+                rel="noreferrer"
+                className="min-w-0 font-medium break-all text-foreground hover:underline"
+              >
+                {digest.title}
+              </a>
+            ) : (
+              <span className="min-w-0 font-medium break-words text-foreground">
+                {digest.title}
+              </span>
+            )
+          ) : null}
+          <span className="ml-auto flex gap-1">
+            <ThreadButtons threads={digest.threads} context={context} />
+          </span>
+        </div>
+      ) : null}
+      <Meta items={digest.meta} />
+      {digest.error ? <div className="text-destructive">{digest.error}</div> : null}
+      {digest.text ? (
+        <LongText label={digest.textLabel} text={digest.text} context={context} />
+      ) : null}
+      {digest.rows?.length ? <DigestRows rows={digest.rows} context={context} /> : null}
+      {digest.empty ? <div className="text-muted-foreground">{digest.empty}</div> : null}
     </div>
   );
 }
@@ -252,66 +299,123 @@ function ImageBlock({ image }: { readonly image: ToolImage }) {
   );
 }
 
+/** Collapsed IDs and leftovers, plus the raw result for anything the digest leaves out. */
+function DetailsDisclosure({
+  details,
+  raw,
+}: {
+  readonly details: ToolDigest["details"];
+  readonly raw: unknown;
+}) {
+  const [open, setOpen] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+  return (
+    <div className="space-y-1.5">
+      <Button
+        variant="ghost-muted"
+        size="micro"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <ChevronRightIcon className={cn("transition-transform", open && "rotate-90")} />
+        Details
+      </Button>
+      {open ? (
+        <div className="space-y-1.5 pl-1">
+          {details.length > 0 ? (
+            <dl className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+              {details.map(([label, value]) => (
+                <div key={label} className="contents">
+                  <dt className="text-muted-foreground">{label}</dt>
+                  <dd className="min-w-0">
+                    <CopyableValue text={value} />
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          <Button variant="ghost-muted" size="micro" onClick={() => setShowRaw((value) => !value)}>
+            {showRaw ? "Hide JSON" : "Show JSON"}
+          </Button>
+          {showRaw ? (
+            <pre className="max-h-80 overflow-auto font-mono whitespace-pre-wrap break-words text-muted-foreground">
+              {typeof raw === "string" ? raw : JSON.stringify(raw, null, 2)}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /**
- * A tool result as fields, text, and images. A toggle shows the raw JSON for
- * the cases the structured view does not explain.
+ * A tool result as a digest (outcome, subject, links, text), its images, and
+ * plain text, with IDs and the raw value one click away.
  */
 export const ToolOutputView = memo(function ToolOutputView({
   blocks,
   raw,
+  toolName,
+  input,
+  context,
   hideImages = false,
 }: {
   readonly blocks: readonly ToolOutputBlock[];
   readonly raw: unknown;
+  readonly toolName: string | null | undefined;
+  readonly input: unknown;
+  readonly context: ToolViewContext;
   /** The row already previews the image, so image blocks would repeat it. */
   readonly hideImages?: boolean | undefined;
 }) {
-  const [showRaw, setShowRaw] = useState(false);
   const visible = hideImages ? blocks.filter((block) => block.kind !== "image") : blocks;
+  if (blocks.length === 0) {
+    const digest = toolResultDigest(toolName, null, input);
+    return digest ? (
+      <div className="font-sans text-xs" data-tool-output>
+        <DigestView digest={digest} context={context} />
+      </div>
+    ) : null;
+  }
   if (visible.length === 0) return null;
-  const hasData = visible.some((block) => block.kind === "data");
+  const digests = visible.map((block) =>
+    block.kind === "data" || (block.kind === "text" && /^error:/iu.test(block.text.trim()))
+      ? toolResultDigest(toolName, block.kind === "data" ? block.value : block.text, input)
+      : null,
+  );
+  const details = digests.flatMap((digest) => digest?.details ?? []);
+  const structured = digests.some((digest) => digest !== null);
   return (
-    <div className="relative space-y-2 font-sans text-xs" data-tool-output>
-      {hasData ? (
-        <Button
-          variant="ghost-muted"
-          size="micro"
-          className="absolute top-0 right-0"
-          aria-pressed={showRaw}
-          onClick={() => setShowRaw((value) => !value)}
-        >
-          {showRaw ? "Fields" : "JSON"}
-        </Button>
-      ) : null}
-      {showRaw ? (
-        <pre className="max-h-80 overflow-auto pr-10 font-mono whitespace-pre-wrap break-words text-muted-foreground">
-          {typeof raw === "string" ? raw : JSON.stringify(raw, null, 2)}
-        </pre>
-      ) : (
-        <div className={cn("max-h-96 space-y-2 overflow-auto", hasData && "pr-10")}>
-          {visible.map((block, index) => {
-            switch (block.kind) {
-              case "text":
-                return (
-                  <pre
-                    key={index}
-                    className="font-mono whitespace-pre-wrap break-words text-muted-foreground"
-                  >
-                    {block.text}
-                  </pre>
-                );
-              case "image":
-                return <ImageBlock key={index} image={block.image} />;
-              case "data":
-                return isRecord(block.value) ? (
-                  <RecordFields key={index} value={block.value} depth={0} />
-                ) : (
-                  <FieldValue key={index} fieldKey="" value={block.value} depth={0} />
-                );
-            }
-          })}
-        </div>
-      )}
+    <div className="space-y-2 font-sans text-xs" data-tool-output>
+      <div className="max-h-[32rem] space-y-2 overflow-auto">
+        {visible.map((block, index) => {
+          const digest = digests[index];
+          if (digest) return <DigestView key={index} digest={digest} context={context} />;
+          switch (block.kind) {
+            case "image":
+              return <ImageBlock key={index} image={block.image} />;
+            case "text":
+              return (
+                <pre
+                  key={index}
+                  className="font-mono whitespace-pre-wrap break-words text-muted-foreground"
+                >
+                  {block.text}
+                </pre>
+              );
+            case "data":
+              return (
+                <pre
+                  key={index}
+                  className="font-mono whitespace-pre-wrap break-words text-muted-foreground"
+                >
+                  {JSON.stringify(block.value, null, 2)}
+                </pre>
+              );
+          }
+        })}
+      </div>
+      {structured ? <DetailsDisclosure details={details} raw={raw} /> : null}
     </div>
   );
 });
