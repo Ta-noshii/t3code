@@ -1,11 +1,10 @@
 import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
 import { type ToolImage, toolImageFromValue } from "@t3tools/shared/toolMedia";
-import * as DateTime from "effect/DateTime";
 
 /**
  * Display model for tool results. A result becomes a list of blocks (text,
- * an image, or structured data) and structured data becomes labeled fields,
- * so clients render values instead of dumping JSON.
+ * an image, or structured data); `toolDigest.ts` turns the data into a
+ * summary so clients render values instead of dumping JSON.
  */
 export type ToolOutputBlock =
   | { readonly kind: "text"; readonly text: string }
@@ -120,24 +119,6 @@ export function turnItemOutputBlocks(item: OrchestrationV2TurnItem): ToolOutputB
 
 export type ToolStatusTone = "success" | "error" | "info" | "warning" | "neutral";
 
-/** How one field value displays. */
-export type ToolScalarView =
-  | { readonly kind: "status"; readonly text: string; readonly tone: ToolStatusTone }
-  | { readonly kind: "time"; readonly iso: string }
-  | { readonly kind: "url"; readonly href: string }
-  | { readonly kind: "id"; readonly text: string }
-  | { readonly kind: "path"; readonly text: string }
-  | { readonly kind: "longText"; readonly text: string }
-  | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "number"; readonly text: string }
-  | { readonly kind: "boolean"; readonly value: boolean };
-
-const STATUS_KEYS = /^(status|state|work_?state|phase|outcome|conclusion|result_?status|health)$/iu;
-const ID_KEY = /(^id$|Id$|_id$|^sha$|Sha$|^ref$)/u;
-const TIME_KEY = /(At|_at|Time|_time|^date|Date)$/u;
-const ISO_TIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/u;
-const LONG_TEXT_LENGTH = 160;
-
 const SUCCESS_STATUSES = new Set([
   "completed",
   "complete",
@@ -202,30 +183,6 @@ export function toolStatusTone(status: string): ToolStatusTone {
   return "neutral";
 }
 
-/** Decides how a field's scalar value renders, from its key and shape. */
-export function toolScalarView(key: string, value: string | number | boolean): ToolScalarView {
-  if (typeof value === "boolean") return { kind: "boolean", value };
-  if (typeof value === "number") {
-    // Epoch milliseconds under a time-ish key.
-    if (TIME_KEY.test(key) && value > 1e12 && value < 1e14) {
-      return { kind: "time", iso: DateTime.formatIso(DateTime.makeUnsafe(value)) };
-    }
-    return { kind: "number", text: value.toLocaleString("en-US") };
-  }
-  const text = value;
-  if (STATUS_KEYS.test(key) && text.length <= 40 && !text.includes("\n")) {
-    return { kind: "status", text, tone: toolStatusTone(text) };
-  }
-  if (ISO_TIME.test(text.trim()) && !Number.isNaN(Date.parse(text.trim()))) {
-    return { kind: "time", iso: text.trim() };
-  }
-  if (/^https?:\/\/\S+$/u.test(text.trim())) return { kind: "url", href: text.trim() };
-  if (ID_KEY.test(key) && !/\s/u.test(text)) return { kind: "id", text };
-  if (/^(\/|~\/)\S*$/u.test(text) && text.length > 1) return { kind: "path", text };
-  if (text.includes("\n") || text.length > LONG_TEXT_LENGTH) return { kind: "longText", text };
-  return { kind: "text", text };
-}
-
 /** `childNodeId` and `child_node_id` both become "Child node id". */
 export function toolFieldLabel(key: string): string {
   const words = key
@@ -236,42 +193,4 @@ export function toolFieldLabel(key: string): string {
     .toLowerCase();
   if (!words) return key;
   return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-/** Whether a field carries nothing worth a row: null, empty text, or an empty list or object. */
-export function toolFieldIsEmpty(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  if (typeof value === "string") return value.trim().length === 0;
-  if (Array.isArray(value)) return value.length === 0;
-  if (isRecord(value)) return Object.values(value).every(toolFieldIsEmpty);
-  return false;
-}
-
-/** The fields of a record worth showing, in their original order. */
-export function toolFields(value: Record<string, unknown>): Array<readonly [string, unknown]> {
-  return Object.entries(value).filter(([, entry]) => !toolFieldIsEmpty(entry));
-}
-
-const TITLE_KEYS = ["title", "name", "label", "displayName", "path", "url", "id"] as const;
-
-/** A heading for one object in a list, taken from its most name-like field. */
-export function toolRecordTitle(value: Record<string, unknown>): string | undefined {
-  for (const key of TITLE_KEYS) {
-    const entry = value[key];
-    if (typeof entry === "string" && entry.trim() && entry.length <= 120) return entry.trim();
-  }
-  return undefined;
-}
-
-/** True for lists that read best inline: short scalars only. */
-export function toolListIsInline(value: readonly unknown[]): boolean {
-  return (
-    value.length <= 24 &&
-    value.every(
-      (entry) =>
-        typeof entry === "number" ||
-        typeof entry === "boolean" ||
-        (typeof entry === "string" && entry.length <= 60 && !entry.includes("\n")),
-    )
-  );
 }
