@@ -188,6 +188,43 @@ describe("orchestration V2 wire projection", () => {
     expect(item.progress).toBe(progress);
   });
 
+  it("keeps an oversized image result structured in detail reads", () => {
+    const base64 = "A".repeat(400_000);
+    const output = {
+      type: "image",
+      file: {
+        base64,
+        type: "image/png",
+        originalSize: 300_000,
+        dimensions: { originalWidth: 1280, originalHeight: 800 },
+      },
+    };
+    const projected = projectTurnItemForDetail({ ...base, output });
+    expect(projected.type === "dynamic_tool" ? projected.output : null).toEqual({
+      type: "image",
+      mimeType: "image/png",
+      byteLength: 300_000,
+      width: 1280,
+      height: 800,
+      dataOmitted: true,
+    });
+    expect(output.file.base64).toBe(base64);
+  });
+
+  it("serves MCP screenshots by index and cuts oversized text leaves", () => {
+    const image = { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" };
+    const small = projectTurnItemForDetail({ ...base, output: { content: [image] } });
+    expect(small.type === "dynamic_tool" ? small.output : null).toEqual({
+      content: [{ type: "image", mimeType: "image/png" }],
+    });
+
+    const output = { id: "task-1", log: "x".repeat(300_000) };
+    const projected = projectTurnItemForDetail({ ...base, output });
+    const bounded = projected.type === "dynamic_tool" ? projected.output : null;
+    expect(bounded).toMatchObject({ id: "task-1" });
+    expect(JSON.stringify(bounded).length).toBeLessThan(20_000);
+  });
+
   it("leaves a screenshot's bytes out of the fetched tool output", () => {
     const data = "A".repeat(600_000);
     const item = {
@@ -205,7 +242,7 @@ describe("orchestration V2 wire projection", () => {
     expect(item.output.content[0]?.source.data).toBe(data);
   });
 
-  it("keeps image markers when the rest of a tool output is too large to send", () => {
+  it("keeps image markers when the rest of a tool output is too large to send whole", () => {
     const image = {
       type: "image",
       source: { type: "base64", media_type: "image/png", data: "AAAA" },
@@ -217,9 +254,8 @@ describe("orchestration V2 wire projection", () => {
     };
     const projected = projectTurnItemForDetail(item);
     const output = projected.type === "dynamic_tool" ? projected.output : null;
-    expect(Array.isArray(output) ? output.slice(1) : null).toEqual([
-      { type: "image", mimeType: "image/png" },
-    ]);
+    // Cutting the long text leaf keeps the output structured, marker in place.
+    expect(toolOutputImages(output)).toEqual([{ mimeType: "image/png" }]);
     expect(JSON.stringify(output).length).toBeLessThan(270_000);
   });
 
