@@ -107,6 +107,10 @@
       "types": "./src/toolActivity.ts",
       "import": "./src/toolActivity.ts"
     },
+    "./toolMedia": {
+      "types": "./src/toolMedia.ts",
+      "import": "./src/toolMedia.ts"
+    },
     "./toolOutput": {
       "types": "./src/toolOutput.ts",
       "import": "./src/toolOutput.ts"

@@ -5595,6 +5595,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
                 <FetchedToolOutput
                   projectedItem={workEntry.projectedItem}
                   environmentId={ctx.activeThreadEnvironmentId}
+                  hideImages={viewedImage !== null}
                 />
               ) : null}
             </>

@@ -10,6 +10,10 @@ import {
   turnItemNeedsDetailFetch,
   turnItemOutputText,
 } from "@t3tools/client-runtime/work-log/item-detail";
+import {
+  type ToolOutputBlock,
+  turnItemOutputBlocks,
+} from "@t3tools/client-runtime/work-log/tool-value";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
 import { memo, Suspense, use, useMemo } from "react";
 
@@ -24,6 +28,7 @@ import { Button } from "../ui/button";
 import ChatMarkdown from "../ChatMarkdown";
 import { RenderErrorBoundary } from "../RenderErrorBoundary";
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
+import { ToolOutputView } from "./ToolOutputView";
 
 interface V2ItemInspectorProps {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
@@ -117,6 +122,8 @@ function useFetchedTurnItem(
   return {
     item,
     output: {
+      blocks: turnItemOutputBlocks(item),
+      raw: item.type === "dynamic_tool" ? item.output : undefined,
       output: turnItemOutputText(item),
       pending: item === wireItem && detail.isPending,
       error:
@@ -131,6 +138,10 @@ function useFetchedTurnItem(
 }
 
 interface ToolOutputState {
+  /** Structured result for tool items; `output` is the text fallback for the rest. */
+  readonly blocks: readonly ToolOutputBlock[] | null;
+  readonly raw: unknown;
+  readonly hideImages?: boolean | undefined;
   readonly output: string | null;
   readonly pending: boolean;
   readonly error: string | null;
@@ -138,7 +149,9 @@ interface ToolOutputState {
 }
 
 function ToolOutput(props: ToolOutputState) {
-  return props.output ? (
+  return props.blocks && props.blocks.length > 0 ? (
+    <ToolOutputView blocks={props.blocks} raw={props.raw} hideImages={props.hideImages} />
+  ) : props.output ? (
     <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
   ) : props.pending ? (
     <div className="text-muted-foreground italic">Loading output…</div>
@@ -153,11 +166,13 @@ function ToolOutput(props: ToolOutputState) {
 export function FetchedToolOutput(props: {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly environmentId: EnvironmentId;
+  /** The row already previews the image the tool read. */
+  readonly hideImages?: boolean | undefined;
 }) {
   const { output } = useFetchedTurnItem(props.projectedItem, props.environmentId);
   return (
     <div className={cn("mt-1.5", monoClassName)}>
-      <ToolOutput {...output} />
+      <ToolOutput {...output} hideImages={props.hideImages} />
     </div>
   );
 }

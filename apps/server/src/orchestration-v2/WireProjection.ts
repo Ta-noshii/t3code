@@ -4,11 +4,16 @@ import type {
   OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
+import { boundToolMedia } from "@t3tools/shared/toolMedia";
 import { compactDynamicToolOutput, toolOutputIndicatesFailure } from "@t3tools/shared/toolOutput";
 
 const MAX_DETAIL_STRING_BYTES = 32_768;
 const MAX_DYNAMIC_VALUE_BYTES = 16_384;
 const MAX_ON_DEMAND_BYTES = 256 * 1024;
+/** Base64 an on-demand read may carry inline, across all images in one value. */
+const MAX_ON_DEMAND_IMAGE_BYTES = 192 * 1024;
+/** Per-string cap when a structured value is still over budget after media is bounded. */
+const MAX_ON_DEMAND_LEAF_BYTES = 8 * 1024;
 
 function truncateDetail(
   value: string | undefined,
@@ -127,19 +132,41 @@ function hasDynamicValue(value: unknown): boolean {
   return typeof value !== "object" || Object.keys(value).length > 0;
 }
 
+function truncateStringLeaves(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") return truncateDetail(value, MAX_ON_DEMAND_LEAF_BYTES);
+  if (depth > 24 || typeof value !== "object" || value === null) return value;
+  if (Array.isArray(value)) return value.map((entry) => truncateStringLeaves(entry, depth + 1));
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, truncateStringLeaves(entry, depth + 1)]),
+  );
+}
+
+function jsonByteLength(value: unknown): number | undefined {
+  try {
+    // Compact, so measuring does not inflate the value; clients indent it.
+    return Buffer.byteLength(JSON.stringify(value) ?? String(value), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Keeps a tool value structured while bounding it. Images become metadata
+ * (with their base64 only while the image budget lasts), then oversized
+ * strings are cut. Only a value that is still too large after both becomes a
+ * truncated JSON string.
+ */
 function boundDynamicValue(value: unknown): unknown {
   if (value === undefined) return value;
   if (typeof value === "string") return truncateDetail(value, MAX_ON_DEMAND_BYTES);
-  let json: string;
-  try {
-    // Compact, so measuring does not inflate the value; clients indent it.
-    json = JSON.stringify(value) ?? String(value);
-  } catch {
-    return "Unserializable tool value";
-  }
-  return Buffer.byteLength(json, "utf8") <= MAX_ON_DEMAND_BYTES
-    ? value
-    : truncateDetail(json, MAX_ON_DEMAND_BYTES);
+  const withMedia = boundToolMedia(value, MAX_ON_DEMAND_IMAGE_BYTES);
+  const size = jsonByteLength(withMedia);
+  if (size === undefined) return "Unserializable tool value";
+  if (size <= MAX_ON_DEMAND_BYTES) return withMedia;
+  const withLeaves = truncateStringLeaves(boundToolMedia(value, 0));
+  const leafSize = jsonByteLength(withLeaves);
+  if (leafSize !== undefined && leafSize <= MAX_ON_DEMAND_BYTES) return withLeaves;
+  return truncateDetail(JSON.stringify(withLeaves) ?? "", MAX_ON_DEMAND_BYTES);
 }
 
 /**
