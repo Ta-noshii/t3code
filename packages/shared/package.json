@@ -123,6 +123,10 @@
       "types": "./src/terminalOutput.ts",
       "import": "./src/terminalOutput.ts"
     },
+    "./toolMedia": {
+      "types": "./src/toolMedia.ts",
+      "import": "./src/toolMedia.ts"
+    },
     "./toolOutput": {
       "types": "./src/toolOutput.ts",
       "import": "./src/toolOutput.ts"
