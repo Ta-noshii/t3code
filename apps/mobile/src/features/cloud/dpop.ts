@@ -88,6 +88,11 @@ export interface DpopProofKeyPair {
 
 const DPOP_PROOF_KEY_STORAGE_KEY = "t3code.cloud.dpop-proof-key";
 
+// Verifiers accept an iat up to 300 s old but only 5 s ahead of their clock.
+// Phone clocks set from the carrier often run several seconds fast, which
+// fails every proof at once, so backdate iat to spend some of the old side.
+const DPOP_IAT_BACKDATE_SECONDS = 60;
+
 function base64UrlToBytes(value: string): Uint8Array {
   return Result.getOrThrow(Encoding.decodeBase64Url(value));
 }
@@ -280,7 +285,7 @@ export function createDpopProof(input: {
       htm: input.method.toUpperCase(),
       htu,
       jti,
-      iat: Math.floor(nowMs / 1_000),
+      iat: Math.floor(nowMs / 1_000) - DPOP_IAT_BACKDATE_SECONDS,
       ...(ath ? { ath } : {}),
     }).pipe(
       Effect.map(Encoding.encodeBase64Url),

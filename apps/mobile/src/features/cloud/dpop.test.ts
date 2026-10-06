@@ -6,6 +6,7 @@ import { vi } from "vite-plus/test";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as TestClock from "effect/testing/TestClock";
 import { verifyDpopProof } from "@t3tools/shared/dpop";
 
 import {
@@ -159,6 +160,28 @@ describe("mobile DPoP", () => {
           expectedThumbprint: proofKey.thumbprint,
           expectedAccessToken: "clerk-token",
           nowEpochSeconds: proofIat(proof.proof),
+        }),
+      ).toMatchObject({ ok: true });
+    }).pipe(Effect.provide(cryptoLayer)),
+  );
+
+  it.effect("still verifies when the phone clock runs ahead of the verifier", () =>
+    Effect.gen(function* () {
+      const proofKey = yield* generateDpopProofKeyPair();
+      const verifierNowSeconds = 1_800_000_000;
+      yield* TestClock.setTime((verifierNowSeconds + 30) * 1_000);
+      const proof = yield* createDpopProof({
+        method: "POST",
+        url: "https://relay.example.test/v1/environments/env-1/connect",
+        proofKey,
+      });
+
+      expect(
+        verifyDpopProof({
+          proof: proof.proof,
+          method: "POST",
+          url: "https://relay.example.test/v1/environments/env-1/connect",
+          nowEpochSeconds: verifierNowSeconds,
         }),
       ).toMatchObject({ ok: true });
     }).pipe(Effect.provide(cryptoLayer)),

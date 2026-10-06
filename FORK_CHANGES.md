@@ -47,6 +47,7 @@ When the PR merges, delete the branch, as with the SnapShots fix above.
 - **Samsung Now Bar agent monitoring.** The Android app shows agents in Samsung's Now Bar, with a distinct state per agent status, and keeps unread results. It handles attention, privacy and notification settings, keeps the bar fresh when React Native timers pause, and stops monitoring once every environment disconnects.
 - Custom Now Bar cards delivered through private host push, expanded cards with live agent updates, layout and text fixes, and a Now Bar state lab.
 - Signed fork updates: the app updates from this repository's releases instead of upstream's.
+- **DPoP proofs tolerate a fast phone clock.** The app backdates each proof's `iat` by 60 s (`apps/mobile/src/features/cloud/dpop.ts`). The relay and environment servers allow a proof to be 300 s old but only 5 s in the future, and a phone clock set from the carrier can run several seconds fast, which failed every environment at once with "Relay rejected the DPoP proof" (`time_window`).
 - Workflow `nowbar-release.yml` syncs upstream and builds the signed APK. It passes `-R "$GITHUB_REPOSITORY"` to `gh`, because the checkout has an `upstream` remote that `gh` would otherwise pick.
 
 ## Fork CI
