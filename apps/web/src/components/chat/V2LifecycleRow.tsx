@@ -456,7 +456,7 @@ function SubagentTimelineLink(props: {
           {reviewer ? (
             <Badge variant="outline" size="sm" className="self-center">
               <FileSearchIcon aria-hidden />
-              Reviewer
+              <span className="max-sm:sr-only">Reviewer</span>
             </Badge>
           ) : null}
           <span className="min-w-0 truncate text-xs font-medium text-foreground">
