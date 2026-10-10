@@ -159,6 +159,34 @@ describe("toolCallDigest", () => {
     ).toMatchObject({ args: [["Wait", "5 min"]] });
   });
 
+  it("reads a codex_review target as what it reviews", () => {
+    expect(
+      toolCallDigest("mcp__t3-code__codex_review", {
+        target: { type: "commit", sha: "7a123a03e8f1", title: "fix: adapt patches" },
+        providerInstanceId: "codex",
+        mode: "wait",
+      }),
+    ).toEqual({
+      meta: [{ kind: "model", providerInstanceId: "codex" }],
+      args: [
+        ["Reviews", "Commit 7a123a0, fix: adapt patches"],
+        ["Mode", "wait"],
+      ],
+      threads: [],
+    });
+    expect(
+      toolCallDigest("mcp__t3-code__codex_review", {
+        target: { type: "custom", instructions: "Focus on the auth flow." },
+      }),
+    ).toEqual({
+      meta: [],
+      text: "Focus on the auth flow.",
+      textLabel: "Instructions",
+      args: [["Reviews", "Custom instructions"]],
+      threads: [],
+    });
+  });
+
   it("leaves the model to the call when the result repeats its target", () => {
     const digest = toolResultDigest("mcp__t3-code__delegate_task", taskStatus, {
       task: "Take proof screenshots.",
