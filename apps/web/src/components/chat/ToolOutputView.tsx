@@ -60,7 +60,7 @@ import { Button } from "../ui/button";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { getProviderInstanceEntry } from "../../providerInstances";
 import { getTriggerDisplayModelName } from "./providerIconUtils";
-import { ProviderInstanceIcon, providerTextColorClassName } from "./ProviderInstanceIcon";
+import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
 
 const TONE_VARIANT = {
   success: "success",
@@ -168,6 +168,7 @@ function ModelMeta({
     ? provider.entry?.models.find((candidate) => candidate.slug === meta.model)
     : undefined;
   const name = known ? getTriggerDisplayModelName(known) : (meta.model ?? provider.displayName);
+  const color = meta.providerInstanceId ? providerTextColor(provider.driverKind) : undefined;
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
       {meta.providerInstanceId ? (
@@ -176,10 +177,9 @@ function ModelMeta({
       <span
         className={cn(
           "min-w-0 font-medium break-words",
-          meta.providerInstanceId
-            ? providerTextColorClassName(provider.driverKind)
-            : "text-foreground",
+          color ? color.className : "text-foreground",
         )}
+        style={color?.style}
       >
         {name}
       </span>
