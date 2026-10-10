@@ -1407,6 +1407,100 @@ describe("OrchestratorMcpService provider resolution", () => {
     }),
   );
 
+  it.effect("delegates codex_review to a Codex instance as a /review command", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+      const task = {
+        id: taskId,
+        threadId: parentThreadId,
+        runId: parentRunId,
+        parentNodeId,
+        origin: "app_owned",
+        createdBy: "agent",
+        driver: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        providerThreadId: null,
+        childThreadId,
+        nativeTaskRef: null,
+        prompt: "/review --commit abc1234",
+        title: "Review commit abc1234",
+        model: "gpt-5.4",
+        status: "running",
+        result: null,
+        startedAt: null,
+        completedAt: null,
+      };
+      let delegated = false;
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: (threadId) =>
+            Effect.succeed(
+              threadId === parentThreadId
+                ? parentProjection(delegated ? [task] : [])
+                : childProjection,
+            ),
+          dispatch: (command) =>
+            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  delegated = true;
+                }),
+              ),
+              Effect.as({
+                sequence: 1,
+                storedEvents: [
+                  {
+                    sequence: 1,
+                    commandId: null,
+                    event: { type: "subagent.updated", payload: task },
+                  },
+                ],
+              } as never),
+            ),
+        }),
+        providerRegistryLayer([
+          providerSnapshot({
+            instanceId: antigravityInstanceId,
+            driver: ProviderDriverKind.make("antigravity"),
+            model: "ant-model",
+          }),
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: "gpt-5.4",
+          }),
+        ]),
+        adapterRegistryLayer([codexInstanceId, antigravityInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const result = yield* service.codexReview(scope, {
+          target: { type: "commit", sha: "abc1234" },
+          clientRequestId: "codex-review-1",
+        });
+        assert.equal(result.status, "running");
+        const [request] = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+          task: string;
+          title: string;
+          modelSelection: { instanceId: string };
+        }>;
+        assert.equal(request?.task, "/review --commit abc1234");
+        assert.equal(request?.title, "Review commit abc1234");
+        assert.equal(request?.modelSelection.instanceId, codexInstanceId);
+
+        const wrongDriver = yield* service
+          .codexReview(scope, { providerInstanceId: antigravityInstanceId })
+          .pipe(Effect.flip);
+        assert.equal(wrongDriver.code, "invalid_request");
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
   it.effect("rejects delegation to a provider without a registered adapter", () =>
     Effect.gen(function* () {
       const forkOnlyInstanceId = ProviderInstanceId.make("forkOnly");
