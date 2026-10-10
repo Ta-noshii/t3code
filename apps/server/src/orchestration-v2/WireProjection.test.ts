@@ -289,11 +289,11 @@ describe("orchestration V2 wire projection", () => {
     expect(output.file.base64).toBe(base64);
   });
 
-  it("keeps a small MCP screenshot inline and cuts oversized text leaves", () => {
+  it("leaves even a small screenshot's bytes out and cuts oversized text leaves", () => {
     const image = { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" };
     const small = projectTurnItemForDetail({ ...base, output: { content: [image] } });
     expect(small.type === "dynamic_tool" ? small.output : null).toEqual({
-      content: [{ type: "image", mimeType: "image/png", data: "iVBORw0KGgo=", byteLength: 8 }],
+      content: [{ type: "image", mimeType: "image/png" }],
     });
 
     const output = { id: "task-1", log: "x".repeat(300_000) };
@@ -342,9 +342,8 @@ describe("orchestration V2 wire projection", () => {
     };
     const projected = projectTurnItemForDetail(item);
     const output = projected.type === "dynamic_tool" ? projected.output : null;
-    expect(Array.isArray(output) ? output.slice(1) : null).toEqual([
-      { type: "image", mimeType: "image/png" },
-    ]);
+    // The text block is cut in place, so the image keeps its index.
+    expect(toolOutputImages(output)).toEqual([{ mimeType: "image/png" }]);
     expect(JSON.stringify(output).length).toBeLessThan(270_000);
   });
 

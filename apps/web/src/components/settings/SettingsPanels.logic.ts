@@ -3,6 +3,7 @@ import type {
   BackgroundActivitySettings,
   ProviderInstanceConfig,
   PreviewViewportSetting,
+  ProviderDriverKind,
   ProviderInstanceId,
   ServerSettings,
   SidebarProjectGroupingMode,

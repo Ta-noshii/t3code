@@ -2086,7 +2086,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(rows.some((row) => row.kind === "thinking")).toBe(false);
   });
 
-  it("carries the latest thought on the live row while a later tool runs", () => {
+  it("lists the latest thought in the live row's trail while a later tool runs", () => {
     type WorkEntry = Extract<
       Parameters<typeof deriveMessagesTimelineRows>[0]["timelineEntries"][number],
       { kind: "work" }
@@ -2134,10 +2134,14 @@ describe("deriveMessagesTimelineRows", () => {
       supportsConversationRollback: false,
     });
 
-    expect(rows.find((row) => row.kind === "work-live")).toMatchObject({
-      entry: { id: "running-command" },
-      thought: { id: "new-thought" },
-    });
+    const live = rows.find((row) => row.kind === "work-live");
+    expect(live).toMatchObject({ entry: { id: "running-command" } });
+    // The trail shows the thinking itself, so the row carries no separate preview.
+    expect(live && "thought" in live ? live.thought : undefined).toBeUndefined();
+    const steps = live && "trail" in live ? (live.trail?.steps ?? []) : [];
+    expect(
+      steps.some((step) => step.kind === "thought" && step.text.includes("Found the cause.")),
+    ).toBe(true);
   });
 
   it("keeps an actually running tool in the shared activity row", () => {
