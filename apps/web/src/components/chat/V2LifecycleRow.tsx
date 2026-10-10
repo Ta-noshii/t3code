@@ -33,6 +33,7 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   BotIcon,
   ChevronRightIcon,
+  FileSearchIcon,
   ArrowRightLeftIcon,
   ArrowRightIcon,
   GitForkIcon,
@@ -52,6 +53,8 @@ import { formatShortTimestamp } from "../../timestampFormat";
 import { getTriggerDisplayModelName } from "./providerIconUtils";
 import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
 import { cn } from "~/lib/utils";
+import { Badge } from "../ui/badge";
+import { subagentCodexReview } from "@t3tools/shared/codexReview";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { subagentResumedSince } from "./V2LifecycleRow.logic";
 import { Button, InlineButton } from "../ui/button";
@@ -198,6 +201,7 @@ export function V2LifecycleRow(props: {
         origin={item.origin}
         status={item.status}
         driver={item.driver}
+        prompt={item.prompt}
         title={formatSubagentDisplayTitle(item.title ?? "Subagent")}
         result={item.result}
         progress={item.progress}
@@ -375,6 +379,7 @@ export function SubagentNotificationLink(props: {
       origin={agent.origin}
       status={agent.status}
       driver={agent.driver}
+      prompt={agent.prompt}
       title={formatSubagentDisplayTitle(agent.title ?? "Subagent")}
       result={agent.result}
       progress={agent.progress}
@@ -401,6 +406,8 @@ function SubagentTimelineLink(props: {
   readonly providerInstanceId: ProviderInstanceId;
   readonly origin: OrchestrationV2Subagent["origin"];
   readonly driver: ProviderDriverKind;
+  /** The task as delegated; a Codex `/review` marks the subagent as a reviewer. */
+  readonly prompt: string;
   readonly title: string;
   readonly result: string | null;
   readonly progress: string | undefined;
@@ -430,6 +437,7 @@ function SubagentTimelineLink(props: {
   const detail =
     rawDetail && !GENERIC_CHILD_END.test(rawDetail) ? plainDetail(rawDetail) || null : null;
   const failed = status === "failed";
+  const reviewer = subagentCodexReview(props) !== null;
   const timing = {
     status: liveStatus,
     startedAt: isoOrNull(agent?.startedAt ?? props.startedAt),
@@ -445,6 +453,12 @@ function SubagentTimelineLink(props: {
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
+          {reviewer ? (
+            <Badge variant="outline" size="sm" className="self-center">
+              <FileSearchIcon aria-hidden />
+              Reviewer
+            </Badge>
+          ) : null}
           <span className="min-w-0 truncate text-xs font-medium text-foreground">
             {props.title}
           </span>

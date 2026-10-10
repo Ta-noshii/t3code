@@ -19,7 +19,9 @@ import {
   type OrchestratorMcpCreateThreadsInput,
   type OrchestratorMcpCreateThreadsResult,
   type OrchestratorMcpCreatedThread,
+  type OrchestratorMcpCodexReviewInput,
   type OrchestratorMcpDelegateTaskInput,
+  ProviderDriverKind,
   type OrchestratorMcpDelegateTaskResult,
   type OrchestratorMcpInteractionMode,
   type OrchestratorMcpDeleteScheduledTaskInput,
@@ -66,6 +68,11 @@ import {
   isOrchestrationV2WorkActive,
 } from "@t3tools/contracts";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
+import {
+  codexReviewTargetLabel,
+  formatCodexReviewCommand,
+  type CodexReviewTarget,
+} from "@t3tools/shared/codexReview";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   normalizeThreadPullRequestKey,
@@ -145,6 +152,11 @@ export interface OrchestratorMcpServiceShape {
   readonly delegateTask: (
     scope: McpInvocationScope,
     input: OrchestratorMcpDelegateTaskInput,
+  ) => Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure>;
+  /** A delegated task whose turn runs Codex's built-in reviewer (`/review`). */
+  readonly codexReview: (
+    scope: McpInvocationScope,
+    input: OrchestratorMcpCodexReviewInput,
   ) => Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure>;
   readonly taskStatus: (
     scope: McpInvocationScope,
@@ -818,6 +830,24 @@ function threadTitle(input: {
   const detail = input.title?.trim() || input.prompt?.trim();
   if (!detail) return `${input.parentTitle} thread ${input.index + 1}`;
   return detail.length > 80 ? `${detail.slice(0, 77)}...` : detail;
+}
+
+const CODEX_DRIVER = ProviderDriverKind.make("codex");
+
+function codexReviewTarget(target: OrchestratorMcpCodexReviewInput["target"]): CodexReviewTarget {
+  switch (target?.type) {
+    case undefined:
+    case "uncommitted":
+      return { type: "uncommittedChanges" };
+    case "base":
+      return { type: "baseBranch", branch: target.branch };
+    case "commit":
+      return target.title === undefined
+        ? { type: "commit", sha: target.sha }
+        : { type: "commit", sha: target.sha, title: target.title };
+    case "custom":
+      return { type: "custom", instructions: target.instructions };
+  }
 }
 
 function taskPrompt(input: OrchestratorMcpDelegateTaskInput): string {
@@ -1810,7 +1840,7 @@ const make = Effect.gen(function* () {
     return task;
   });
 
-  return OrchestratorMcpService.of({
+  const service: OrchestratorMcpServiceShape = OrchestratorMcpService.of({
     scheduleTask: Effect.fn("OrchestratorMcpService.scheduleTask")(function* (scope, input) {
       const { parent, limits } = yield* loadCaller(scope);
       const projectId = yield* resolveProjectTarget(parent, input.projectId);
@@ -2937,7 +2967,50 @@ const make = Effect.gen(function* () {
         status: result.type === "already_terminal" ? result.run.status : "interrupt_requested",
       } satisfies OrchestratorMcpThreadInterruptResult;
     }),
+    codexReview: (scope, input) =>
+      Effect.gen(function* () {
+        const providers = yield* loadProviders;
+        const callerInstanceId = scope.thread?.providerInstanceId;
+        const codex = providers.filter((provider) => provider.driver === CODEX_DRIVER);
+        const provider =
+          input.providerInstanceId === undefined
+            ? (codex.find((candidate) => candidate.instanceId === callerInstanceId) ??
+              codex.find((candidate) => candidate.enabled !== false) ??
+              codex[0])
+            : providers.find((candidate) => candidate.instanceId === input.providerInstanceId);
+        if (provider === undefined) {
+          return yield* failure(
+            "invalid_request",
+            input.providerInstanceId === undefined
+              ? "No Codex provider instance is configured."
+              : `Provider instance ${input.providerInstanceId} was not found.`,
+          );
+        }
+        if (provider.driver !== CODEX_DRIVER) {
+          return yield* failure(
+            "invalid_request",
+            `codex_review needs a Codex instance; ${provider.instanceId} runs ${provider.driver}.`,
+          );
+        }
+        const target = codexReviewTarget(input.target);
+        return yield* service.delegateTask(scope, {
+          task: formatCodexReviewCommand(target),
+          target: {
+            providerInstanceId: provider.instanceId,
+            ...(input.model === undefined ? {} : { model: input.model }),
+          },
+          title: input.title ?? `Review ${codexReviewTargetLabel(target)}`,
+          // The reviewer reads; plan mode would only get in its way.
+          interactionMode: "default",
+          ...(input.mode === undefined ? {} : { mode: input.mode }),
+          ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+          ...(input.clientRequestId === undefined
+            ? {}
+            : { clientRequestId: input.clientRequestId }),
+        });
+      }).pipe(Effect.withSpan("OrchestratorMcpService.codexReview")),
   });
+  return service;
 });
 
 export const layer: Layer.Layer<

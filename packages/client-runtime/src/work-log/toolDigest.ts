@@ -402,7 +402,7 @@ function genericDigest(fields: Fields): ToolDigest {
   };
 }
 
-/** delegate_task, task_status, task_cancel: one subagent task. */
+/** delegate_task, codex_review, task_status, task_cancel: one subagent task. */
 function taskDigest(fields: Fields, input: Fields | undefined, tool: string): ToolDigest {
   const terminal = str(fields.latestTerminalStatus);
   const raw = terminal ?? str(fields.status);
@@ -580,6 +580,7 @@ function capabilitiesDigest(fields: Fields): ToolDigest {
 function presenterDigest(tool: string, fields: Fields, input: Fields | undefined): ToolDigest {
   switch (tool) {
     case "delegate_task":
+    case "codex_review":
     case "task_status":
     case "task_cancel":
       return taskDigest(fields, input, tool);
@@ -724,12 +725,47 @@ export interface ToolCallDigest {
  * arguments a person would recognize, without the IDs the result already
  * links. Null for other tools, which show their arguments as given.
  */
+/** What a codex_review call reviews, as its target reads. */
+function reviewTargetLabel(target: Fields | undefined): string {
+  switch (str(target?.type)) {
+    case "base":
+      return `Changes against ${str(target!.branch) ?? "the base branch"}`;
+    case "commit": {
+      const sha = str(target!.sha)?.slice(0, 7) ?? "a commit";
+      const title = str(target!.title);
+      return title ? `Commit ${sha}, ${title}` : `Commit ${sha}`;
+    }
+    case "custom":
+      return "Custom instructions";
+    default:
+      return "Uncommitted changes";
+  }
+}
+
+/** codex_review's target is what to review, not a model. */
+function codexReviewCallDigest(input: Fields): ToolCallDigest {
+  const target = isRecord(input.target) ? input.target : undefined;
+  const instructions = str(target?.instructions);
+  const title = str(input.title);
+  return {
+    ...(title ? { title } : {}),
+    meta: modelMeta(input),
+    ...(instructions ? { text: instructions, textLabel: "Instructions" } : {}),
+    args: [
+      ["Reviews", reviewTargetLabel(target)],
+      ...(str(input.mode) ? [["Mode", str(input.mode)!] as const] : []),
+    ],
+    threads: [],
+  };
+}
+
 export function toolCallDigest(
   toolName: string | null | undefined,
   input: unknown,
 ): ToolCallDigest | null {
   const tool = resolveT3McpToolKey(toolName);
   if (tool === null || !isRecord(input)) return null;
+  if (tool === "codex_review") return codexReviewCallDigest(input);
   const used = new Set<string>(["clientRequestId"]);
   const textKey = CALL_TEXT_KEYS.find((key) => str(input[key]));
   if (textKey) used.add(textKey);
