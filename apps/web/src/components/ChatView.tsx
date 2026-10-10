@@ -7903,7 +7903,7 @@ export default function ChatView(props: ChatViewProps) {
           ? "Compaction is unavailable for this provider"
           : compactQueued
             ? "Compaction is queued for when the agent finishes"
-          : "Compacting is unavailable right now"
+            : "Compacting is unavailable right now"
     : null;
   // Tokens a stale Claude session would re-read on its next turn. While set,
   // the composer shows a Compact chip and Enter compacts first; turning the

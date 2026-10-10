@@ -1287,13 +1287,14 @@ describe("ClaudeAdapterV2 thread recap", () => {
       const opened: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOptions> = [];
       const offered: Array<SDKUserMessage> = [];
       let closed = 0;
-      const adapter = ClaudeAdapterV2.makeClaudeAdapterV2({
+      const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
         instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
         settings: DEFAULT_CLAUDE_SETTINGS,
         environment: {},
         attachmentsDir: yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-recap-" }),
         fileSystem,
         path: yield* Path.Path,
+        crypto: yield* Crypto.Crypto,
         idAllocator: yield* IdAllocator.IdAllocatorV2,
         queryRunner: {
           allocateSessionId: Effect.succeed("unused"),
@@ -1363,7 +1364,11 @@ describe("ClaudeAdapterV2 thread recap", () => {
         );
         assert.equal(harness.closed(), 1);
       }),
-    ).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
   );
 
   it.effect("returns no recap for a thread without a Claude session or a reply", () =>
@@ -1374,7 +1379,11 @@ describe("ClaudeAdapterV2 thread recap", () => {
         assert.isNull(yield* silent.adapter.readThreadRecap!(recapInput(null)));
         assert.lengthOf(silent.opened, 1);
       }),
-    ).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
   );
 });
 
@@ -3317,7 +3326,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       );
       yield* Queue.take(harness.terminalReceipts);
       assert.lengthOf(suggestedTurns(), 1);
-    }).pipe(Effect.provide(Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer))),
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
   );
 
   it.effect("drops a suggestion that arrives after the next turn started", () =>
@@ -3360,7 +3373,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             event.providerTurn.promptSuggestion !== undefined,
         ),
       );
-    }).pipe(Effect.provide(Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer))),
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
   );
 
   it.effect("names an expired Claude login instead of the terminal API error", () =>

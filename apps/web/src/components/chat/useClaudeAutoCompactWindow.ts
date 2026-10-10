@@ -89,8 +89,6 @@ export function useClaudeAutoCompactWindow(input: {
         settings,
         instanceId,
         instance: nextInstance,
-        driver: CLAUDE_DRIVER,
-        isDefault,
       });
       const chosen = { key: pendingKey, from: savedValue, value: next };
       setPending(chosen);

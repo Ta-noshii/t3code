@@ -104,8 +104,8 @@ interface BranchToolbarProps {
   onComposerFocusRequest?: () => void;
   availableEnvironments?: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
-  copyTargets?: readonly CopyTargetOption[];
-  onCopyToEnvironment?: (target: CopyTargetOption) => void;
+  copyTargets?: readonly CopyTargetOption[] | undefined;
+  onCopyToEnvironment?: ((target: CopyTargetOption) => void) | undefined;
   composerControlsHostRef?: (element: HTMLDivElement | null) => void;
   contextStripVisible?: boolean;
 }

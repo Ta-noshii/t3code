@@ -2063,32 +2063,18 @@ const layerWsRpc = (
             ),
           ),
         [ORCHESTRATION_V2_WS_METHODS.getThreadRecap]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_V2_WS_METHODS.getThreadRecap,
-            threadRecap.getThreadRecap(input).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationV2GetThreadRecapError({
-                    threadId: input.threadId,
-                    message: "Failed to recap the thread",
-                    cause,
-                  }),
-              ),
+          threadRecap.getThreadRecap(input).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationV2GetThreadRecapError({
+                  threadId: input.threadId,
+                  message: "Failed to recap the thread",
+                  cause,
+                }),
             ),
-            { "rpc.aggregate": "orchestration" },
           ),
-        [THREAD_TRANSFER_WS_METHODS.exportThread]: (input) =>
-          observeRpcEffect(
-            THREAD_TRANSFER_WS_METHODS.exportThread,
-            threadTransfer.exportThread(input),
-            { "rpc.aggregate": "orchestration", "orchestration_v2.thread_id": input.threadId },
-          ),
-        [THREAD_TRANSFER_WS_METHODS.importThread]: (input) =>
-          observeRpcEffect(
-            THREAD_TRANSFER_WS_METHODS.importThread,
-            threadTransfer.importThread(input),
-            { "rpc.aggregate": "orchestration", "orchestration_v2.thread_id": input.threadId },
-          ),
+        [THREAD_TRANSFER_WS_METHODS.exportThread]: (input) => threadTransfer.exportThread(input),
+        [THREAD_TRANSFER_WS_METHODS.importThread]: (input) => threadTransfer.importThread(input),
         [ORCHESTRATION_V2_WS_METHODS.subscribeArchivedShell]: (_input) =>
           Stream.unwrap(subscribeOrchestrationV2ArchivedShell()),
         [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input) =>
