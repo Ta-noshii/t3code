@@ -1454,7 +1454,7 @@ function makeNativeForkFallbackHarness() {
   );
   const forkThread = vi.fn(() =>
     Effect.fail(
-      new ProviderAdapterEventStreamError({
+      new ProviderAdapter.ProviderAdapterEventStreamError({
         driver,
         providerSessionId,
         cause: "no SDK assistant message cursor was recorded for that turn",
@@ -1505,6 +1505,7 @@ function makeNativeForkFallbackHarness() {
             }),
         }),
         IdAllocator.layer,
+        layerWorktreeLocation(),
         FileSystem.layerNoop({}),
         Layer.mock(GitWorkflow.GitWorkflowService)({}),
         Layer.mock(ProjectService.ProjectService)({}),
@@ -1513,6 +1514,7 @@ function makeNativeForkFallbackHarness() {
           getRuntimeRecoveryProjection: turnStartContext,
           getThreadRecords: () =>
             Effect.succeed({
+              thread: projection.thread,
               runs: [
                 {
                   ...sourceRun,

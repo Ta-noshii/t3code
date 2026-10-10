@@ -4024,7 +4024,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       );
       yield* Queue.take(harness.terminalReceipts);
       assert.lengthOf(suggestedTurns(), 1);
-    }).pipe(Effect.provide(Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer))),
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
   );
 
   it.effect("drops a suggestion that arrives after the next turn started", () =>
@@ -4067,7 +4071,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             event.providerTurn.promptSuggestion !== undefined,
         ),
       );
-    }).pipe(Effect.provide(Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer))),
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
   );
 
   it.effect("names an expired Claude login instead of the terminal API error", () =>

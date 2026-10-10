@@ -1685,7 +1685,11 @@ export function deriveMessagesTimelineRows(input: {
             active: latestToolKeepsActivityLive,
             // The trail lists the thoughts itself, so the preview line is for
             // groups without one.
-            ...(trail ? { trail } : latestThoughtEntry ? { thought: latestThoughtEntry.entry } : {}),
+            ...(trail
+              ? { trail }
+              : latestThoughtEntry
+                ? { thought: latestThoughtEntry.entry }
+                : {}),
           };
         })()
       : null;

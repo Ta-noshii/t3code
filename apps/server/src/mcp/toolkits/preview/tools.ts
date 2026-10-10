@@ -347,7 +347,7 @@ The tab is resized through each width and left at the last one (pass restore=tru
       ),
     }),
     success: PreviewOverflowCheckResult,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   })
     .annotate(Tool.Title, "Check preview page for overflow")
