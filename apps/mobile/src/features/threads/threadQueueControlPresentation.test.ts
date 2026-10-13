@@ -17,6 +17,7 @@ describe("threadQueueControlPresentation", () => {
         canPromoteToSteer: false,
         canSendNow: true,
         text: "Queued message",
+        attachments: [],
       });
 
       expect(controls.canSend).toBe(expected);
@@ -40,11 +41,28 @@ describe("threadQueueControlPresentation", () => {
       canPromoteToSteer: true,
       canSendNow: false,
       text: `[Assistant quote](${href}) Can we add a backoff here?`,
+      attachments: [],
     });
 
     expect(controls.displayText).toBe(
       "Retry the sync after the lock clears. Can we add a backoff here?",
     );
+  });
+
+  it("does not offer to steer with /compact or /logout, which run as their own turn", () => {
+    const row = (text: string, canSendNow = false) =>
+      resolveThreadQueueRowControls({
+        busy: false,
+        canPromoteToSteer: true,
+        canSendNow,
+        text,
+        attachments: [],
+      });
+
+    expect(row(" /compact").canSend).toBe(false);
+    expect(row("/logout").canSend).toBe(false);
+    expect(row("/compact the parser notes").canSend).toBe(true);
+    expect(row("/compact", true).canSend).toBe(true);
   });
 
   it("keeps the row already open in the composer from being reopened or steered", () => {
@@ -54,6 +72,7 @@ describe("threadQueueControlPresentation", () => {
       canSendNow: false,
       isEditing: true,
       text: "Being edited",
+      attachments: [],
     });
 
     expect(editing.isEditing).toBe(true);

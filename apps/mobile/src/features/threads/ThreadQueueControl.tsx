@@ -244,6 +244,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
           isEditing: editing?.runId === run.id,
           isGuestMessage: context?.guest !== undefined,
           text,
+          attachments,
         });
         const title =
           controls.displayText || (attachments.length > 0 ? "Attachments" : "Queued message");
