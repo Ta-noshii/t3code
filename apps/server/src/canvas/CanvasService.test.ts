@@ -305,6 +305,54 @@ describe("CanvasService", () => {
       }),
     ),
   );
+
+  it.effect("keeps canvases in groups and removes a group once empty", () =>
+    withCanvases(({ root }) =>
+      Effect.gen(function* () {
+        const canvases = yield* CanvasService.CanvasService;
+        const fileSystem = yield* FileSystem.FileSystem;
+        yield* canvases.create({ projectId, title: "Overview" });
+        const { canvas } = yield* canvases.create({
+          projectId,
+          title: "Login",
+          group: " Design / auth ",
+        });
+        expect(canvas).toMatchObject({
+          path: `${root}/.canvases/Design/auth/login.excalidraw`,
+          slug: "Design/auth/login",
+        });
+        // A hidden folder is not a group.
+        yield* fileSystem.makeDirectory(`${root}/.canvases/.cache`, { recursive: true });
+        yield* fileSystem.writeFileString(
+          `${root}/.canvases/.cache/stale.excalidraw`,
+          yield* fileSystem.readFileString(canvas.path),
+        );
+
+        const slugs = (yield* canvases.list(projectId)).canvases.map((entry) => entry.slug);
+        expect(slugs.toSorted()).toEqual(["Design/auth/login", "overview"]);
+        const bySlug = yield* canvases.read({ canvas: { projectId, slug: "Design/auth/login" } });
+        expect(bySlug.canvas.path).toBe(canvas.path);
+        const byPath = yield* canvases.read({ canvas: { path: canvas.path } });
+        expect(byPath.canvas).toMatchObject({ projectId, slug: "Design/auth/login" });
+
+        const escaped = yield* Effect.flip(
+          canvases.create({ projectId, title: "X", group: "../x" }),
+        );
+        expect(escaped).toMatchObject({ _tag: "CanvasInvalidPathError", reason: "invalid-group" });
+
+        const moved = yield* canvases.rename({ path: canvas.path, title: "Login", group: "" });
+        expect(moved).toMatchObject({
+          path: `${root}/.canvases/login.excalidraw`,
+          slug: "login",
+        });
+        expect(yield* fileSystem.exists(`${root}/.canvases/Design`)).toBe(false);
+
+        const regrouped = yield* canvases.rename({ path: moved.path, title: "Login", group: "ux" });
+        yield* canvases.delete({ path: regrouped.path });
+        expect(yield* fileSystem.exists(`${root}/.canvases/ux`)).toBe(false);
+      }),
+    ),
+  );
 });
 
 describe("CanvasService agent operations", () => {
@@ -319,6 +367,22 @@ describe("CanvasService agent operations", () => {
         const read = yield* canvases.agentRead(context, {});
         expect(read.canvas.slug).toBe("plan");
         expect((yield* canvases.agentList(context)).current).toBe(read.canvas.path);
+      }),
+    ),
+  );
+
+  it.effect("names grouped canvases by slug and moves them", () =>
+    withCanvases(({ root }) =>
+      Effect.gen(function* () {
+        const canvases = yield* CanvasService.CanvasService;
+        yield* canvases.agentCreate(context, { title: "Flow", group: "design" });
+        const opened = yield* canvases.agentOpen(context, "design/flow");
+        expect(opened.path).toBe(`${root}/.canvases/design/flow.excalidraw`);
+
+        const moved = yield* canvases.agentMove(context, { group: "archive" });
+        expect(moved).toMatchObject({ slug: "archive/flow", title: "Flow" });
+        const read = yield* canvases.agentRead(context, {});
+        expect(read.canvas.path).toBe(moved.path);
       }),
     ),
   );
