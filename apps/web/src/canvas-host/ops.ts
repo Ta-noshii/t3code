@@ -61,8 +61,9 @@ async function render(op: Extract<CanvasHostOp, { op: "render" }>): Promise<Canv
     },
   ]);
   const elements = [...all.filter((element) => kept.has(element)), anchor!] as Elements;
-  // The export starts at the top left of its top-level elements.
-  const [minX, minY] = getCommonBounds(elements.filter((element) => !element.frameId));
+  // The export ends at the bottom right of its top-level elements. Its top
+  // left can sit further out, since frame names are drawn above their frames.
+  const [, , maxX, maxY] = getCommonBounds(elements.filter((element) => !element.frameId));
   const scene = await exportToCanvas({
     elements,
     appState: {
@@ -83,7 +84,11 @@ async function render(op: Extract<CanvasHostOp, { op: "render" }>): Promise<Canv
   canvas.height = Math.max(1, Math.round(rect.height * scale));
   canvas
     .getContext("2d")
-    ?.drawImage(scene, Math.round((minX - rect.x) * scale), Math.round((minY - rect.y) * scale));
+    ?.drawImage(
+      scene,
+      Math.round((maxX - rect.x) * scale) - scene.width,
+      Math.round((maxY - rect.y) * scale) - scene.height,
+    );
   const png = canvas.toDataURL("image/png");
   return {
     png: png.slice(png.indexOf(",") + 1),

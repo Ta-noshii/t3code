@@ -158,7 +158,7 @@ const CanvasAddImageTool = Tool.make("canvas_add_image", {
 
 export const CanvasScreenshotTool = Tool.make("canvas_screenshot", {
   description:
-    "Render a canvas to a PNG. crop: {type:'full'}, {type:'elements',ids}, {type:'rect',rect}, or {type:'frame',frame} (name or id). Crop to what you changed to check it.",
+    "Render a canvas to a PNG. crop: {type:'full'}, {type:'elements',ids}, {type:'rect',rect}, or {type:'frame',frame} (name or id). padding defaults to 24 scene units, 2 for frames. dark=true inverts the scene; PNG, JPEG and WebP images keep their colors but SVG images invert too, so embed mockups as PNG when their colors matter. Crop to what you changed to check it.",
   parameters: Schema.Struct({
     ...CanvasScreenshotOptions.fields,
     canvas: Schema.optional(CanvasName),
