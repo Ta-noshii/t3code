@@ -31,8 +31,8 @@ import {
 } from "@t3tools/shared/usageLimits";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
-import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
-import { I18nManager, Keyboard, Platform, View, type ViewStyle } from "react-native";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { I18nManager, Keyboard, Platform, Pressable, View, type ViewStyle } from "react-native";
 import { composerImageGallery } from "../../lib/composerImageGallery";
 import { filePreviewGallery } from "../../lib/filePreviewGallery";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
@@ -72,6 +72,7 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { ComposerAttachmentButton } from "./ComposerAttachmentButton";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import {
   ComposerAttachmentStrip,
   ComposerAttachmentThumbnail,
@@ -228,6 +229,8 @@ export interface ThreadComposerProps {
     readonly saving: boolean;
     readonly onRemoveExistingAttachment: (attachmentId: string) => void;
   } | null;
+  /** The provider's guess at the next prompt, offered while the composer is empty. */
+  readonly promptSuggestion?: string | null;
   readonly followUpBehavior: FollowUpBehavior;
   readonly canSteerActiveTurn: boolean;
   readonly hidden: boolean;
@@ -803,6 +806,16 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       />
     </View>
   );
+  // Only an idle, empty composer offers the suggestion; tapping it fills the draft.
+  const offeredPromptSuggestion =
+    props.promptSuggestion &&
+    !props.activeThreadBusy &&
+    draftMessage.trim().length === 0 &&
+    draftAttachments.length === 0 &&
+    queuedEdit === null &&
+    !voiceInput.isBusy
+      ? props.promptSuggestion
+      : null;
 
   return (
     <Animated.View
@@ -870,6 +883,28 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             tone="text"
             onPress={openSettings}
           />
+        ) : null}
+
+        {offeredPromptSuggestion ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Use suggestion: ${offeredPromptSuggestion}`}
+            className="mb-1.5 max-w-full flex-row items-center gap-1.5 self-start rounded-full border border-border bg-card px-3 py-1.5 active:bg-subtle"
+            onPress={() => {
+              props.onChangeDraftMessage(offeredPromptSuggestion);
+              inputRef.current?.focus();
+            }}
+          >
+            <SymbolView
+              name={{ ios: "sparkles", android: "auto_awesome" }}
+              size={12}
+              tintColorClassName="accent-foreground-muted"
+              type="monochrome"
+            />
+            <Text numberOfLines={2} className="min-w-0 shrink text-sm text-foreground-muted">
+              {offeredPromptSuggestion}
+            </Text>
+          </Pressable>
         ) : null}
 
         <ComposerSurface
