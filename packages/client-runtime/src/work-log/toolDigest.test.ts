@@ -28,7 +28,49 @@ const taskStatus = {
   waitTimedOut: true,
 };
 
+const canvas = {
+  path: "/repo/.canvases/auth-flow.excalidraw",
+  projectId: "project-1",
+  slug: "auth-flow",
+  title: "Auth flow",
+  displayPath: ".canvases/auth-flow.excalidraw",
+  format: "excalidraw",
+  readOnly: false,
+  modifiedAt: "2026-10-13T00:00:00.000Z",
+  elementCount: 7,
+  imageCount: 0,
+};
+
 describe("toolResultDigest", () => {
+  it("names the canvas an agent changed, what changed, and the file to open", () => {
+    const digest = toolResultDigest("mcp__t3-code__canvas_update", {
+      canvas,
+      revision: "abc123",
+      createdIds: ["api", "db"],
+      updatedIds: ["title"],
+      deletedIds: [],
+    });
+    expect(digest).toMatchObject({
+      kind: "canvas",
+      title: "Auth flow",
+      canvasPath: "/repo/.canvases/auth-flow.excalidraw",
+      meta: [
+        { kind: "fact", text: ".canvases/auth-flow.excalidraw", icon: "folder" },
+        { kind: "fact", text: "2 added, 1 changed" },
+      ],
+    });
+    expect(
+      toolResultDigest("mcp__t3-code__canvas_list", {
+        folder: ".canvases",
+        current: null,
+        canvases: [],
+      }),
+    ).toMatchObject({
+      kind: "canvas",
+      empty: "No canvases yet",
+    });
+  });
+
   it("reads a task status as its name, model and thread, with ids tucked away", () => {
     const digest = toolResultDigest("mcp__t3-code__task_status", taskStatus, {
       taskId: TASK_ID,
