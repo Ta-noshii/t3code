@@ -233,9 +233,16 @@ export function toThreadRow(
   };
 }
 
-/** Active, undeleted threads. Archived ones live in their own snapshot list. */
+/**
+ * Active, undeleted, top-level threads. Archived ones live in their own
+ * snapshot list, and subagent threads report to their parent instead.
+ */
 export function isListedThread(shell: OrchestrationV2ThreadShell): boolean {
-  return shell.archivedAt === null && shell.deletedAt === null;
+  return (
+    shell.archivedAt === null &&
+    shell.deletedAt === null &&
+    shell.lineage.relationshipToParent !== "subagent"
+  );
 }
 
 export function toProjectRow(project: OrchestrationProjectShell) {
