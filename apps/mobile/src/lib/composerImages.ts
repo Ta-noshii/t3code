@@ -353,7 +353,7 @@ const PHOTO_JPEG_QUALITY = 0.85;
  * natively; only the bounded result crosses the bridge. Camera photos are 12-48 MP HEIC files,
  * so a full-size conversion is both slow to transfer and far more than a model can use.
  */
-async function renderPhotoAsJpeg(uri: string): Promise<{ base64: string; uri: string }> {
+export async function renderPhotoAsJpeg(uri: string): Promise<{ base64: string; uri: string }> {
   const { ImageManipulator, SaveFormat } = await import("expo-image-manipulator");
   let image = await ImageManipulator.manipulate(uri).renderAsync();
   try {
