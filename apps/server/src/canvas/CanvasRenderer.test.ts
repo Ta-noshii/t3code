@@ -81,6 +81,24 @@ describe.runIf(executable !== undefined)("CanvasRenderer in headless Chrome", ()
       }),
     );
 
+    it.effect("keeps a frame's box when it has no children", () =>
+      Effect.gen(function* () {
+        const renderer = yield* CanvasRenderer.CanvasRenderer;
+        const [frame] = yield* renderer.convert({
+          skeletons: [
+            { type: "frame", id: "f", name: "Login", x: 0, y: 0, width: 300, height: 200 },
+          ],
+          existing: [],
+        });
+        expect(frame).toMatchObject({ id: "f", x: 0, y: 0, width: 300, height: 200 });
+        const [box] = yield* renderer.convert({
+          skeletons: [{ type: "rectangle", id: "r", x: 400, y: 0, width: 50, height: 50 }],
+          existing: [frame!],
+        });
+        expect(box?.id).toBe("r");
+      }),
+    );
+
     it.effect("remeasures text after its content changes", () =>
       Effect.gen(function* () {
         const renderer = yield* CanvasRenderer.CanvasRenderer;
