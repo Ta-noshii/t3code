@@ -167,6 +167,19 @@ export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQu
   };
 }
 
+/** Whether a message is a bare /compact, which the provider runs as a compaction. */
+export function isCompactCommand(text: string, attachments: ReadonlyArray<unknown>): boolean {
+  return attachments.length === 0 && text.trim().toLowerCase() === "/compact";
+}
+
+/**
+ * /compact and /logout run as their own turn. The server refuses to steer them into a
+ * running one, so they queue behind it and cannot be promoted to a steer.
+ */
+export function runsAsOwnTurn(text: string, attachments: ReadonlyArray<unknown>): boolean {
+  return attachments.length === 0 && ["/compact", "/logout"].includes(text.trim().toLowerCase());
+}
+
 export function canForkProjectedAssistantItem(input: {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly capabilities?: OrchestrationV2ProviderCapabilities | undefined;

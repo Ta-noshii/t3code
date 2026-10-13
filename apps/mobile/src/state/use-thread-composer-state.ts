@@ -1,4 +1,5 @@
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { isCompactCommand } from "@t3tools/client-runtime/state/thread-workflows";
 import { readEnvironmentScope } from "./session";
 import type { ComposerTextPaste } from "../native/T3ComposerEditor.types";
 import { useAtomValue } from "@effect/atom-react";
@@ -384,8 +385,9 @@ export function useThreadComposerState() {
     const queuedCompact = selectedThreadQueuedMessages.some(
       (message) =>
         message.messageId === dispatchingQueuedMessageId &&
-        message.text.trim().toLowerCase() === "/compact" &&
-        message.attachments.length === 0,
+        // A /compact queued behind the running turn has not started compacting yet.
+        message.dispatchMode !== "queue" &&
+        isCompactCommand(message.text, message.attachments),
     );
     if (queuedCompact) return true;
     const activeRunId = selectedThreadRuntime?.activeRunId;
@@ -699,13 +701,17 @@ export function useThreadComposerState() {
       const setupRunning = [selectedThreadActivityRun?.status, selectedThreadRuntime?.status].some(
         (status) => status === "preparing" || status === "starting",
       );
-      const followUpDispatchMode = setupRunning
-        ? "queue"
-        : followUpAction === "auto"
-          ? null
-          : followUpAction === "queue"
-            ? "queue"
-            : "auto";
+      // The server refuses to steer /compact into a running turn, so it always queues
+      // as its own turn after it.
+      const queueCompactCommand = activeThreadBusy && isCompactCommand(text, attachments);
+      const followUpDispatchMode =
+        setupRunning || queueCompactCommand
+          ? "queue"
+          : followUpAction === "auto"
+            ? null
+            : followUpAction === "queue"
+              ? "queue"
+              : "auto";
 
       const metadata = makeQueuedMessageMetadata();
       const messageId = MessageId.make(metadata.messageId);

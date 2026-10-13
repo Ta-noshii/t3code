@@ -1,3 +1,4 @@
+import { runsAsOwnTurn } from "@t3tools/client-runtime/state/thread-workflows";
 import type { EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 
 export const REMOVE_QUEUED_MESSAGE_ACCESSIBILITY_LABEL = "Remove queued message";
@@ -22,6 +23,7 @@ export function resolveThreadQueueRowControls(input: {
   readonly isEditing?: boolean;
   readonly queuedCount: number;
   readonly text: string;
+  readonly attachments: ReadonlyArray<unknown>;
 }): ThreadQueueRowControls {
   const mutationEnabled = !input.busy;
   const isEditing = input.isEditing === true;
@@ -33,7 +35,11 @@ export function resolveThreadQueueRowControls(input: {
     canEdit: mutationEnabled && !isEditing,
     canMoveDown: mutationEnabled && input.canReorder && input.index < input.queuedCount - 1,
     canMoveUp: mutationEnabled && input.canReorder && input.index > 0,
-    canSteer: mutationEnabled && input.canPromoteToSteer && !isEditing,
+    canSteer:
+      mutationEnabled &&
+      input.canPromoteToSteer &&
+      !isEditing &&
+      !runsAsOwnTurn(input.text, input.attachments),
     dismissAccessibilityLabel: REMOVE_QUEUED_MESSAGE_ACCESSIBILITY_LABEL,
     displayText: input.text,
     isEditing,
