@@ -6,4 +6,6 @@ Canvases are plain `.excalidraw` files in a `.canvases` folder of the project's 
 
 Ask the agent to sketch something ("draw the auth flow on a canvas") or to work from a drawing you made. Its canvas tool calls name the canvas and have an "Open canvas" button. Edits from both sides merge, so you can keep drawing while the agent updates the canvas. Drawings saved as `.excalidraw.png` or `.excalidraw.svg` open read-only.
 
+In the mobile app, open a thread's project canvases with **Canvases** in the thread's Git menu on iPhone, or the canvas button in the thread header on Android. Touch and hold a canvas to rename or delete it, and use the photo button in a canvas to add a picture from the library, the camera, or the clipboard. When the agent opens a canvas in the thread you are reading, a notice above the composer offers to open it. The app loads the editor from the computer running T3 Code, so that computer needs a version with canvases.
+
 Screenshots for the agent come from the same small headless browser used for [visual replies](html-renders.md), which downloads once on first use.

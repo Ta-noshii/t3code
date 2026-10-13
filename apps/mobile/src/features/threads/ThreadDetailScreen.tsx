@@ -175,6 +175,7 @@ import type {
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { ComposerErrorNotice } from "./ComposerErrorNotice";
 import { ManagedRuntimeModeNotice } from "./ManagedRuntimeModeNotice";
+import { CanvasFocusNotice } from "../canvas/CanvasFocusNotice";
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ThreadRecapNotice } from "./ThreadRecapNotice";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
@@ -1651,6 +1652,10 @@ function ThreadDetailBody(
                         />
                       </Animated.View>
                     ) : null}
+                    <CanvasFocusNotice
+                      environmentId={props.environmentId}
+                      threadId={props.selectedThread.id}
+                    />
                     {props.draftMode ? null : (
                       <ThreadSideChatsRow
                         environmentId={props.environmentId}
