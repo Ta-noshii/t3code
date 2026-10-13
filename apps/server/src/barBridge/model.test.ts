@@ -16,6 +16,7 @@ import {
   deriveBarRequest,
   deriveModelOptions,
   deriveThreadState,
+  isListedThread,
   parseOp,
   resolveDefaultModel,
   toThreadRow,
@@ -132,6 +133,31 @@ describe("deriveThreadState", () => {
         NOW,
       ),
     ).toBe("idle");
+  });
+});
+
+describe("isListedThread", () => {
+  it("lists top-level threads and forks but not subagents", () => {
+    expect(isListedThread(shell)).toBe(true);
+    const parentThreadId = ThreadId.make("thread-parent");
+    const fork = {
+      ...shell,
+      lineage: {
+        rootThreadId: parentThreadId,
+        parentThreadId,
+        relationshipToParent: "fork" as const,
+      },
+    };
+    const subagent = {
+      ...shell,
+      lineage: {
+        rootThreadId: parentThreadId,
+        parentThreadId,
+        relationshipToParent: "subagent" as const,
+      },
+    };
+    expect(isListedThread(fork)).toBe(true);
+    expect(isListedThread(subagent)).toBe(false);
   });
 });
 
