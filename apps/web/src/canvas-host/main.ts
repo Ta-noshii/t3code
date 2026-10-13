@@ -28,8 +28,7 @@ window.t3Canvas = {
 
 // The headless renderer never posts a load message, so the editor (and React)
 // only load inside a WebView.
-const isWebView =
-  "ReactNativeWebView" in window || new URLSearchParams(window.location.search).has("editor");
+const isWebView = "ReactNativeWebView" in window;
 if (isWebView) {
   void import("./editorHost").then(({ mountEditorHost }) => mountEditorHost());
 }
