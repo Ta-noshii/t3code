@@ -294,6 +294,23 @@ import {
   DeviceSession,
   DeviceShutdownInput,
 } from "./device.ts";
+import {
+  CanvasCreateInput,
+  CanvasDeleteInput,
+  CanvasDocument,
+  CanvasError,
+  CanvasEvent,
+  CanvasListInput,
+  CanvasListResult,
+  CanvasReadInput,
+  CanvasRenameInput,
+  CanvasSaveInput,
+  CanvasSaveResult,
+  CanvasScreenshotInput,
+  CanvasScreenshotResult,
+  CanvasSubscribeInput,
+  CanvasSummary,
+} from "./canvas.ts";
 import {} from "./previewAutomation.ts";
 import {
   ServerConfigStreamEvent,
@@ -470,6 +487,15 @@ export const WS_METHODS = {
   previewReportProfiles: "preview.reportProfiles",
   previewReportStatus: "preview.reportStatus",
 
+  // Canvas methods
+  canvasList: "canvas.list",
+  canvasRead: "canvas.read",
+  canvasSave: "canvas.save",
+  canvasCreate: "canvas.create",
+  canvasRename: "canvas.rename",
+  canvasDelete: "canvas.delete",
+  canvasScreenshot: "canvas.screenshot",
+
   // Device methods
   deviceConfigure: "device.configure",
   deviceList: "device.list",
@@ -588,6 +614,7 @@ export const WS_METHODS = {
   subscribePreviewEvents: "subscribePreviewEvents",
   subscribeDiscoveredLocalServers: "subscribeDiscoveredLocalServers",
   subscribeDeviceState: "subscribeDeviceState",
+  subscribeCanvasEvents: "subscribeCanvasEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
@@ -1619,6 +1646,56 @@ const WsDeviceActionRpc = Rpc.make(WS_METHODS.deviceAction, {
   error: Schema.Union([DeviceError, EnvironmentAuthorizationError]),
 });
 
+const CanvasRpcError = Schema.Union([CanvasError, EnvironmentAuthorizationError]);
+
+const WsCanvasListRpc = Rpc.make(WS_METHODS.canvasList, {
+  payload: CanvasListInput,
+  success: CanvasListResult,
+  error: CanvasRpcError,
+});
+
+const WsCanvasReadRpc = Rpc.make(WS_METHODS.canvasRead, {
+  payload: CanvasReadInput,
+  success: CanvasDocument,
+  error: CanvasRpcError,
+});
+
+const WsCanvasSaveRpc = Rpc.make(WS_METHODS.canvasSave, {
+  payload: CanvasSaveInput,
+  success: CanvasSaveResult,
+  error: CanvasRpcError,
+});
+
+const WsCanvasCreateRpc = Rpc.make(WS_METHODS.canvasCreate, {
+  payload: CanvasCreateInput,
+  success: CanvasSummary,
+  error: CanvasRpcError,
+});
+
+const WsCanvasRenameRpc = Rpc.make(WS_METHODS.canvasRename, {
+  payload: CanvasRenameInput,
+  success: CanvasSummary,
+  error: CanvasRpcError,
+});
+
+const WsCanvasDeleteRpc = Rpc.make(WS_METHODS.canvasDelete, {
+  payload: CanvasDeleteInput,
+  error: CanvasRpcError,
+});
+
+const WsCanvasScreenshotRpc = Rpc.make(WS_METHODS.canvasScreenshot, {
+  payload: CanvasScreenshotInput,
+  success: CanvasScreenshotResult,
+  error: CanvasRpcError,
+});
+
+const WsSubscribeCanvasEventsRpc = Rpc.make(WS_METHODS.subscribeCanvasEvents, {
+  payload: CanvasSubscribeInput,
+  success: CanvasEvent,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsSubscribeDeviceStateRpc = Rpc.make(WS_METHODS.subscribeDeviceState, {
   payload: Schema.Struct({}),
   success: DeviceServiceState,
@@ -2067,6 +2144,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewReportStatusRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
+  WsCanvasListRpc,
+  WsCanvasReadRpc,
+  WsCanvasSaveRpc,
+  WsCanvasCreateRpc,
+  WsCanvasRenameRpc,
+  WsCanvasDeleteRpc,
+  WsCanvasScreenshotRpc,
+  WsSubscribeCanvasEventsRpc,
   WsDeviceConfigureRpc,
   WsDeviceListRpc,
   WsDeviceTestHostRpc,
