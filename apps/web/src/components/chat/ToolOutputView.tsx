@@ -38,6 +38,7 @@ import {
   GlobeIcon,
   HourglassIcon,
   ImageIcon,
+  ShapesIcon,
   InfoIcon,
   LinkIcon,
   ListIcon,
@@ -58,6 +59,7 @@ import ChatMarkdown from "../ChatMarkdown";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { MiddleTruncate } from "../ui/middle-truncate";
+import { useRightPanelStore } from "../../rightPanelStore";
 import { getProviderInstanceEntry } from "../../providerInstances";
 import { getTriggerDisplayModelName } from "./providerIconUtils";
 import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
@@ -88,6 +90,7 @@ const KIND_ICON: Record<ToolDigestKind, LucideIcon> = {
   project: FolderIcon,
   request: CircleHelpIcon,
   list: ListIcon,
+  canvas: ShapesIcon,
 };
 
 const FACT_ICON: Record<ToolDigestIcon, LucideIcon> = {
@@ -427,7 +430,8 @@ function DigestView({
   readonly digest: ToolDigest;
   readonly context: ToolViewContext;
 }) {
-  const hasHead = Boolean(digest.status || digest.title || digest.threads.length);
+  const canvasPath = context.threadRef ? digest.canvasPath : undefined;
+  const hasHead = Boolean(digest.status || digest.title || digest.threads.length || canvasPath);
   return (
     <div className="space-y-2">
       {hasHead ? (
@@ -452,6 +456,19 @@ function DigestView({
           {digest.status ? <StatusBadge status={digest.status} /> : null}
           <span className="ml-auto flex gap-1">
             <ThreadButtons threads={digest.threads} context={context} />
+            {canvasPath && context.threadRef ? (
+              <Button
+                variant="outline"
+                size="micro"
+                onClick={() =>
+                  useRightPanelStore.getState().openCanvas(context.threadRef!, canvasPath)
+                }
+              >
+                <ShapesIcon />
+                Open canvas
+                <ArrowUpRightIcon />
+              </Button>
+            ) : null}
           </span>
         </div>
       ) : null}
