@@ -6,9 +6,11 @@ import {
   canvasElementBounds,
   canvasExportScale,
   canvasFormatForPath,
+  canvasGroup,
   canvasSlug,
   canvasTitle,
   mergeCanvasElements,
+  normalizeCanvasGroup,
   parseCanvasScene,
   serializeCanvasScene,
 } from "./canvas.ts";
@@ -45,6 +47,19 @@ describe("canvas paths", () => {
     expect(canvasTitle({ appState: { name: "API gateway" } }, "/x/a.excalidraw")).toBe(
       "API gateway",
     );
+  });
+});
+
+describe("canvas groups", () => {
+  it("normalizes typed folder names and refuses ones leaving the library", () => {
+    expect(normalizeCanvasGroup(" Design / auth/ ")).toBe("Design/auth");
+    expect(normalizeCanvasGroup("a\\b")).toBe("a/b");
+    expect(normalizeCanvasGroup("  ")).toBe("");
+    expect(normalizeCanvasGroup("../x")).toBeNull();
+    expect(normalizeCanvasGroup("a/.git")).toBeNull();
+    expect(normalizeCanvasGroup("a/b/c/d/e")).toBeNull();
+    expect(canvasGroup("design/auth/login")).toBe("design/auth");
+    expect(canvasGroup("login")).toBe("");
   });
 });
 
