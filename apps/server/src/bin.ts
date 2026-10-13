@@ -3,7 +3,8 @@
  * agents run `t3 acp-mcp-call` per tool call, so their startup sits on first-message latency.
  * They and Codex's managed-token helper dispatch before the full CLI module graph (seconds
  * of evaluation) loads, as does `t3 secret prompt`, which must report quickly when it cannot
- * show a card. Everything else defers to the real CLI in ./binCli.ts.
+ * show a card, and the long-running `t3 bar-bridge` for the Omarchy bar, which needs none of
+ * the CLI. Everything else defers to the real CLI in ./binCli.ts.
  */
 import { isEntrypoint } from "./entrypoint.ts";
 
@@ -38,6 +39,9 @@ if (
   } else if (command === "secret") {
     const { runSecretCliFastPath } = await import("./secrets/secretPromptCli.ts");
     await runSecretCliFastPath(process.argv.slice(3));
+  } else if (command === "bar-bridge") {
+    const { runBarBridge } = await import("./barBridge/bridge.ts");
+    await runBarBridge();
   } else {
     // Windows desktop launches without stdin; attach before reading, except on fast paths using pipes.
     const { attachConsoleStdin } = await import("./cli/consoleStdin.ts");
