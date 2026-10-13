@@ -18,6 +18,8 @@ const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
+const CAMERA_PERMISSION =
+  "Allow T3 Code to use your camera to scan pairing QR codes and add photos to canvases.";
 const androidAdaptiveForeground = "./assets/android-icon-foreground.png";
 
 if (
@@ -387,13 +389,20 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow T3 Code to access your camera so you can scan pairing QR codes.",
+        cameraPermission: CAMERA_PERMISSION,
         microphonePermission: false,
         barcodeScannerEnabled: true,
         recordAudioAndroid: false,
       },
     ],
-    ["expo-image-picker", { photosPermission: false, microphonePermission: false }],
+    [
+      "expo-image-picker",
+      {
+        photosPermission: false,
+        cameraPermission: CAMERA_PERMISSION,
+        microphonePermission: false,
+      },
+    ],
     [
       "expo-splash-screen",
       {

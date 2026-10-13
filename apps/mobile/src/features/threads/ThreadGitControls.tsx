@@ -92,6 +92,7 @@ export type ThreadGitMenuProps = {
   readonly onOpenFilesInspector?: () => void;
   readonly onOpenGitInspector?: () => void;
   readonly onMergeBack?: () => void;
+  readonly onOpenCanvases?: () => void;
   readonly onPull: () => Promise<void>;
   readonly onRunAction: (input: GitActionRequestInput) => Promise<GitRunStackedActionResult | null>;
 };
@@ -389,6 +390,17 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
                 },
               ]
             : []),
+          ...(props.onOpenCanvases
+            ? [
+                {
+                  description: "Drawings you share with the agent",
+                  icon: { name: "scribble.variable", type: "sfSymbol" as const },
+                  label: "Canvases",
+                  onPress: props.onOpenCanvases,
+                  type: "action" as const,
+                },
+              ]
+            : []),
           {
             description:
               props.hasThread === false
@@ -562,6 +574,17 @@ function threadGitMenuDefinition(
             : "Turn diffs and worktree changes",
         onPress: model.openReview,
       },
+      ...(props.onOpenCanvases
+        ? [
+            {
+              id: "canvases",
+              title: "Canvases",
+              icon: "scribble.variable",
+              subtitle: "Drawings you share with the agent",
+              onPress: props.onOpenCanvases,
+            },
+          ]
+        : []),
       {
         id: "git-more",
         title: "More",

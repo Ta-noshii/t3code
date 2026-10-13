@@ -67,6 +67,9 @@ import { ThreadBackgroundWorkSheet } from "./features/threads/ThreadBackgroundWo
 import { ThreadQueueSheet } from "./features/threads/ThreadQueueControl";
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
 import { McpAppFullscreenScreen } from "./features/threads/McpAppFullscreenScreen";
+import { CanvasLibraryScreen } from "./features/canvas/CanvasLibraryScreen";
+import { CanvasScreen } from "./features/canvas/CanvasScreen";
+import { CANVAS_LIBRARY_LINKING, CANVAS_LINKING } from "./features/canvas/canvasRoutes";
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
 import { AddProjectDestinationRoute } from "./features/projects/AddProjectDestinationRoute";
@@ -878,6 +881,21 @@ const RootStackConfig = createWorkspaceStackNavigator({
       options: {
         presentation: "fullScreenModal",
         headerShown: false,
+        gestureEnabled: false,
+      },
+    }),
+    CanvasLibrary: createNativeStackScreen({
+      screen: CanvasLibraryScreen,
+      linking: CANVAS_LIBRARY_LINKING,
+      options: GLASS_HEADER_OPTIONS,
+    }),
+    Canvas: createNativeStackScreen({
+      screen: CanvasScreen,
+      linking: CANVAS_LINKING,
+      options: {
+        presentation: "fullScreenModal",
+        headerShown: false,
+        // A swipe from the edge would fight drawing on the canvas.
         gestureEnabled: false,
       },
     }),

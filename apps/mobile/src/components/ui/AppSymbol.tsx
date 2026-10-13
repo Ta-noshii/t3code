@@ -98,6 +98,8 @@ import IconPalette from "@tabler/icons-react-native/IconPalette";
 import IconPencil from "@tabler/icons-react-native/IconPencil";
 import IconPlug from "@tabler/icons-react-native/IconPlug";
 import IconPhoto from "@tabler/icons-react-native/IconPhoto";
+import IconScribble from "@tabler/icons-react-native/IconScribble";
+import IconClipboard from "@tabler/icons-react-native/IconClipboard";
 import IconPin from "@tabler/icons-react-native/IconPin";
 import IconPinnedOff from "@tabler/icons-react-native/IconPinnedOff";
 import IconPlayerPlay from "@tabler/icons-react-native/IconPlayerPlay";
@@ -236,6 +238,8 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "person.badge.clock": IconUserQuestion,
   "person.badge.plus": IconUserPlus,
   photo: IconPhoto,
+  "scribble.variable": IconScribble,
+  "doc.on.clipboard": IconClipboard,
   pin: IconPin,
   "pin.slash": IconPinnedOff,
   play: IconPlayerPlay,

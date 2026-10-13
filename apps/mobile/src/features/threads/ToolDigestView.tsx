@@ -27,6 +27,7 @@ export interface ToolDigestContext {
   readonly environmentId: EnvironmentId;
   readonly renderMarkdown: (text: string) => ReactNode;
   readonly onOpenThread: (threadId: string) => void;
+  readonly onOpenCanvas: (path: string) => void;
 }
 
 const KIND_ICON: Record<ToolDigestKind, AppSymbolName> = {
@@ -377,7 +378,8 @@ function DigestRows(props: {
 
 function DigestView(props: { readonly digest: ToolDigest; readonly context: ToolDigestContext }) {
   const { digest } = props;
-  const hasHead = Boolean(digest.status || digest.title);
+  const { canvasPath } = digest;
+  const hasHead = Boolean(digest.status || digest.title || canvasPath);
   return (
     <View className="gap-2">
       {hasHead ? (
@@ -405,6 +407,14 @@ function DigestView(props: { readonly digest: ToolDigest; readonly context: Tool
             )
           ) : null}
           {digest.status ? <StatusBadge status={digest.status} /> : null}
+          {canvasPath ? (
+            <SmallButton
+              outlined
+              icon="scribble.variable"
+              label="Open canvas"
+              onPress={() => props.context.onOpenCanvas(canvasPath)}
+            />
+          ) : null}
         </View>
       ) : null}
       <ThreadButtons threads={digest.threads} context={props.context} />
