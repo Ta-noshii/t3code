@@ -265,6 +265,8 @@ export interface ThreadDetailScreenProps {
   /** "While you were away" summary of a finished thread, shown above the composer. */
   readonly threadRecap: string | null;
   readonly onDismissThreadRecap: () => void;
+  /** Opens a new thread with the conversation before a sent message and the message unsent. */
+  readonly onEditInNewThread: ((messageId: MessageId) => Promise<void>) | null;
   readonly canStopThread: boolean;
   readonly queuedRunEdit: QueuedRunEdit | null;
   readonly composerDraftKey: string | null;
@@ -1461,6 +1463,7 @@ function ThreadDetailBody(
                 onEditPendingMessage={
                   isProviderSubagent || pendingMessageEditBlocked ? null : handleEditPendingMessage
                 }
+                onEditInNewThread={isProviderSubagent ? null : props.onEditInNewThread}
                 contentPresentation={props.contentPresentation}
                 threadTitle={props.selectedThread.title}
                 latestRun={props.activityRun}
