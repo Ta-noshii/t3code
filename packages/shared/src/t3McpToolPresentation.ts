@@ -64,7 +64,8 @@ export type T3McpToolSummaryAction =
   | "browser"
   | "device"
   | "html-preview"
-  | "html-render";
+  | "html-render"
+  | "canvas";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -337,6 +338,16 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   t3_thread_send_attachments: tool(["Send", "Sending", "Sent", "attachments"], "attachment-send"),
   html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
+  canvas_list: tool(["List", "Listing", "Listed", "canvases"], "canvas"),
+  canvas_create: tool(["Create", "Creating", "Created", "a canvas"], "canvas"),
+  canvas_open: tool(["Open", "Opening", "Opened", "a canvas"], "canvas"),
+  canvas_read: tool(["Read", "Reading", "Read", "a canvas"], "canvas"),
+  canvas_update: tool(["Update", "Updating", "Updated", "a canvas"], "canvas"),
+  canvas_add_image: tool(["Add", "Adding", "Added", "an image to a canvas"], "canvas"),
+  canvas_screenshot: tool(
+    ["Take a screenshot of", "Taking a screenshot of", "Took a screenshot of", "a canvas"],
+    "canvas",
+  ),
 };
 
 export const T3_MCP_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(T3_MCP_TOOLS));
