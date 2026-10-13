@@ -1,5 +1,8 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
+import {
+  deriveThreadQueueWorkflowState,
+  runsAsOwnTurn,
+} from "@t3tools/client-runtime/state/thread-workflows";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type {
   ChatAttachment as ContractChatAttachment,
@@ -41,11 +44,6 @@ interface QueuedRowThumbnail {
 }
 
 const QUEUED_RUN_DRAG_TYPE = "application/x-t3code-queued-run";
-
-/** /compact and /logout run as their own turn; the server refuses to steer them into another. */
-function runsAsOwnTurn(text: string, attachments: ReadonlyArray<unknown>): boolean {
-  return attachments.length === 0 && ["/compact", "/logout"].includes(text.trim().toLowerCase());
-}
 
 export interface QueuedRunsControlHandle {
   steerNext: (repeat: boolean) => boolean;

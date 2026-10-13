@@ -18,6 +18,7 @@ describe("threadQueueControlPresentation", () => {
       index: 1,
       queuedCount: 3,
       text: "Please review the follow-up change.",
+      attachments: [],
     });
 
     expect(controls.displayText).toBe("Please review the follow-up change.");
@@ -36,6 +37,7 @@ describe("threadQueueControlPresentation", () => {
       index: 0,
       queuedCount: 2,
       text: "First",
+      attachments: [],
     });
     const busy = resolveThreadQueueRowControls({
       busy: true,
@@ -44,6 +46,7 @@ describe("threadQueueControlPresentation", () => {
       index: 0,
       queuedCount: 1,
       text: "Queued message",
+      attachments: [],
     });
 
     expect(first.canMoveUp).toBe(false);
@@ -52,6 +55,23 @@ describe("threadQueueControlPresentation", () => {
     expect(busy.canDismiss).toBe(false);
     expect(busy.canMoveUp).toBe(false);
     expect(busy.canSteer).toBe(false);
+  });
+
+  it("does not offer to steer with /compact or /logout, which run as their own turn", () => {
+    const row = (text: string) =>
+      resolveThreadQueueRowControls({
+        busy: false,
+        canPromoteToSteer: true,
+        canReorder: true,
+        index: 0,
+        queuedCount: 1,
+        text,
+        attachments: [],
+      });
+
+    expect(row(" /compact").canSteer).toBe(false);
+    expect(row("/logout").canSteer).toBe(false);
+    expect(row("/compact the parser notes").canSteer).toBe(true);
   });
 
   it("keeps the row already open in the composer from being reopened or steered", () => {
@@ -63,6 +83,7 @@ describe("threadQueueControlPresentation", () => {
       isEditing: true,
       queuedCount: 3,
       text: "Being edited",
+      attachments: [],
     });
 
     expect(editing.isEditing).toBe(true);
