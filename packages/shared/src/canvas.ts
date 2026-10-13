@@ -304,6 +304,11 @@ export function unionCanvasRects(rects: ReadonlyArray<CanvasRect>): CanvasRect |
 export class CanvasCropError extends Error {}
 
 const CANVAS_SCREENSHOT_DEFAULT_PADDING = 24;
+// Frames crop tight, like Excalidraw's frame export. Two units keep the
+// border's antialiased edge and stop just below the frame's name.
+const CANVAS_FRAME_DEFAULT_PADDING = 2;
+// Excalidraw draws every frame border at this width, whatever the element says.
+const CANVAS_FRAME_STROKE_WIDTH = 2;
 // A small crop is enlarged at most this much, so a single shape does not
 // come back as a blurry 1600 px blow-up.
 const MAX_AUTO_SCALE = 3;
@@ -311,12 +316,12 @@ const MAX_AUTO_SCALE = 3;
 /**
  * The scene rectangle a crop shows, padding included. Element crops take
  * the listed elements plus the text bound inside them; frame crops match a
- * frame's name or id and use no padding, like Excalidraw's frame export.
+ * frame's name or id and default to a few units of padding instead.
  */
 export function canvasCropRect(
   elements: ReadonlyArray<CanvasElement>,
   crop: CanvasCrop,
-  padding = CANVAS_SCREENSHOT_DEFAULT_PADDING,
+  padding?: number,
 ): CanvasRect {
   const live = elements.filter((element) => element.isDeleted !== true);
   const pad = (rect: CanvasRect | null, amount: number) => {
@@ -332,9 +337,9 @@ export function canvasCropRect(
     unionCanvasRects(list.flatMap((element) => canvasElementBounds(element) ?? []));
   switch (crop.type) {
     case "full":
-      return pad(boundsOf(live), padding);
+      return pad(boundsOf(live), padding ?? CANVAS_SCREENSHOT_DEFAULT_PADDING);
     case "rect":
-      return pad(crop.rect, padding);
+      return pad(crop.rect, padding ?? CANVAS_SCREENSHOT_DEFAULT_PADDING);
     case "elements": {
       const ids = new Set(crop.ids);
       const picked = live.filter(
@@ -346,7 +351,7 @@ export function canvasCropRect(
       if (missing.length > 0) {
         throw new CanvasCropError(`No elements with ids ${missing.join(", ")}.`);
       }
-      return pad(boundsOf(picked), padding);
+      return pad(boundsOf(picked), padding ?? CANVAS_SCREENSHOT_DEFAULT_PADDING);
     }
     case "frame": {
       const frames = live.filter(
@@ -370,7 +375,10 @@ export function canvasCropRect(
             : "The canvas has no frames.",
         );
       }
-      return pad(canvasElementBounds({ ...frame, strokeWidth: 0 }), 0);
+      return pad(
+        canvasElementBounds({ ...frame, strokeWidth: CANVAS_FRAME_STROKE_WIDTH }),
+        padding ?? CANVAS_FRAME_DEFAULT_PADDING,
+      );
     }
   }
 }
