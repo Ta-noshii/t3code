@@ -113,6 +113,7 @@ import {
   deriveThreadRuntime,
   presentPendingBackgroundWork,
   presentProviderGoal,
+  latestPromptSuggestion,
 } from "@t3tools/client-runtime/state/thread-execution";
 import {
   buildEarlierConversationTranscript,
@@ -198,7 +199,6 @@ import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
 import {
   type ComposerSubmissionIntent,
   collapseExpandedComposerCursor,
-  latestPromptSuggestion,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
 import {

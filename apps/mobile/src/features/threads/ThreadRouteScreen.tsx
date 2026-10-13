@@ -2,6 +2,9 @@ import { useOpenPullRequest } from "../../native/useOpenPullRequest";
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTurn";
 import { useWorktreeSetup } from "./use-worktree-setup";
+import { latestPromptSuggestion } from "@t3tools/client-runtime/state/thread-execution";
+import * as DateTime from "effect/DateTime";
+import { useThreadRecap } from "./useThreadRecap";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import {
@@ -291,6 +294,24 @@ function ThreadRouteContent(
   );
   const selectedThreadDetailState = props.selectedThreadDetailState;
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
+  const latestCompletedRun = useMemo(() => {
+    const latest = selectedThreadDetail?.runs.reduce<
+      (typeof selectedThreadDetail.runs)[number] | undefined
+    >(
+      (current, run) => (current === undefined || run.ordinal > current.ordinal ? run : current),
+      undefined,
+    );
+    return latest?.status === "completed"
+      ? {
+          runId: latest.id,
+          completedAt: latest.completedAt === null ? null : DateTime.formatIso(latest.completedAt),
+        }
+      : null;
+  }, [selectedThreadDetail]);
+  const promptSuggestion = useMemo(
+    () => latestPromptSuggestion(selectedThreadDetail),
+    [selectedThreadDetail],
+  );
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   const composer = useThreadComposerState();
   const gitState = useSelectedThreadGitState();
@@ -422,6 +443,17 @@ function ThreadRouteContent(
     }, [props.renderInspector]),
   );
   const routeEnvironmentRuntime = useRemoteEnvironmentRuntime(environmentId);
+  const threadRecap = useThreadRecap({
+    environmentId: selectedThread?.environmentId ?? null,
+    threadId: selectedThread?.id ?? null,
+    ready: selectedThreadDetail !== null,
+    completedRun: latestCompletedRun,
+    idle:
+      !composer.activeThreadBusy &&
+      requests.activePendingApproval === null &&
+      requests.activePendingUserInput === null,
+    supported: routeEnvironmentRuntime?.serverConfig?.environment.capabilities.threadRecap === true,
+  });
   const routeConnectionState =
     routeEnvironmentRuntime?.connectionState ?? (environmentId ? "available" : connectionState);
   const routeConnectionError = routeEnvironmentRuntime?.connectionError ?? null;
@@ -1040,6 +1072,9 @@ function ThreadRouteContent(
           threadSyncStatus={selectedThreadDetailState.status}
           historyControls={historyControls}
           activeThreadBusy={composer.activeThreadBusy}
+          promptSuggestion={promptSuggestion}
+          threadRecap={threadRecap.recap}
+          onDismissThreadRecap={threadRecap.dismiss}
           canStopThread={awaitingBootstrapTurn || composer.interruptibleRunId !== null}
           queuedRunEdit={composer.queuedRunEdit}
           composerDraftKey={composer.composerDraftKey}
