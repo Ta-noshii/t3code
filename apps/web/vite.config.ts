@@ -1,3 +1,4 @@
+import * as NodeUrl from "node:url";
 import * as NodeZlib from "node:zlib";
 
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
@@ -16,6 +17,7 @@ import {
 
 import { loadRepoEnv } from "../../scripts/lib/public-config";
 import { thirdPartyLicensesPlugin } from "../../scripts/lib/third-party-licenses";
+import { excalidrawAssetsPlugin } from "./vite/excalidrawAssets";
 import { tailwindPlugins } from "./vite/tailwind";
 
 const repoEnv = loadRepoEnv();
@@ -184,6 +186,7 @@ export default defineConfig(() => {
         presets: [reactCompilerPreset()],
       }),
       tailwindPlugins(bundledDev),
+      excalidrawAssetsPlugin(),
     ],
     optimizeDeps: {
       include: [
@@ -285,6 +288,14 @@ export default defineConfig(() => {
       emptyOutDir: true,
       manifest: true,
       sourcemap: buildSourcemap,
+      rolldownOptions: {
+        // canvas-host.html renders canvases for the server's headless
+        // screenshots and hosts the editor in the mobile app's WebView.
+        input: {
+          main: NodeUrl.fileURLToPath(new URL("./index.html", import.meta.url)),
+          canvasHost: NodeUrl.fileURLToPath(new URL("./canvas-host.html", import.meta.url)),
+        },
+      },
     },
     test: {
       projects: [defineProject(unitTestProject)],
