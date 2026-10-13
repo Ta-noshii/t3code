@@ -744,6 +744,7 @@ function presenterDigest(tool: string, fields: Fields, input: Fields | undefined
       };
     case "canvas_list":
     case "canvas_create":
+    case "canvas_move":
     case "canvas_open":
     case "canvas_read":
     case "canvas_update":

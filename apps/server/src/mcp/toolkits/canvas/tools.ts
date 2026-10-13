@@ -20,7 +20,12 @@ const dependencies = [
 
 const CanvasName = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)).annotate({
   description:
-    "A library slug from canvas_list, or a path to an .excalidraw file (absolute, ~/..., or relative to the project). Defaults to the canvas this thread used last.",
+    "A library slug from canvas_list (like auth-flow or design/auth-flow), or a path to an .excalidraw file (absolute, ~/..., or relative to the project). Defaults to the canvas this thread used last.",
+});
+
+const Group = Schema.String.check(Schema.isMaxLength(400)).annotate({
+  description:
+    'A folder of the library to group canvases in, like "design" or "design/auth"; created when missing. "" is the top level.',
 });
 
 const Element = Schema.Record(Schema.String, Schema.Unknown);
@@ -35,7 +40,7 @@ const UpdateResult = Schema.Struct({
 
 const CanvasListTool = Tool.make("canvas_list", {
   description:
-    "List the project's canvas library (Excalidraw diagrams in its canvas folder) and the canvas this thread is using.",
+    "List the project's canvas library (Excalidraw diagrams in its canvas folder) and the canvas this thread is using. Canvases in subfolders have slugs like design/auth-flow; the part before the last / is the group.",
   success: Schema.Struct({
     folder: Schema.String,
     current: Schema.NullOr(Schema.String),
@@ -52,9 +57,10 @@ const CanvasListTool = Tool.make("canvas_list", {
 
 const CanvasCreateTool = Tool.make("canvas_create", {
   description:
-    "Create an empty canvas in the project's library, or at path, and make it this thread's canvas.",
+    "Create an empty canvas in the project's library, or at path, and make it this thread's canvas. Put related canvases in a group.",
   parameters: Schema.Struct({
     title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+    group: Schema.optional(Group),
     path: Schema.optional(
       Schema.String.annotate({
         description: "Where to create the file instead of the library, ending in .excalidraw.",
@@ -69,6 +75,24 @@ const CanvasCreateTool = Tool.make("canvas_create", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, false);
+
+const CanvasMoveTool = Tool.make("canvas_move", {
+  description:
+    "Rename a library canvas or move it to another group of the library. The file is renamed to match; a group left empty is removed.",
+  parameters: Schema.Struct({
+    canvas: Schema.optional(CanvasName),
+    title: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
+    group: Schema.optional(Group),
+  }),
+  success: Schema.Struct({ canvas: CanvasSummary }),
+  failure: OrchestratorMcpFailure,
+  dependencies,
+})
+  .annotate(Tool.Title, "Move canvas")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
 const CanvasOpenTool = Tool.make("canvas_open", {
@@ -186,6 +210,7 @@ export const CanvasScreenshotTool = Tool.make("canvas_screenshot", {
 export const CanvasStandardToolkit = Toolkit.make(
   CanvasListTool,
   CanvasCreateTool,
+  CanvasMoveTool,
   CanvasOpenTool,
   CanvasReadTool,
   CanvasUpdateTool,
@@ -197,6 +222,7 @@ export const CanvasScreenshotToolkit = Toolkit.make(CanvasScreenshotTool);
 export const CanvasToolkit = Toolkit.make(
   CanvasListTool,
   CanvasCreateTool,
+  CanvasMoveTool,
   CanvasOpenTool,
   CanvasReadTool,
   CanvasUpdateTool,

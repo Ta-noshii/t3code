@@ -50,8 +50,9 @@ export type CanvasFormat = typeof CanvasFormat.Type;
 
 /**
  * A canvas is addressed by `path`, the absolute path on the environment.
- * Library canvases also carry their project and slug (file name without
- * extension) so tools and clients can name them briefly.
+ * Library canvases also carry their project and slug (the path inside the
+ * library without extension, like `design/auth-flow`) so tools and clients
+ * can name them briefly. The part before the last `/` is its group.
  */
 export const CanvasSummary = Schema.Struct({
   path: TrimmedNonEmptyString,
@@ -162,12 +163,16 @@ export const CanvasCreateInput = Schema.Struct({
   title: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   /** Where to create it instead of the library: absolute, `~/`, or project-relative. */
   path: Schema.optional(TrimmedNonEmptyString),
+  /** A folder inside the library, like `design/auth`; created if missing. */
+  group: Schema.optional(Schema.String.check(Schema.isMaxLength(400))),
 });
 export type CanvasCreateInput = typeof CanvasCreateInput.Type;
 
 export const CanvasRenameInput = Schema.Struct({
   path: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  /** Moves a library canvas to this folder of the library; "" is the top level. */
+  group: Schema.optional(Schema.String.check(Schema.isMaxLength(400))),
 });
 export type CanvasRenameInput = typeof CanvasRenameInput.Type;
 
@@ -363,6 +368,7 @@ export class CanvasInvalidPathError extends Schema.TaggedError<CanvasInvalidPath
       "outside-library",
       "exists",
       "relative-path",
+      "invalid-group",
     ]),
   },
 ) {
@@ -378,6 +384,8 @@ export class CanvasInvalidPathError extends Schema.TaggedError<CanvasInvalidPath
         return `A canvas already exists at ${this.path}.`;
       case "relative-path":
         return `${this.path} is relative; pass an absolute path or the project it belongs to.`;
+      case "invalid-group":
+        return `${this.path} is not a usable folder. Name folders with / between them and no . or .. parts.`;
     }
   }
 }

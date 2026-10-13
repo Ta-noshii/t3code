@@ -92,6 +92,7 @@ it.effect("registers the canvas tools and returns screenshots as images", () =>
       "canvas_add_image",
       "canvas_create",
       "canvas_list",
+      "canvas_move",
       "canvas_open",
       "canvas_read",
       "canvas_screenshot",
