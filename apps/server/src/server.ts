@@ -76,6 +76,8 @@ import * as PeerMcpClient from "./peer/PeerMcpClient.ts";
 import * as SecretPromptHttp from "./secrets/SecretPromptHttp.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
+import * as CanvasRenderer from "./canvas/CanvasRenderer.ts";
+import * as CanvasService from "./canvas/CanvasService.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as DeviceHubProxy from "./device/DeviceHubProxy.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -761,6 +763,13 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(
     ServerBrowser.layer.pipe(
       Layer.provide(Layer.merge(DesktopBrowserChannel.layer, PreviewAgentActivity.layer)),
+    ),
+  ),
+  // Canvas screenshots run Excalidraw in the preview's headless browser.
+  Layer.provide(
+    CanvasService.layer.pipe(
+      Layer.provide(CanvasRenderer.layer),
+      Layer.provide(T3ProjectFileLoader.layer),
     ),
   ),
   Layer.provide(PreviewBrowser.layer),
