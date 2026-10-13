@@ -1,7 +1,6 @@
 import {
-  SECRET_REQUEST_DEFAULT_PLACEHOLDER,
-  SECRET_REQUEST_PRIVACY_NOTE,
   secretRequestAnswerInput,
+  secretRequestCopy,
   secretRequestDisplay,
   secretRequestFailureMessage,
   type SecretRequestItem,
@@ -12,18 +11,21 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
 import { CheckIcon, LockIcon, MinusIcon, ShieldCheckIcon } from "lucide-react";
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
 import { WorkLogRow } from "./WorkLog";
 
 /**
- * Inline card for a secret an agent asked the user for. The typed value lives
- * only in this component's state and the RPC payload: it is never logged,
- * toasted, or persisted, and the field clears once the answer is sent.
+ * Inline card for a secret an agent asked the user for, or a command in its
+ * shell asked for through `t3 secret prompt`. The typed value lives only in
+ * this component's state and the RPC payload: it is never logged, toasted, or
+ * persisted, and the field clears once the answer is sent. A prompt whose
+ * command exits switches to its ended row when the item updates.
  */
 export function SecretRequestCard(props: {
   readonly environmentId: EnvironmentId;
@@ -59,6 +61,7 @@ function PendingSecretRequestForm(props: {
   readonly item: SecretRequestItem;
 }) {
   const { item } = props;
+  const copy = secretRequestCopy(item);
   const inputId = useId();
   const errorId = useId();
   const privacyId = useId();
@@ -101,6 +104,26 @@ function PendingSecretRequestForm(props: {
     void send({ type: "save", secret });
   };
 
+  const fieldProps = {
+    id: inputId,
+    className: "[-webkit-text-security:disc]",
+    autoComplete: "off",
+    autoCorrect: "off",
+    autoCapitalize: "off",
+    spellCheck: false,
+    // Password managers otherwise offer to save or fill this field.
+    "data-1p-ignore": true,
+    "data-lpignore": "true",
+    "data-bwignore": true,
+    placeholder: copy.placeholder,
+    value: secret,
+    disabled: submitting,
+    "aria-invalid": error !== null || undefined,
+    "aria-describedby": error !== null ? `${privacyId} ${errorId}` : privacyId,
+    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setSecret(event.currentTarget.value),
+  };
+
   // Same hierarchy as a chat card: what is asked, why, the field, then the
   // promise about where the value goes.
   return (
@@ -113,7 +136,7 @@ function PendingSecretRequestForm(props: {
       // follows lands here rather than with the composer.
       onPointerDown={(event) => {
         if (!(event.target instanceof HTMLElement)) return;
-        if (event.target.closest("input, button, a")) return;
+        if (event.target.closest("input, textarea, button, a")) return;
         document.getElementById(inputId)?.focus();
       }}
     >
@@ -121,34 +144,35 @@ function PendingSecretRequestForm(props: {
         <label htmlFor={inputId} className="text-sm font-medium text-foreground">
           {item.label}
         </label>
-        {item.reason.trim() ? <p className="text-sm text-muted-foreground">{item.reason}</p> : null}
+        {copy.command !== null ? (
+          <>
+            <p className="text-sm text-muted-foreground">Enter your password to run as root:</p>
+            <code className="block min-w-0 rounded-md bg-muted px-2 py-1.5 font-mono text-sm break-all text-foreground">
+              {copy.command}
+            </code>
+          </>
+        ) : item.reason.trim() ? (
+          <p className="text-sm text-muted-foreground">{item.reason}</p>
+        ) : null}
       </div>
-      <div className="flex min-w-0 items-center gap-2">
+      <div
+        className={
+          copy.multiline ? "flex min-w-0 items-end gap-2" : "flex min-w-0 items-center gap-2"
+        }
+      >
         <div className="min-w-0 flex-1">
-          <Input
-            id={inputId}
+          {copy.multiline ? (
+            // Masked like the single-line field; a key or certificate needs
+            // its line breaks.
+            <Textarea {...fieldProps} />
+          ) : (
             // Masked text rather than a password field: browsers offer to
             // save any submitted password, and this is not a login.
-            type="text"
-            className="[-webkit-text-security:disc]"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            // Password managers otherwise offer to save or fill this field.
-            data-1p-ignore
-            data-lpignore="true"
-            data-bwignore
-            placeholder={item.placeholder ?? SECRET_REQUEST_DEFAULT_PLACEHOLDER}
-            value={secret}
-            disabled={submitting}
-            aria-invalid={error !== null || undefined}
-            aria-describedby={error !== null ? `${privacyId} ${errorId}` : privacyId}
-            onChange={(event) => setSecret(event.currentTarget.value)}
-          />
+            <Input type="text" {...fieldProps} />
+          )}
         </div>
         <Button type="submit" disabled={submitting || secret.trim().length === 0}>
-          Save securely
+          {copy.saveLabel}
         </Button>
       </div>
       {error !== null ? (
@@ -162,7 +186,7 @@ function PendingSecretRequestForm(props: {
           className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
         >
           <ShieldCheckIcon className="size-3.5 shrink-0" aria-hidden />
-          {SECRET_REQUEST_PRIVACY_NOTE}
+          {copy.privacyNote}
         </p>
         <Button
           type="button"
@@ -171,7 +195,7 @@ function PendingSecretRequestForm(props: {
           disabled={submitting}
           onClick={() => void send({ type: "decline" })}
         >
-          Decline
+          {copy.declineLabel}
         </Button>
       </div>
     </form>

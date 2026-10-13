@@ -1347,6 +1347,15 @@ export function codexThreadRuntimeParams(input: {
               },
             },
           }),
+      // One app-server serves every thread of an instance, so the agent shell
+      // variables go per thread into the shell policy, not the process env.
+      // Dotted keys add to the user's policy instead of replacing it.
+      ...Object.fromEntries(
+        Object.entries(mcpSession?.agentShellEnvironment ?? {}).map(([name, value]) => [
+          `shell_environment_policy.set.${name}`,
+          value,
+        ]),
+      ),
     },
   };
 }
