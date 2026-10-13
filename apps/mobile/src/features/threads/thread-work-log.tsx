@@ -76,7 +76,15 @@ import {
   turnItemOutputImages,
   turnItemOutputText,
 } from "@t3tools/client-runtime/work-log/item-detail";
+import { toolCallDigest } from "@t3tools/client-runtime/work-log/tool-digest";
+import { turnItemOutputBlocks } from "@t3tools/client-runtime/work-log/tool-value";
 import { useTurnItemDetail } from "../../state/queries";
+import {
+  type ToolDigestContext,
+  ToolCallDigestView,
+  toolOutputDigests,
+  ToolOutputDigestView,
+} from "./ToolDigestView";
 import {
   resolveThreadWorkGroupInitialScroll,
   shouldFollowThreadWorkGroupAppend,
@@ -990,6 +998,27 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
           : expanded && shownItem.type === "web_search"
             ? toolCallLines({ args: { query: shownItem.patterns?.join(", ") } })
             : null;
+  // T3 tools read as their prompt and settings, and their results as digests.
+  const callDigest =
+    call && shownItem.type === "dynamic_tool"
+      ? toolCallDigest(shownItem.toolName, shownItem.input)
+      : null;
+  const resultBlocks =
+    expanded && shownItem.type === "dynamic_tool" && (fetchedItem || !row.fetchesDetail)
+      ? (turnItemOutputBlocks(shownItem)?.filter((block) => block.kind !== "image") ?? null)
+      : null;
+  const resultDigests =
+    resultBlocks && shownItem.type === "dynamic_tool"
+      ? toolOutputDigests(resultBlocks, shownItem.toolName, shownItem.input)
+      : null;
+  const digestContext: ToolDigestContext = {
+    environmentId: props.environmentId,
+    renderMarkdown: props.renderReasoning,
+    onOpenThread: (threadId) =>
+      navigation.dispatch(
+        StackActions.push("Thread", { environmentId: String(props.environmentId), threadId }),
+      ),
+  };
   const failedExitCode =
     call && shownItem.type === "command_execution" && shownItem.exitCode
       ? shownItem.exitCode
@@ -1215,11 +1244,13 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
             nestedScrollEnabled
             directionalLockEnabled
             showsVerticalScrollIndicator
-            className="max-h-60"
+            className={callDigest || resultDigests ? "max-h-96" : "max-h-60"}
             contentContainerStyle={{ paddingRight: 8 }}
           >
             {reasoning ? (
               props.renderReasoning(reasoning.text)
+            ) : callDigest ? (
+              <ToolCallDigestView digest={callDigest} context={digestContext} />
             ) : call ? (
               [
                 call.command,
@@ -1258,7 +1289,16 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
                 {fullDetail}
               </Text>
             ) : null}
-            {fetchedOutput ? (
+            {resultBlocks && resultDigests ? (
+              <View className={cn(callDigest && "mt-2 border-t border-border pt-2")}>
+                <ToolOutputDigestView
+                  blocks={resultBlocks}
+                  digests={resultDigests}
+                  raw={shownItem.type === "dynamic_tool" ? shownItem.output : undefined}
+                  context={digestContext}
+                />
+              </View>
+            ) : fetchedOutput ? (
               <Text
                 selectable
                 className={cn(
