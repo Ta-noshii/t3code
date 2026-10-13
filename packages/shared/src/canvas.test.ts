@@ -190,10 +190,18 @@ describe("screenshot crops", () => {
     expect(() => canvasCropRect(elements, { type: "elements", ids: ["nope"] })).toThrow(/nope/u);
   });
 
-  it("crops to a frame by name or id without padding", () => {
-    const frame = { x: -50, y: -50, width: 200, height: 150 };
-    expect(canvasCropRect(elements, { type: "frame", frame: "login" }, 40)).toEqual(frame);
-    expect(canvasCropRect(elements, { type: "frame", frame: "frame-1" }, 40)).toEqual(frame);
+  it("crops to a frame by name or id, border included", () => {
+    // Frame borders are 2 units wide whatever the element says, and frame
+    // crops default to 2 units of padding.
+    const frame = { x: -53, y: -53, width: 206, height: 156 };
+    expect(canvasCropRect(elements, { type: "frame", frame: "login" })).toEqual(frame);
+    expect(canvasCropRect(elements, { type: "frame", frame: "frame-1" })).toEqual(frame);
+    expect(canvasCropRect(elements, { type: "frame", frame: "login" }, 0)).toEqual({
+      x: -51,
+      y: -51,
+      width: 202,
+      height: 152,
+    });
     expect(() => canvasCropRect(elements, { type: "frame", frame: "Signup" })).toThrow(/Login/u);
   });
 
