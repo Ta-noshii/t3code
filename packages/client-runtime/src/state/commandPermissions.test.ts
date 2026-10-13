@@ -7,6 +7,7 @@ import type { RpcSession } from "../rpc/session.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
+  AuthFilesystemWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
@@ -289,6 +290,37 @@ it.effect.each(["commit", "push", "commit_push", "create_pr", "commit_push_pr"] 
         yield* command.authorize(registry, env, withThread);
       }),
     ),
+);
+
+it.effect("requires the filesystem write grant to change canvases, not to read them", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      registry.set(sessions(env), AsyncResult.success(grant(false)));
+      for (const method of [
+        WS_METHODS.canvasSave,
+        WS_METHODS.canvasCreate,
+        WS_METHODS.canvasRename,
+        WS_METHODS.canvasDelete,
+      ]) {
+        const write = createCommandPermissions(runtime, method);
+        expect(registry.get(write.permissionAtom(env))).toBe(false);
+        expect((yield* write.authorize(registry, env).pipe(Effect.flip)).requiredPermission).toBe(
+          AuthFilesystemWriteScope,
+        );
+      }
+      yield* createCommandPermissions(runtime, WS_METHODS.canvasRead).authorize(registry, env);
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthFilesystemWriteScope],
+          permissions: [AuthFilesystemWriteScope],
+        }),
+      );
+      yield* createCommandPermissions(runtime, WS_METHODS.canvasSave).authorize(registry, env);
+    }),
+  ),
 );
 
 it.effect("honors exact empty permissions and preserves legacy parent grants", () =>

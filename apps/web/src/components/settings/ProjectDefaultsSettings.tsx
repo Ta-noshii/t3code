@@ -1,4 +1,5 @@
 import {
+  CanvasFolder,
   DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
   type ProviderInstanceId,
@@ -7,6 +8,7 @@ import {
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
+import * as Schema from "effect/Schema";
 
 import { mergeEnvironmentSettings } from "../../hooks/useSettings";
 import {
@@ -26,6 +28,7 @@ import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import { TraitsPicker } from "../chat/TraitsPicker";
+import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
@@ -45,6 +48,7 @@ import {
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 
+const isCanvasFolder = Schema.is(CanvasFolder);
 const WORKTREE_SUBMODULES_OPTIONS = ["recursive", "top-level", "none"] as const;
 function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules {
   return value !== null && (WORKTREE_SUBMODULES_OPTIONS as readonly string[]).includes(value);
@@ -90,6 +94,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedSubmodules = useScopedSettingsMixed(["worktreeSubmodules"]);
+  const mixedCanvasFolder = useScopedSettingsMixed(["canvasFolder"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
@@ -374,6 +379,51 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                   ))}
                 </SelectPopup>
               </Select>
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["canvasFolder"]}
+            mixed={mixedCanvasFolder}
+            {...searchableSetting("canvas-folder")}
+            description={
+              isProjectScope
+                ? "Where this project's canvases are saved, relative to the project root."
+                : "Where canvases are saved, relative to the project root. Projects and their t3.json can override it."
+            }
+            resetAction={
+              !isProjectScope && settings.canvasFolder !== null ? (
+                <SettingResetButton
+                  label="canvas folder"
+                  onClick={() => updateSettings({ canvasFolder: null })}
+                />
+              ) : null
+            }
+            control={
+              <DraftInput
+                nativeInput
+                size="sm"
+                className="w-40"
+                aria-label="Canvas folder"
+                placeholder={mixedCanvasFolder ? "Mixed" : undefined}
+                disabled={unavailable}
+                value={mixedCanvasFolder ? "" : (effective?.canvasFolder ?? "")}
+                onCommit={(next) => {
+                  const folder = next.trim();
+                  if (folder.length === 0) {
+                    updateSettings({ canvasFolder: null });
+                  } else if (isCanvasFolder(folder)) {
+                    updateSettings({ canvasFolder: folder });
+                  } else {
+                    toastManager.add({
+                      type: "error",
+                      title: "Canvas folder not saved",
+                      description:
+                        "Use a folder inside the project, like .canvases or docs/diagrams.",
+                    });
+                  }
+                }}
+              />
             }
           />
         </>

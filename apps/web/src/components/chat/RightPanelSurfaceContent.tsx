@@ -31,6 +31,7 @@ const DevicePanel = lazy(() =>
   import("../device/DevicePanel").then((module) => ({ default: module.DevicePanel })),
 );
 const FilePreviewPanel = lazy(() => import("../files/FilePreviewPanel"));
+const CanvasPanel = lazy(() => import("../canvas/CanvasPanel"));
 
 export type RightPanelTerminalProps = Omit<
   PersistentThreadTerminalPanelProps,
@@ -77,6 +78,8 @@ export function RightPanelSurfaceContent(props: {
   readonly terminal: RightPanelTerminalProps;
   readonly pullRequest: RightPanelPullRequestProps;
   readonly files: RightPanelFileProps;
+  /** The open project, which owns the canvas folder; null without one. */
+  readonly canvasProjectId: ProjectId | null;
 }) {
   const { surface, threadRef, visible } = props;
   if (surface === null) return null;
@@ -220,5 +223,18 @@ export function RightPanelSurfaceContent(props: {
         </Suspense>
       );
     }
+    case "canvas":
+      if (props.canvasProjectId === null) return null;
+      return (
+        <Suspense fallback={null}>
+          <CanvasPanel
+            key={`${props.environmentId}:${props.canvasProjectId}`}
+            environmentId={props.environmentId}
+            projectId={props.canvasProjectId}
+            threadRef={threadRef}
+            path={surface.path}
+          />
+        </Suspense>
+      );
   }
 }

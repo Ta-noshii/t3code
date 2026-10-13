@@ -158,6 +158,7 @@ import {
   selectThreadRightPanelState,
   useRightPanelStore,
 } from "../rightPanelStore";
+import { useCanvasFocus } from "./canvas/useCanvasFocus";
 import { isPreviewSupportedInRuntime, useThreadPreviewState } from "../previewStateStore";
 import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
 import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
@@ -1936,6 +1937,11 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadRef?.environmentId ?? null,
     AuthPreviewOperateScope,
   );
+  const addCanvasSurface = () => {
+    if (!activeThreadRef || !activeProject) return;
+    useRightPanelStore.getState().open(activeThreadRef, "canvas");
+  };
+  useCanvasFocus(activeThreadRef);
   const supportsThreadPullRequests =
     serverConfig?.environment.capabilities.threadPullRequests === true;
   const visiblePullRequests = visibleThreadPullRequests(
@@ -3370,6 +3376,7 @@ export default function ChatView(props: ChatViewProps) {
             ? addPullRequestsSurfaceStable
             : undefined,
       }}
+      canvasProjectId={activeProject?.id ?? null}
       files={{
         projectName: activeProject?.title ?? null,
         workspaceRoot: activeWorkspaceRoot,
@@ -4167,6 +4174,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequest={addPullRequestSurfaceStable}
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
+          onAddCanvas={addCanvasSurface}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
           diffAvailable={isServerThread && isGitRepo}
@@ -4174,6 +4182,7 @@ export default function ChatView(props: ChatViewProps) {
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
           deviceAvailable={activeThreadRef !== null}
+          canvasAvailable={activeProject !== null}
         >
           {rightPanelContent}
         </ChatRightPanel>
