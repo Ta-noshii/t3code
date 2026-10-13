@@ -1,5 +1,5 @@
 /** Where the web build serves Excalidraw's fonts (see vite/excalidrawAssets.ts). */
-export const CANVAS_ASSET_PATH = "/excalidraw-assets/";
+const CANVAS_ASSET_PATH = "/excalidraw-assets/";
 
 declare global {
   interface Window {

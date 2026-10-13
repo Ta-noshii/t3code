@@ -9,6 +9,7 @@ import { vi } from "vite-plus/test";
 import {
   AuthAccessReadScope,
   AuthAccessWriteScope,
+  AuthFilesystemWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
@@ -468,6 +469,37 @@ it.effect("requires access management to answer a link request", () =>
       );
       expect(registry.get(answer.permissionAtom(env))).toBe(true);
       yield* answer.authorize(registry, env);
+    }),
+  ),
+);
+
+it.effect("requires the filesystem write grant to change canvases, not to read them", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      registry.set(sessions(env), AsyncResult.success(grant(false)));
+      for (const method of [
+        WS_METHODS.canvasSave,
+        WS_METHODS.canvasCreate,
+        WS_METHODS.canvasRename,
+        WS_METHODS.canvasDelete,
+      ]) {
+        const write = createCommandPermissions(runtime, method);
+        expect(registry.get(write.permissionAtom(env))).toBe(false);
+        expect((yield* write.authorize(registry, env).pipe(Effect.flip)).requiredPermission).toBe(
+          AuthFilesystemWriteScope,
+        );
+      }
+      yield* createCommandPermissions(runtime, WS_METHODS.canvasRead).authorize(registry, env);
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthFilesystemWriteScope],
+          permissions: [AuthFilesystemWriteScope],
+        }),
+      );
+      yield* createCommandPermissions(runtime, WS_METHODS.canvasSave).authorize(registry, env);
     }),
   ),
 );

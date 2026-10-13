@@ -1495,6 +1495,7 @@ export function PullRequestsPage() {
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
             onAddDevice={() => undefined}
+            onAddCanvas={() => undefined}
             browserAvailable={false}
             terminalAvailable={false}
             diffAvailable={false}
@@ -1502,6 +1503,7 @@ export function PullRequestsPage() {
             pullRequestAvailable={false}
             pullRequestsAvailable={false}
             deviceAvailable={false}
+            canvasAvailable={false}
             pullRequestStatusSeeds={listedPullRequestTabStatuses}
           >
             <PullRequestDetailPanel

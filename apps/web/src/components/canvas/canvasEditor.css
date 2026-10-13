@@ -1,0 +1,18 @@
+/* Excalidraw's chrome in T3's palette and type, so the editor reads as part of
+   the panel. The drawing surface keeps Excalidraw's own colors, since those
+   are what the saved file shows everywhere else. */
+[data-canvas-editor] .excalidraw,
+[data-canvas-editor] .excalidraw.theme--dark {
+  --ui-font: var(--font-sans);
+  --color-primary: var(--primary);
+  --color-primary-darker: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+  --color-primary-darkest: color-mix(in oklab, var(--primary) 76%, var(--foreground));
+  --color-primary-hover: color-mix(in oklab, var(--primary) 90%, var(--foreground));
+  --color-primary-light: color-mix(in oklab, var(--primary) 16%, var(--popover));
+  --color-primary-light-darker: color-mix(in oklab, var(--primary) 26%, var(--popover));
+  --color-surface-primary-container: color-mix(in oklab, var(--primary) 18%, var(--popover));
+  --color-on-primary-container: var(--foreground);
+  --island-bg-color: var(--popover);
+  --border-radius-lg: var(--radius-md);
+  --border-radius-md: var(--radius-sm);
+}
