@@ -11,6 +11,7 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as NodeZlib from "node:zlib";
 
@@ -80,7 +81,11 @@ const withCanvases = <A, E>(
   body: (dirs: {
     readonly root: string;
     readonly home: string;
-  }) => Effect.Effect<A, E, CanvasService.CanvasService | FileSystem.FileSystem | Path.Path>,
+  }) => Effect.Effect<
+    A,
+    E,
+    CanvasService.CanvasService | FileSystem.FileSystem | Path.Path | Scope.Scope
+  >,
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -308,7 +313,7 @@ describe("CanvasService agent operations", () => {
       Effect.gen(function* () {
         const canvases = yield* CanvasService.CanvasService;
         const missing = yield* Effect.flip(canvases.agentRead(context, {}));
-        expect(missing._tag).toBe("CanvasNotFoundError");
+        expect(missing._tag).toBe("CanvasNoCurrentError");
 
         yield* canvases.agentCreate(context, { title: "Plan" });
         const read = yield* canvases.agentRead(context, {});
@@ -382,7 +387,7 @@ describe("CanvasService agent operations", () => {
           frame: "login",
         });
         const read = yield* canvases.agentRead(context, { full: true, ids: result.createdIds });
-        const [image] = read.elements;
+        const image = read.elements[0] as CanvasElement | undefined;
         expect(image).toMatchObject({ type: "image", frameId: "f", x: 20, y: 40, width: 460 });
         expect(image?.height).toBe(230);
         expect("omittedImages" in read && read.omittedImages).toEqual([image?.fileId]);

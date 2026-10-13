@@ -19,7 +19,7 @@ const bindingTarget = (binding: unknown) =>
     : undefined;
 
 /** One line of `canvas_read`'s summary. */
-export interface CanvasElementSummary {
+export type CanvasElementSummary = {
   readonly id: string;
   readonly type: string;
   readonly x: number;
@@ -35,7 +35,7 @@ export interface CanvasElementSummary {
   readonly stroke?: string;
   readonly fill?: string;
   readonly link?: string;
-}
+};
 
 /**
  * A compact view of the scene for the agent: every live element with its

@@ -68,6 +68,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type * as PlatformError from "effect/PlatformError";
 import * as PubSub from "effect/PubSub";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
 import * as Semaphore from "effect/Semaphore";
@@ -101,6 +102,9 @@ import {
   type CanvasElementSummary,
 } from "./canvasElements.ts";
 import { embeddedSceneFromPng, embeddedSceneFromSvg } from "./canvasEmbedded.ts";
+
+/** Agent operations can also find the thread has no canvas yet. */
+type CanvasAgentFailure = CanvasFailure | CanvasNoCurrentError;
 
 type CanvasFailure =
   | CanvasNotFoundError
@@ -164,6 +168,25 @@ export interface CanvasReadFull {
 /** Full element JSON is refused past this many characters; pass ids instead. */
 export const CANVAS_FULL_READ_MAX_CHARS = 200_000;
 
+/** An agent tool named no canvas and the thread has not used one yet. */
+export class CanvasNoCurrentError extends Schema.TaggedError<CanvasNoCurrentError>()(
+  "CanvasNoCurrentError",
+  {},
+) {
+  override get message(): string {
+    return "No canvas is open in this thread. Pass canvas, or call canvas_list.";
+  }
+}
+
+export class CanvasTooLargeError extends Schema.TaggedError<CanvasTooLargeError>()(
+  "CanvasTooLargeError",
+  { path: Schema.String },
+) {
+  override get message(): string {
+    return `${this.path} is too large to read in full. Read the summary, or pass ids.`;
+  }
+}
+
 export class CanvasService extends Context.Service<
   CanvasService,
   {
@@ -209,27 +232,30 @@ export class CanvasService extends Context.Service<
         readonly full?: boolean | undefined;
         readonly ids?: ReadonlyArray<string> | undefined;
       },
-    ) => Effect.Effect<CanvasReadSummary | CanvasReadFull, CanvasFailure>;
+    ) => Effect.Effect<
+      CanvasReadSummary | CanvasReadFull,
+      CanvasAgentFailure | CanvasTooLargeError
+    >;
     readonly agentUpdate: (
       context: CanvasThreadContext,
       input: CanvasUpdateInput,
     ) => Effect.Effect<
       CanvasUpdateResult,
-      CanvasFailure | CanvasRenderError | CanvasRenderer.CanvasBrowserError
+      CanvasAgentFailure | CanvasRenderError | CanvasRenderer.CanvasBrowserError
     >;
     readonly agentAddImage: (
       context: CanvasThreadContext,
       input: CanvasAddImageInput,
     ) => Effect.Effect<
       CanvasUpdateResult,
-      CanvasFailure | CanvasImageError | CanvasRenderError | CanvasRenderer.CanvasBrowserError
+      CanvasAgentFailure | CanvasImageError | CanvasRenderError | CanvasRenderer.CanvasBrowserError
     >;
     readonly agentScreenshot: (
       context: CanvasThreadContext,
       input: Omit<CanvasScreenshotInput, "canvas"> & { readonly canvas?: string | undefined },
     ) => Effect.Effect<
       CanvasScreenshotResult & { readonly canvas: CanvasSummary },
-      CanvasFailure | CanvasRenderError | CanvasRenderer.CanvasBrowserError
+      CanvasAgentFailure | CanvasRenderError | CanvasRenderer.CanvasBrowserError
     >;
   }
 >()("t3/canvas/CanvasService") {}
@@ -825,9 +851,7 @@ const make = Effect.gen(function* () {
     if (canvas !== undefined) return yield* resolveRef(refFor(context.projectId, canvas));
     const current = currentByThread.get(context.threadId);
     if (current === undefined) {
-      return yield* new CanvasNotFoundError({
-        path: "this thread (no canvas is open yet; pass canvas, or call canvas_list)",
-      });
+      return yield* new CanvasNoCurrentError();
     }
     return yield* resolveRef({ path: current, projectId: context.projectId });
   });
@@ -876,7 +900,7 @@ const make = Effect.gen(function* () {
       // @effect-diagnostics-next-line preferSchemaOverJson:off - only measures the size.
       const size = JSON.stringify(live).length;
       if (size > CANVAS_FULL_READ_MAX_CHARS) {
-        return yield* new CanvasOperationError({ operation: "read", path: resolved.path });
+        return yield* new CanvasTooLargeError({ path: resolved.path });
       }
       return {
         canvas,

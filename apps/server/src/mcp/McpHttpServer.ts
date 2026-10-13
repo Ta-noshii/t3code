@@ -27,6 +27,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import { parseBearerToken } from "../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as CanvasService from "../canvas/CanvasService.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
@@ -79,6 +80,12 @@ import {
 import * as HtmlHandlers from "./toolkits/html/handlers.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
 import { requestUrl } from "../requestUrl.ts";
+import * as CanvasHandlers from "./toolkits/canvas/handlers.ts";
+import {
+  CanvasScreenshotTool,
+  CanvasScreenshotToolkit,
+  CanvasStandardToolkit,
+} from "./toolkits/canvas/tools.ts";
 
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
   requestUrl(request).pipe(
@@ -812,6 +819,29 @@ const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(funct
   );
 });
 
+const registerCanvasScreenshot = Effect.fn("McpHttpServer.registerCanvasScreenshot")(function* () {
+  const canvases = yield* CanvasService.CanvasService;
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const built = yield* CanvasScreenshotToolkit;
+  yield* registerImageTool(
+    CanvasScreenshotTool,
+    (payload) =>
+      built
+        .handle("canvas_screenshot", payload)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) =>
+      effect.pipe(
+        Effect.provideService(CanvasService.CanvasService, canvases),
+        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+      ),
+    "screenshot",
+    (error) =>
+      isOrchestratorMcpFailure(error) || AiError.isAiError(error)
+        ? error.message
+        : "Canvas screenshot failed.",
+  );
+});
+
 /**
  * Tools that hand work to another thread's agent: they create it, message it,
  * steer it, or move context into it. Their events name the receiving agent too.
@@ -1159,6 +1189,11 @@ export const layerDeviceToolkit = Layer.mergeAll(
   layerDeviceScreenshotRegistration,
 );
 
+export const layerCanvasToolkit = Layer.mergeAll(
+  toolkitRegistration(CanvasStandardToolkit, CanvasHandlers.layerStandard),
+  imageToolRegistration(registerCanvasScreenshot(), CanvasHandlers.layerScreenshot),
+);
+
 /**
  * `McpServer` for in-process calls, which provide `McpInvocationContext`
  * around `callTool` as the auth middleware does for each /mcp request.
@@ -1201,6 +1236,7 @@ export const layerTools = Layer.mergeAll(
   layerPullRequestsToolkit,
   layerDeviceToolkit,
   layerHtmlToolkit,
+  layerCanvasToolkit,
 );
 
 export const layer = layerMcpTransport(layerTools);
