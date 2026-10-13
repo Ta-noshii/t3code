@@ -39,6 +39,7 @@ env:
     patch/edit-fork-v2
     fix/hyprland-snapshot-flight-sizing
     fix/preview-viewport-main-zoom
+    patch/bar-bridge
 
 jobs:
   plan:

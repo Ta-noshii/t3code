@@ -47,6 +47,10 @@ Upstream PR [pingdotgg/t3code#14039](https://github.com/pingdotgg/t3code/pull/14
 
 When the PR merges, delete the branch, as with the SnapShots fix above.
 
+### `patch/bar-bridge`
+
+Based on `patch/edit-fork-v2`, since "Send all" needs its `queued-messages.send-all` command. `t3 bar-bridge` is a hidden CLI subcommand for the Omarchy bar plugin `tanoshii.t3code` (a Quickshell panel in `~/.config/omarchy/plugins/tanoshii.t3code`). The plugin starts it and speaks newline-delimited JSON over stdin and stdout; the protocol is `PROTOCOL.md` in the plugin folder. The bridge finds the local server from `server-runtime.json`, issues itself a session with `orchestration:read` and `orchestration:operate` scopes the first time (saved at `~/.config/t3-bar/token`, mode 0600), and subscribes to the shell and to the thread the panel has open. It sends thread rows with a derived state (waiting, working, failed, unread, idle, snoozed, settled), the open thread's recent messages, tools, queue and pending request, launch options, and notify events. It takes ops for reply, steer, queue and send all, approve or deny, answer questions, stop, settle, snooze, pin, visit and launch. Subagent threads are left out of the list, as in the sidebar. The command loads on demand from `apps/server/src/bin.ts`, so normal startup does not change; the code is in `apps/server/src/barBridge/`. `T3_BAR_BRIDGE_NO_VISIT=1` makes opening a thread skip `thread.visit`, for testing against real data without marking threads read.
+
 ## Android (on `nowbar`)
 
 - **Samsung Now Bar agent monitoring.** The Android app shows agents in Samsung's Now Bar, with a distinct state per agent status, and keeps unread results. It handles attention, privacy and notification settings, keeps the bar fresh when React Native timers pause, and stops monitoring once every environment disconnects.
