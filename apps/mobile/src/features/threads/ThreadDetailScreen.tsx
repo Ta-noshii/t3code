@@ -237,6 +237,8 @@ export interface ThreadDetailScreenProps {
   /** "While you were away" summary of a finished thread, shown above the composer. */
   readonly threadRecap: string | null;
   readonly onDismissThreadRecap: () => void;
+  /** Opens a new thread with the conversation before a sent message and the message unsent. */
+  readonly onEditInNewThread: ((messageId: MessageId) => Promise<void>) | null;
   readonly canStopThread: boolean;
   readonly queuedRunEdit: QueuedRunEdit | null;
   readonly composerDraftKey: string | null;
@@ -1415,6 +1417,7 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
               // A native subagent has no composer to edit a pending message in;
               // Cancel on the edit banner would discard it.
               onEditPendingMessage={isProviderSubagent ? null : handleEditPendingMessage}
+              onEditInNewThread={isProviderSubagent ? null : props.onEditInNewThread}
               contentPresentation={props.contentPresentation}
               agentLabel={agentLabel}
               threadTitle={props.selectedThread.title}

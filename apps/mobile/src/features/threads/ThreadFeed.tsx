@@ -29,7 +29,10 @@ import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { HandoffEndpoints } from "@t3tools/client-runtime/handoff";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
-import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
+import {
+  canForkProjectedAssistantItem,
+  providerCanForkRun,
+} from "@t3tools/client-runtime/state/thread-workflows";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import type { WorkflowOpening } from "@t3tools/client-runtime/state/subagentRuntime";
@@ -267,7 +270,7 @@ import {
   resolveWorkspaceFilePath,
   resolveWorkspaceRelativeFilePath,
 } from "../files/filePath";
-import { waitForThreadShellReady } from "./threadForkNavigation";
+import { waitForThreadShell } from "./useEditInNewThread";
 import { resolveUserMessageIntentBadge } from "./userMessageIntentBadge";
 import { fileChipClipboardPath, fileChipMenu, resolveFileChipTarget } from "./fileChipMenu";
 import { useFileChipShare } from "./useFileChipShare";
@@ -335,6 +338,8 @@ export interface ThreadFeedProps {
   readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
   readonly dispatchingMessageId: MessageId | null;
   readonly onEditPendingMessage: ((message: QueuedThreadMessage) => void) | null;
+  /** Null where a sent message cannot be edited in a new thread. */
+  readonly onEditInNewThread: ((messageId: MessageId) => Promise<void>) | null;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly threadTitle: string;
@@ -363,16 +368,6 @@ export interface ThreadFeedProps {
   readonly onEndFollowEnabledChange?: (enabled: boolean) => void;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
-}
-
-async function waitForThreadShell(
-  environmentId: EnvironmentId,
-  threadId: ThreadId,
-): Promise<boolean> {
-  const atom = environmentThreadShells.threadShellAtom(scopeThreadRef(environmentId, threadId));
-  return waitForThreadShellReady({
-    read: () => appAtomRegistry.get(atom) !== null,
-  });
 }
 
 const USER_MESSAGE_COPY_MENU_ACTIONS = [
@@ -406,6 +401,56 @@ function UserMessageCopyButton(props: {
     >
       {button}
     </Menu>
+  );
+}
+
+/** Opens a new thread with the conversation before this user message and the message unsent. */
+function EditInNewThreadButton(props: {
+  readonly environmentId: EnvironmentId;
+  readonly iconColor: ColorValue;
+  readonly projectedItem: OrchestrationV2ProjectedTurnItem;
+  readonly onEditInNewThread: (messageId: MessageId) => Promise<void>;
+}) {
+  const support = useV2ItemSupport({
+    environmentId: props.environmentId,
+    sourceThreadId: props.projectedItem.sourceThreadId,
+    sourceItemId: props.projectedItem.sourceItemId,
+  });
+  const [busy, setBusy] = useState(false);
+  const item = props.projectedItem.item;
+  // A steer shares its run with the prompt before it, so there is no point to cut at.
+  if (
+    item.type !== "user_message" ||
+    item.inputIntent === "steer" ||
+    item.inputIntent === "promoted_queued_to_steer" ||
+    !providerCanForkRun(support.providerSession?.capabilities)
+  ) {
+    return null;
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Edit in new thread"
+      disabled={busy}
+      onPress={() => {
+        setBusy(true);
+        void Haptics.selectionAsync();
+        void props.onEditInNewThread(item.messageId).finally(() => setBusy(false));
+      }}
+      className="h-7 w-7 items-center justify-center disabled:opacity-40"
+    >
+      {busy ? (
+        <AppActivityIndicator size="small" />
+      ) : (
+        <SymbolView
+          name="square.and.pencil"
+          size={13}
+          tintColor={props.iconColor}
+          type="monochrome"
+        />
+      )}
+    </Pressable>
   );
 }
 
@@ -1196,6 +1241,7 @@ function renderFeedEntry(
     | "skills"
     | "dispatchingMessageId"
     | "onEditPendingMessage"
+    | "onEditInNewThread"
     | "threadId"
     | "workspaceRoot"
   > & {
@@ -1624,6 +1670,14 @@ function renderFeedEntry(
                 >
                   <SymbolView name="pencil" size={14} tintColor={iconSubtleColor} />
                 </Pressable>
+              ) : null}
+              {props.onEditInNewThread !== null && message.projectedItem ? (
+                <EditInNewThreadButton
+                  environmentId={props.environmentId}
+                  iconColor={iconSubtleColor}
+                  projectedItem={message.projectedItem}
+                  onEditInNewThread={props.onEditInNewThread}
+                />
               ) : null}
               {presentation.text.trim().length > 0 ? (
                 <UserMessageCopyButton
@@ -2934,6 +2988,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             environmentId: props.environmentId,
             dispatchingMessageId: props.dispatchingMessageId,
             onEditPendingMessage: props.onEditPendingMessage,
+            onEditInNewThread: props.onEditInNewThread,
             onUseArtifactTemplate: props.onUseArtifactTemplate,
             threadId: props.threadId,
             copiedRowId,

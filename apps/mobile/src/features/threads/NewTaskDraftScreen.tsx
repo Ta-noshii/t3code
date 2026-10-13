@@ -1172,6 +1172,7 @@ export function NewTaskDraftScreen(props: {
         promptSuggestion={null}
         threadRecap={null}
         onDismissThreadRecap={() => undefined}
+        onEditInNewThread={null}
         header={
           <DraftThreadHeader thread={thread} project={selectedProject} cwd={composerWorkspaceCwd} />
         }

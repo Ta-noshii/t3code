@@ -5,6 +5,7 @@ import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTu
 import { useWorktreeSetup } from "./use-worktree-setup";
 import { latestPromptSuggestion } from "@t3tools/client-runtime/state/thread-execution";
 import * as DateTime from "effect/DateTime";
+import { useEditInNewThread } from "./useEditInNewThread";
 import { useThreadRecap } from "./useThreadRecap";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { AppBar } from "../../components/ui/AppBar";
@@ -449,6 +450,11 @@ function ThreadRouteContent(
       requests.activePendingApproval === null &&
       requests.activePendingUserInput === null,
     supported: routeEnvironmentRuntime?.serverConfig?.environment.capabilities.threadRecap === true,
+  });
+  const editInNewThread = useEditInNewThread({
+    thread: selectedThread,
+    busy: composer.activeThreadBusy,
+    hasEarlierHistory: selectedThreadDetailState.history.hasMoreHistory,
   });
   const routeConnectionState =
     routeEnvironmentRuntime?.connectionState ?? (environmentId ? "available" : connectionState);
@@ -1002,6 +1008,7 @@ function ThreadRouteContent(
           promptSuggestion={promptSuggestion}
           threadRecap={threadRecap.recap}
           onDismissThreadRecap={threadRecap.dismiss}
+          onEditInNewThread={editInNewThread}
           canStopThread={awaitingBootstrapTurn || composer.interruptibleRunId !== null}
           queuedRunEdit={composer.queuedRunEdit}
           composerDraftKey={composer.composerDraftKey}
