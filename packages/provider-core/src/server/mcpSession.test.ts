@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { withAgentDeviceEnvironment } from "./mcpSession.ts";
+import { withAgentDeviceEnvironment, withAgentShellEnvironment } from "./mcpSession.ts";
 
 describe("device CLI environment", () => {
   it("preserves provider credentials and commands while routing devices to the owned daemon", () => {
@@ -26,5 +26,30 @@ describe("device CLI environment", () => {
     const environment = { PATH: "/usr/bin", PROVIDER_KEY: "fixture" };
     expect(withAgentDeviceEnvironment(environment, undefined)).toBe(environment);
     expect(withAgentDeviceEnvironment(environment, {})).toBe(environment);
+  });
+});
+
+describe("agent shell environment", () => {
+  it("replaces a credential inherited from another thread with this thread's", () => {
+    const inherited = {
+      PATH: "/usr/bin",
+      T3CODE_THREAD_ID: "thread-parent",
+      T3CODE_AGENT_SHELL_AUTHORIZATION: "Bearer parent",
+    };
+    expect(
+      withAgentShellEnvironment(inherited, {
+        agentShellEnvironment: {
+          T3CODE_THREAD_ID: "thread-own",
+          T3CODE_AGENT_SHELL_URL: "http://127.0.0.1:9000",
+          T3CODE_AGENT_SHELL_AUTHORIZATION: "Bearer own",
+        },
+      }),
+    ).toEqual({
+      PATH: "/usr/bin",
+      T3CODE_THREAD_ID: "thread-own",
+      T3CODE_AGENT_SHELL_URL: "http://127.0.0.1:9000",
+      T3CODE_AGENT_SHELL_AUTHORIZATION: "Bearer own",
+    });
+    expect(withAgentShellEnvironment(inherited, undefined)).toEqual({ PATH: "/usr/bin" });
   });
 });
