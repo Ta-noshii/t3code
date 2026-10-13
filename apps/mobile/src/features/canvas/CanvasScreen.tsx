@@ -22,6 +22,7 @@ import { useAppearancePreferences } from "../settings/appearance/AppearancePrefe
 import {
   canvasHostUrl,
   canvasNativeMessageScript,
+  isCanvasHostOrigin,
   isCanvasHostUrl,
   readCanvasPageMessage,
 } from "./canvasHostProtocol";
@@ -196,7 +197,7 @@ export function CanvasScreen(props: StaticScreenProps<CanvasRouteParams>) {
   }, [status]);
 
   const onMessage = (event: WebViewMessageEvent) => {
-    if (hostUrl === null || !isCanvasHostUrl(event.nativeEvent.url, hostUrl)) return;
+    if (hostUrl === null || !isCanvasHostOrigin(event.nativeEvent.url, hostUrl)) return;
     const message = readCanvasPageMessage(event.nativeEvent.data);
     if (message === null || document === null) return;
     switch (message.type) {

@@ -18,6 +18,19 @@ export function isCanvasHostUrl(url: string, hostUrl: string): boolean {
   return url === hostUrl || url.startsWith(`${hostUrl}?`) || url.startsWith(`${hostUrl}#`);
 }
 
+function originOf(url: string): string | null {
+  return /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(url)?.[0].toLowerCase() ?? null;
+}
+
+/**
+ * True when a message comes from the host page's origin. Android reports only
+ * the sender's origin for messages, iOS the page's full URL.
+ */
+export function isCanvasHostOrigin(url: string, hostUrl: string): boolean {
+  const origin = originOf(url);
+  return origin !== null && origin === originOf(hostUrl);
+}
+
 /** A message the page posted, or null for anything else. */
 export function readCanvasPageMessage(data: string): CanvasHostPageMessage | null {
   return Option.getOrNull(decodePageMessage(data));
