@@ -1,7 +1,6 @@
 import "@excalidraw/excalidraw/index.css";
 import "./canvasEditor.css";
 
-import { useAtomSubscribe } from "@effect/atom-react";
 import {
   CaptureUpdateAction,
   Excalidraw,
@@ -32,11 +31,11 @@ import {
   unionCanvasRects,
 } from "@t3tools/shared/canvas";
 import * as Schema from "effect/Schema";
-import { AsyncResult } from "effect/reactivity";
 import { ChevronLeftIcon, HighlighterIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { configureExcalidrawAssets } from "~/canvas/excalidrawAssets";
+import { fitCanvasScene } from "~/canvas/fitScene";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useTheme } from "~/hooks/useTheme";
 import { canvasEnvironment } from "~/state/canvas";
@@ -46,6 +45,7 @@ import { Button } from "../ui/button";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CanvasSync, type CanvasSyncStatus } from "./canvasSync";
+import { useCanvasEvents } from "./useCanvasEvents";
 
 configureExcalidrawAssets(window.location.origin);
 
@@ -149,6 +149,7 @@ function CanvasEditorSurface(props: CanvasEditorProps & { readonly initial: Canv
   const closedRef = useRef(false);
   const pendingHighlightRef = useRef<ReadonlyArray<string> | null>(null);
   const highlightRef = useRef(highlight);
+  const fittedRef = useRef(false);
   useEffect(() => {
     highlightRef.current = highlight;
   }, [highlight]);
@@ -255,7 +256,12 @@ function CanvasEditorSurface(props: CanvasEditorProps & { readonly initial: Canv
   const handleChange = useCallback(
     (_elements: unknown, appState: AppState) => {
       const api = apiRef.current;
-      if (!api || readOnly || appState.isLoading) return;
+      if (!api || appState.isLoading) return;
+      if (!fittedRef.current) {
+        fittedRef.current = true;
+        fitCanvasScene(api);
+      }
+      if (readOnly) return;
       // Created on the first change after the scene loads, so loading it is
       // not mistaken for an edit.
       if (syncRef.current === null) {
@@ -278,12 +284,10 @@ function CanvasEditorSurface(props: CanvasEditorProps & { readonly initial: Canv
     };
   }, []);
 
-  useAtomSubscribe(
-    canvasEnvironment.events({ environmentId: props.environmentId, input: {} }),
+  useCanvasEvents(
+    props.environmentId,
     useCallback(
-      (result: AsyncResult.AsyncResult<CanvasEvent, unknown>) => {
-        if (!AsyncResult.isSuccess(result)) return;
-        const event = result.value;
+      (event: CanvasEvent) => {
         if (event.type !== "changed" || event.path !== props.path) return;
         if (event.source === "agent" && event.elementIds && event.elementIds.length > 0) {
           pendingHighlightRef.current = event.elementIds;
