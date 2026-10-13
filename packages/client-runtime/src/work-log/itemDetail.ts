@@ -174,20 +174,37 @@ function commandOutputText(output: string): string {
 function dynamicToolOutputText(
   item: Extract<OrchestrationV2TurnItem, { type: "dynamic_tool" }>,
 ): string | null {
+  const hasImagePreview = item.viewedImagePath !== undefined;
   const blocks = toolOutputBlocks(item.output);
   if (blocks.length === 0) {
     const digest = toolResultDigest(item.toolName, null, item.input);
     return digest ? toolDigestText(digest) : null;
   }
-  const hasImagePreview = item.viewedImagePath !== undefined;
-  const parts = blocks.map((block) => {
-    // The viewed image renders as a preview, so it needs no placeholder.
-    if (block.kind === "image") return hasImagePreview ? null : "[image]";
-    const digest = toolResultDigest(
-      item.toolName,
-      block.kind === "data" ? block.value : block.text,
-      item.input,
-    );
+  const digests = blocks.map((block) =>
+    block.kind === "image"
+      ? null
+      : toolResultDigest(
+          item.toolName,
+          block.kind === "data" ? block.value : block.text,
+          item.input,
+        ),
+  );
+  // Without a structured result to summarize, the output reads as it always has,
+  // image placeholders included.
+  const summarized = blocks.some(
+    (block, index) =>
+      block.kind === "data" &&
+      isRecord(block.value) &&
+      // A content block (an image without bytes, say) is not a result to summarize.
+      typeof block.value.type !== "string" &&
+      digests[index] !== null,
+  );
+  if (!summarized) {
+    return formatToolValue(item.output, hasImagePreview);
+  }
+  const parts = blocks.map((block, index) => {
+    if (block.kind === "image") return "[image]";
+    const digest = digests[index];
     if (digest) return toolDigestText(digest);
     return block.kind === "text" ? block.text : formatToolValue(block.value);
   });
