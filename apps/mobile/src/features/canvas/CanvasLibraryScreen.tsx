@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useFocusEffect, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import type { CanvasSummary } from "@t3tools/contracts";
+import { canvasGroup, normalizeCanvasGroup } from "@t3tools/shared/canvas";
 import { useCallback, useMemo } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,14 +22,48 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { canvasRouteParams, type CanvasLibraryRouteParams } from "./canvasRoutes";
 
-const ROW_ACTIONS = [
-  { id: "rename", title: "Rename", image: "pencil" },
-  { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
-];
+const groupOf = (canvas: CanvasSummary) => (canvas.slug === null ? "" : canvasGroup(canvas.slug));
+
+/** Top-level canvases first, then each group by name; canvases stay newest first. */
+function groupCanvases(canvases: ReadonlyArray<CanvasSummary>) {
+  const groups = new Map<string, CanvasSummary[]>();
+  for (const canvas of canvases) {
+    const group = groupOf(canvas);
+    groups.set(group, [...(groups.get(group) ?? []), canvas]);
+  }
+  return [...groups]
+    .map(([name, entries]) => ({ name, canvases: entries }))
+    .sort((left, right) =>
+      left.name === "" ? -1 : right.name === "" ? 1 : left.name.localeCompare(right.name),
+    );
+}
+
+/** Rename, move to another group or a new one, and delete. */
+function rowActions(canvas: CanvasSummary, groups: ReadonlyArray<string>) {
+  const current = groupOf(canvas);
+  const targets = [...new Set(["", ...groups])].filter((group) => group !== current);
+  return [
+    { id: "rename", title: "Rename", image: "pencil" },
+    {
+      id: "move",
+      title: "Move to",
+      image: "folder",
+      subactions: [
+        ...targets.map((group) => ({
+          id: `move:${group}`,
+          title: group === "" ? "Top level" : group,
+        })),
+        { id: "move-new", title: "New folder…", image: "folder.badge.plus" },
+      ],
+    },
+    { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
+  ];
+}
 
 function CanvasRow(props: {
   readonly canvas: CanvasSummary;
   readonly canEdit: boolean;
+  readonly groups: ReadonlyArray<string>;
   readonly isLast: boolean;
   readonly onOpen: () => void;
   readonly onAction: (action: string) => void;
@@ -44,7 +79,7 @@ function CanvasRow(props: {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${canvas.title}, edited ${relativeTime(canvas.modifiedAt)} ago`}
-      accessibilityHint={props.canEdit ? "Touch and hold to rename or delete." : undefined}
+      accessibilityHint={props.canEdit ? "Touch and hold to rename, move, or delete." : undefined}
       onPress={props.onOpen}
       className="flex-row items-center gap-3 bg-grouped-card px-4 active:bg-row-hover"
     >
@@ -82,7 +117,7 @@ function CanvasRow(props: {
     <Menu
       shouldOpenOnLongPress
       title={canvas.title}
-      actions={ROW_ACTIONS}
+      actions={rowActions(canvas, props.groups)}
       onPressAction={({ nativeEvent }) => props.onAction(nativeEvent.event)}
     >
       {row}
@@ -127,19 +162,42 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
     [environmentId, navigation],
   );
 
-  const startNew = () =>
+  const groups = useMemo(() => groupCanvases(canvases ?? []), [canvases]);
+  const groupNames = groups.map((group) => group.name);
+
+  const startNew = (group = "") =>
     Dialog.prompt({
-      title: "New canvas",
+      title: group === "" ? "New canvas" : `New canvas in ${group}`,
       initialValue: "",
       confirmText: "Create",
       onConfirm: (title) => {
         if (title.trim().length === 0) return;
-        void create({ environmentId, input: { projectId, title: title.trim() } }).then((result) => {
+        void create({
+          environmentId,
+          input: { projectId, title: title.trim(), ...(group === "" ? {} : { group }) },
+        }).then((result) => {
           refresh();
           if (result._tag === "Success") open(result.value);
         });
       },
     });
+
+  /** Asks for a folder name, then hands it to `then`. */
+  const askFolder = (then: (group: string) => void) =>
+    Dialog.prompt({
+      title: "New folder",
+      initialValue: "",
+      confirmText: "Next",
+      onConfirm: (name) => {
+        const group = normalizeCanvasGroup(name);
+        if (group) then(group);
+      },
+    });
+
+  const move = (canvas: CanvasSummary, group: string) =>
+    void rename({ environmentId, input: { path: canvas.path, title: canvas.title, group } }).then(
+      refresh,
+    );
 
   const runAction = (canvas: CanvasSummary, action: string) => {
     if (action === "rename") {
@@ -154,6 +212,10 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
           );
         },
       });
+    } else if (action.startsWith("move:")) {
+      move(canvas, action.slice("move:".length));
+    } else if (action === "move-new") {
+      askFolder((group) => move(canvas, group));
     } else if (action === "delete") {
       Dialog.confirm({
         title: `Delete "${canvas.title}"?`,
@@ -177,7 +239,15 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
         onBack={() => navigation.goBack()}
         actions={
           canWrite
-            ? [{ accessibilityLabel: "New canvas", icon: "plus", onPress: startNew }]
+            ? [
+                {
+                  accessibilityLabel: "New folder",
+                  icon: "folder.badge.plus",
+                  // A folder holds canvases; it is made with its first one.
+                  onPress: () => askFolder(startNew),
+                },
+                { accessibilityLabel: "New canvas", icon: "plus", onPress: () => startNew() },
+              ]
             : undefined
         }
       />
@@ -209,24 +279,61 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
               variant="plain"
               title="No canvases yet"
               detail={`Sketch diagrams here, or ask the agent to draw one. They are saved as Excalidraw files in ${folder}.`}
-              {...(canWrite ? { actionLabel: "New canvas", onAction: startNew } : {})}
+              {...(canWrite ? { actionLabel: "New canvas", onAction: () => startNew() } : {})}
             />
           ) : (
             <>
-              <View className="overflow-hidden rounded-[24px] border-continuous bg-grouped-card">
-                {canvases.map((canvas, index) => (
-                  <CanvasRow
-                    key={canvas.path}
-                    canvas={canvas}
-                    canEdit={canWrite && canvas.slug !== null}
-                    isLast={index === canvases.length - 1}
-                    onOpen={() => open(canvas)}
-                    onAction={(action) => runAction(canvas, action)}
-                  />
-                ))}
-              </View>
+              {groups.map((group) => (
+                <View key={`group:${group.name}`} className="gap-2">
+                  {group.name === "" ? null : (
+                    <View className="flex-row items-center gap-2 px-2 pt-2">
+                      <SymbolView
+                        name="folder"
+                        size={15}
+                        tintColorClassName="accent-foreground-muted"
+                        type="monochrome"
+                      />
+                      <Text
+                        className="min-w-0 flex-1 text-sm font-t3-medium text-foreground-muted"
+                        numberOfLines={1}
+                        ellipsizeMode="middle"
+                      >
+                        {group.name}
+                      </Text>
+                      {canWrite ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`New canvas in ${group.name}`}
+                          hitSlop={10}
+                          onPress={() => startNew(group.name)}
+                        >
+                          <SymbolView
+                            name="plus"
+                            size={17}
+                            tintColorClassName="accent-icon"
+                            type="monochrome"
+                          />
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  )}
+                  <View className="overflow-hidden rounded-[24px] border-continuous bg-grouped-card">
+                    {group.canvases.map((canvas, index) => (
+                      <CanvasRow
+                        key={canvas.path}
+                        canvas={canvas}
+                        canEdit={canWrite && canvas.slug !== null}
+                        groups={groupNames}
+                        isLast={index === group.canvases.length - 1}
+                        onOpen={() => open(canvas)}
+                        onAction={(action) => runAction(canvas, action)}
+                      />
+                    ))}
+                  </View>
+                </View>
+              ))}
               <Text className="px-2 text-sm text-foreground-muted">
-                Saved in {folder}. Touch and hold a canvas to rename or delete it.
+                Saved in {folder}. Touch and hold a canvas to rename, move, or delete it.
               </Text>
             </>
           )}

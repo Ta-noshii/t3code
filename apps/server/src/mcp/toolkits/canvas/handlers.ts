@@ -89,6 +89,14 @@ const handlers = {
       return { canvas };
     }),
   ),
+  canvas_move: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const context = yield* callerContext("canvas_move");
+      const canvases = yield* CanvasService.CanvasService;
+      const canvas = yield* canvases.agentMove(context, input).pipe(Effect.mapError(toFailure));
+      return { canvas };
+    }),
+  ),
   canvas_open: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
       const context = yield* callerContext("canvas_open");
@@ -142,6 +150,7 @@ const handlers = {
 export const layerStandard = McpToolAccess.toLayer(CanvasStandardToolkit, {
   canvas_list: handlers.canvas_list,
   canvas_create: handlers.canvas_create,
+  canvas_move: handlers.canvas_move,
   canvas_open: handlers.canvas_open,
   canvas_read: handlers.canvas_read,
   canvas_update: handlers.canvas_update,
