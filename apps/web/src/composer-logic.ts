@@ -2,7 +2,6 @@ import type { ClientSettings } from "@t3tools/contracts/settings";
 import type {
   AssistantCitation,
   EnvironmentId,
-  OrchestrationV2ThreadProjection,
   ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import type { ComposerPathSearchTarget } from "@t3tools/client-runtime/state/threads";
@@ -93,31 +92,6 @@ export function composerSubmissionIntentForKey(input: {
   return "foreground";
 }
 
-/**
- * The provider's guess at the next prompt, for an empty composer. Only the
- * latest run counts, and only once it completed: a newer run, or one still
- * working, makes the suggestion stale.
- */
-export function latestPromptSuggestion(
-  projection: Pick<OrchestrationV2ThreadProjection, "runs" | "providerTurns"> | null,
-): string | null {
-  const latestRun = projection?.runs.reduce<
-    OrchestrationV2ThreadProjection["runs"][number] | undefined
-  >(
-    (latest, run) => (latest === undefined || run.ordinal > latest.ordinal ? run : latest),
-    undefined,
-  );
-  if (!projection || latestRun?.status !== "completed" || latestRun.activeAttemptId === null) {
-    return null;
-  }
-  const latestTurn = projection.providerTurns
-    .filter((turn) => turn.runAttemptId === latestRun.activeAttemptId)
-    .reduce<OrchestrationV2ThreadProjection["providerTurns"][number] | undefined>(
-      (latest, turn) => (latest === undefined || turn.ordinal > latest.ordinal ? turn : latest),
-      undefined,
-    );
-  return latestTurn?.status === "completed" ? (latestTurn.promptSuggestion ?? null) : null;
-}
 
 function clampCursor(text: string, cursor: number): number {
   if (!Number.isFinite(cursor)) return text.length;

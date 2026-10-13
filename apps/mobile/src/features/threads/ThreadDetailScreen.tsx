@@ -167,6 +167,7 @@ import type {
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { ComposerErrorNotice } from "./ComposerErrorNotice";
 import { ComposerFeedback } from "./ComposerFeedback";
+import { ThreadRecapNotice } from "./ThreadRecapNotice";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import { ProviderSubagentBar } from "./ProviderSubagentBar";
@@ -248,6 +249,11 @@ export interface ThreadDetailScreenProps {
   readonly threadSyncStatus?: EnvironmentThreadStatus;
   readonly historyControls?: ThreadFeedHistoryControls;
   readonly activeThreadBusy: boolean;
+  /** The provider's guess at the next prompt, offered in an empty composer. */
+  readonly promptSuggestion: string | null;
+  /** "While you were away" summary of a finished thread, shown above the composer. */
+  readonly threadRecap: string | null;
+  readonly onDismissThreadRecap: () => void;
   readonly canStopThread: boolean;
   readonly queuedRunEdit: QueuedRunEdit | null;
   readonly composerDraftKey: string | null;
@@ -1444,6 +1450,18 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                     threadRef={props.selectedThreadDetailRef}
                     canOperateThread={props.canOperateThread}
                   />
+                  {props.threadRecap !== null ? (
+                    <Animated.View
+                      className="shrink-0"
+                      entering={FadeInDown.duration(220)}
+                      exiting={FadeOut.duration(140)}
+                    >
+                      <ThreadRecapNotice
+                        recap={props.threadRecap}
+                        onDismiss={props.onDismissThreadRecap}
+                      />
+                    </Animated.View>
+                  ) : null}
                   {props.feedbackSubmissions.map((submission) => (
                     <ComposerFeedback
                       key={submission.id}
@@ -1594,6 +1612,12 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                         serverConfig={props.serverConfig}
                         queueCount={props.selectedThreadQueueCount}
                         activeThreadBusy={props.activeThreadBusy}
+                        promptSuggestion={
+                          props.activePendingApproval === null &&
+                          props.activePendingUserInput === null
+                            ? props.promptSuggestion
+                            : null
+                        }
                         canStopThread={props.canStopThread}
                         environmentId={props.environmentId}
                         projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}
