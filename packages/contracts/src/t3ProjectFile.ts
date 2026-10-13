@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
+import { CanvasFolder, DEFAULT_CANVAS_FOLDER } from "./canvas.ts";
 import { ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
 import { ProjectScriptIcon } from "./project.ts";
 import type { ProjectScopedServerSettingKey, ServerSettings } from "./settings.ts";
@@ -97,6 +98,12 @@ export const T3ProjectFile = Schema.Struct({
         'How new worktrees populate git submodules: "recursive" (the default) initializes nested submodules too, "top-level" initializes only those declared by this repository, and "none" leaves every submodule empty for a setup script to handle. A project or environment setting in T3 Code overrides this.',
     }),
   ),
+  canvasFolder: Schema.optionalKey(
+    CanvasFolder.annotate({
+      description:
+        'Folder for this repository\'s Excalidraw canvases, relative to the repository root. Defaults to ".canvases". A project setting in T3 Code overrides this.',
+    }),
+  ),
   scripts: Schema.optionalKey(
     Schema.Array(T3ProjectFileScript)
       .annotate({
@@ -120,6 +127,7 @@ export type T3ProjectFile = typeof T3ProjectFile.Type;
 export const PROJECT_FILE_BACKED_SETTINGS = {
   defaultThreadEnvMode: { field: "defaultThreadEnvMode", builtIn: "local" },
   worktreeSubmodules: { field: "worktreeSubmodules", builtIn: "recursive" },
+  canvasFolder: { field: "canvasFolder", builtIn: DEFAULT_CANVAS_FOLDER },
 } as const satisfies {
   // `providerInstances` is scoped per project but overrides field by field
   // rather than replacing a whole `ServerSettings` value (see its doc comment
