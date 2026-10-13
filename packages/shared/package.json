@@ -11,6 +11,10 @@
       "types": "./src/authScopeOptions.ts",
       "import": "./src/authScopeOptions.ts"
     },
+    "./canvas": {
+      "types": "./src/canvas.ts",
+      "import": "./src/canvas.ts"
+    },
     "./orchestrationV2ThreadError": {
       "types": "./src/orchestrationV2ThreadError.ts",
       "import": "./src/orchestrationV2ThreadError.ts"
