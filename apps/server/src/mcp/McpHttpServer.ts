@@ -17,6 +17,7 @@ import { OrchestratorMcpFailure, PreviewAutomationError } from "@t3tools/contrac
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
+import * as CanvasService from "../canvas/CanvasService.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
@@ -58,6 +59,12 @@ import {
 } from "./toolkits/device/tools.ts";
 import * as HtmlHandlers from "./toolkits/html/handlers.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
+import * as CanvasHandlers from "./toolkits/canvas/handlers.ts";
+import {
+  CanvasScreenshotTool,
+  CanvasScreenshotToolkit,
+  CanvasStandardToolkit,
+} from "./toolkits/canvas/tools.ts";
 
 /** Where an MCP client discovers how to sign in (RFC 9728), at this request's own origin. */
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
@@ -760,6 +767,29 @@ const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(funct
   );
 });
 
+const registerCanvasScreenshot = Effect.fn("McpHttpServer.registerCanvasScreenshot")(function* () {
+  const canvases = yield* CanvasService.CanvasService;
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const built = yield* CanvasScreenshotToolkit;
+  yield* registerImageTool(
+    CanvasScreenshotTool,
+    (payload) =>
+      built
+        .handle("canvas_screenshot", payload)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) =>
+      effect.pipe(
+        Effect.provideService(CanvasService.CanvasService, canvases),
+        Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+      ),
+    "screenshot",
+    (error) =>
+      isOrchestratorMcpFailure(error) || AiError.isAiError(error)
+        ? error.message
+        : "Canvas screenshot failed.",
+  );
+});
+
 /**
  * `McpServer.toolkit` for handlers that declared their access (see
  * `McpToolAccess`). Every toolkit on `/mcp` registers through this.
@@ -858,6 +888,11 @@ export const layerDeviceToolkit = Layer.mergeAll(
   layerDeviceScreenshotRegistration,
 );
 
+export const layerCanvasToolkit = Layer.mergeAll(
+  toolkitRegistration(CanvasStandardToolkit, CanvasHandlers.layerStandard),
+  imageToolRegistration(registerCanvasScreenshot(), CanvasHandlers.layerScreenshot),
+);
+
 export const layerMcpTransport = McpServer.layerHttp({
   name: "T3 Code",
   version: packageJson.version,
@@ -878,4 +913,5 @@ export const layer = Layer.mergeAll(
   layerPullRequestsToolkit,
   layerDeviceToolkit,
   layerHtmlToolkit,
+  layerCanvasToolkit,
 ).pipe(Layer.provideMerge(layerMcpTransport));
