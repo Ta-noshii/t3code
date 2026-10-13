@@ -5,8 +5,10 @@ import {
   buildEarlierConversationTranscript,
   canForkProjectedAssistantItem,
   deriveThreadQueueWorkflowState,
+  isCompactCommand,
   planEditInNewThread,
   resolveLatestMergeBackRun,
+  runsAsOwnTurn,
   threadSupportsProviderHandoff,
 } from "./threadWorkflows.ts";
 
@@ -382,6 +384,19 @@ describe("thread workflows", () => {
       expect(resolveLatestMergeBackRun(projection)).toBeNull();
     },
   );
+});
+
+describe("commands that run as their own turn", () => {
+  it("matches a bare /compact or /logout and nothing else", () => {
+    expect(isCompactCommand(" /COMPACT ", [])).toBe(true);
+    expect(isCompactCommand("/compact", [{}])).toBe(false);
+    expect(isCompactCommand("/compact now", [])).toBe(false);
+    expect(isCompactCommand("/logout", [])).toBe(false);
+    expect(runsAsOwnTurn("/compact", [])).toBe(true);
+    expect(runsAsOwnTurn("/logout ", [])).toBe(true);
+    expect(runsAsOwnTurn("/logout", [{}])).toBe(false);
+    expect(runsAsOwnTurn("Fix the parser", [])).toBe(false);
+  });
 });
 
 describe("edit in new thread", () => {

@@ -1,3 +1,4 @@
+import { runsAsOwnTurn } from "@t3tools/client-runtime/state/thread-workflows";
 import type { EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 
@@ -23,6 +24,7 @@ export function resolveThreadQueueRowControls(input: {
   readonly isEditing?: boolean;
   readonly queuedCount: number;
   readonly text: string;
+  readonly attachments: ReadonlyArray<unknown>;
 }): ThreadQueueRowControls {
   const mutationEnabled = !input.busy;
   const isEditing = input.isEditing === true;
@@ -34,7 +36,12 @@ export function resolveThreadQueueRowControls(input: {
     canEdit: mutationEnabled && !isEditing,
     canMoveDown: mutationEnabled && input.canReorder && input.index < input.queuedCount - 1,
     canMoveUp: mutationEnabled && input.canReorder && input.index > 0,
-    canSend: mutationEnabled && (input.canPromoteToSteer || input.canSendNow) && !isEditing,
+    // /compact and /logout cannot join a running turn, so they offer Send now only.
+    canSend:
+      mutationEnabled &&
+      ((input.canPromoteToSteer && !runsAsOwnTurn(input.text, input.attachments)) ||
+        input.canSendNow) &&
+      !isEditing,
     dismissAccessibilityLabel: REMOVE_QUEUED_MESSAGE_ACCESSIBILITY_LABEL,
     // Editing and sending keep the original text so quoted citations stay linked.
     displayText: assistantCitationsToPlainText(input.text),
