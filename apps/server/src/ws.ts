@@ -184,6 +184,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import { terminalOutputStream, withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
+import * as CanvasService from "./canvas/CanvasService.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -1266,6 +1267,7 @@ export const layerWsRpc = (
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
+      const canvasService = yield* CanvasService.CanvasService;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
@@ -3003,6 +3005,16 @@ export const layerWsRpc = (
         [WS_METHODS.deviceDetail]: (input) => deviceService.detail(input),
         [WS_METHODS.deviceAction]: (input) => deviceService.action(input),
         [WS_METHODS.subscribeDeviceState]: (_input) => DeviceService.stateStream(deviceService),
+        [WS_METHODS.canvasList]: (input) => canvasService.list(input.projectId),
+        [WS_METHODS.canvasRead]: (input) => canvasService.read(input),
+        [WS_METHODS.canvasSave]: (input) => canvasService.save(input),
+        [WS_METHODS.canvasCreate]: (input) =>
+          canvasService.create(input).pipe(Effect.map((document) => document.canvas)),
+        [WS_METHODS.canvasRename]: (input) => canvasService.rename(input),
+        [WS_METHODS.canvasDelete]: (input) => canvasService.delete(input),
+        [WS_METHODS.canvasScreenshot]: (input) =>
+          CanvasService.browserErrorsAsRenderErrors(canvasService.screenshot(input)),
+        [WS_METHODS.subscribeCanvasEvents]: (_input) => canvasService.events,
         [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
           Stream.callback<DiscoveredLocalServerList>((queue) =>
             Effect.gen(function* () {
