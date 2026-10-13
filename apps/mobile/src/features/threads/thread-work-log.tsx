@@ -1005,6 +1005,8 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
       navigation.dispatch(
         StackActions.push("Thread", { environmentId: String(props.environmentId), threadId }),
       ),
+    onOpenCanvas: (path) =>
+      navigation.navigate("Canvas", { environmentId: props.environmentId, path }),
   };
   const failedExitCode =
     call && shownItem.type === "command_execution" && shownItem.exitCode

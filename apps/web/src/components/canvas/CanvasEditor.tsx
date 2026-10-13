@@ -24,18 +24,14 @@ import type {
   EnvironmentId,
   ProjectId,
 } from "@t3tools/contracts";
-import {
-  CANVAS_IMAGE_MAX_SIZE,
-  canvasElementBounds,
-  storedAppState,
-  unionCanvasRects,
-} from "@t3tools/shared/canvas";
+import { canvasElementBounds, storedAppState, unionCanvasRects } from "@t3tools/shared/canvas";
 import * as Schema from "effect/Schema";
 import { ChevronLeftIcon, HighlighterIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { configureExcalidrawAssets } from "~/canvas/excalidrawAssets";
 import { fitCanvasScene } from "~/canvas/fitScene";
+import { shrinkCanvasImage } from "~/canvas/shrinkCanvasImage";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useTheme } from "~/hooks/useTheme";
 import { canvasEnvironment } from "~/state/canvas";
@@ -51,8 +47,6 @@ configureExcalidrawAssets(window.location.origin);
 
 const SAVE_DELAY_MS = 800;
 const HIGHLIGHT_STORAGE_KEY = "t3code:canvas:highlight-agent-changes";
-// Pasted images above this size are re-encoded even when small in pixels.
-const IMAGE_MAX_BYTES = 1_500_000;
 
 export interface CanvasEditorProps {
   readonly environmentId: EnvironmentId;
@@ -243,7 +237,7 @@ function CanvasEditorSurface(props: CanvasEditorProps & { readonly initial: Canv
             return result._tag === "Success" ? result.value : null;
           },
           read: readLatest,
-          prepareFiles: (files) => Promise.all(files.map(shrinkImage)),
+          prepareFiles: (files) => Promise.all(files.map(shrinkCanvasImage)),
           onStatus: setStatus,
         },
         initial,
@@ -380,33 +374,4 @@ function CanvasEditorSurface(props: CanvasEditorProps & { readonly initial: Canv
       </div>
     </>
   );
-}
-
-/**
- * Re-encodes a pasted raster image as WebP no larger than the size canvas
- * files keep, the same limit the server applies to images agents add.
- */
-async function shrinkImage(file: CanvasBinaryFile): Promise<CanvasBinaryFile> {
-  if (!/^image\/(png|jpeg|webp|bmp)$/u.test(file.mimeType)) return file;
-  const image = new Image();
-  image.src = file.dataURL;
-  try {
-    await image.decode();
-  } catch {
-    return file;
-  }
-  const bytes = (file.dataURL.length - file.dataURL.indexOf(",") - 1) * 0.75;
-  const scale = Math.min(
-    1,
-    CANVAS_IMAGE_MAX_SIZE / Math.max(image.naturalWidth, image.naturalHeight),
-  );
-  if (scale === 1 && bytes <= IMAGE_MAX_BYTES) return file;
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-  canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
-  const dataURL = canvas.toDataURL("image/webp", 0.9);
-  return dataURL.startsWith("data:image/webp")
-    ? { ...file, mimeType: "image/webp", dataURL }
-    : file;
 }

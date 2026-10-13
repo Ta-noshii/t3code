@@ -13,8 +13,9 @@
  * Mobile hosts the editor in a WebView loading `CANVAS_HOST_PAGE_PATH` from
  * the environment it is connected to, so the editor version always matches
  * the server and the app bundles no Excalidraw code. The page talks to the
- * native side over `postMessage` with `CanvasHostMessage`; the native side
- * reads and saves through the RPCs below.
+ * native side over `postMessage` (`CanvasHostPageMessage` and
+ * `CanvasHostNativeMessage`); the native side reads and saves through the
+ * RPCs below.
  *
  * @module Canvas
  */
@@ -252,31 +253,68 @@ export type CanvasEvent = typeof CanvasEvent.Type;
 export const CanvasSubscribeInput = Schema.Struct({});
 
 /**
- * Messages between the canvas host page (`CANVAS_HOST_PAGE_PATH`) and a
- * native WebView. Native sends `load` with a document and `update` when the
- * file changes; the page sends `ready` once, then `change` with the scene
- * after edits settle, which native saves with `canvas.save`.
+ * The canvas host page (`CANVAS_HOST_PAGE_PATH`) in a native WebView keeps
+ * the editor and its file in step the way the web editor does, and asks the
+ * native side to run the RPCs for it: native answers `save` and `read`
+ * requests by id and forwards `changed` events for the open file. The page
+ * has no credentials of its own.
  */
 export const CANVAS_HOST_PAGE_PATH = "/canvas-host.html";
 
-export const CanvasHostMessage = Schema.Union([
+export const CanvasHostTheme = Schema.Literals(["light", "dark"]);
+export type CanvasHostTheme = typeof CanvasHostTheme.Type;
+
+export const CanvasSyncStatus = Schema.Literals(["saved", "unsaved", "saving", "error"]);
+export type CanvasSyncStatus = typeof CanvasSyncStatus.Type;
+
+const { path: _path, ...saveFieldsWithoutPath } = CanvasSaveInput.fields;
+
+/** Page to native. */
+export const CanvasHostPageMessage = Schema.Union([
+  /** The page is listening; native answers with `load`. */
   Schema.Struct({ type: Schema.Literal("ready") }),
   Schema.Struct({
-    type: Schema.Literal("load"),
-    document: CanvasDocument,
-    theme: Schema.Literals(["light", "dark"]),
+    type: Schema.Literal("save"),
+    requestId: NonNegativeInt,
+    input: Schema.Struct(saveFieldsWithoutPath),
   }),
-  Schema.Struct({ type: Schema.Literal("update"), document: CanvasDocument }),
   Schema.Struct({
-    type: Schema.Literal("change"),
-    path: Schema.String,
-    baseRevision: Schema.NullOr(Schema.String),
-    elements: Schema.Array(CanvasElement),
-    appState: Schema.Record(Schema.String, Schema.Unknown),
-    files: Schema.Record(Schema.String, CanvasBinaryFile),
+    type: Schema.Literal("read"),
+    requestId: NonNegativeInt,
+    knownFileIds: Schema.Array(Schema.String),
   }),
+  Schema.Struct({ type: Schema.Literal("status"), status: CanvasSyncStatus }),
 ]);
-export type CanvasHostMessage = typeof CanvasHostMessage.Type;
+export type CanvasHostPageMessage = typeof CanvasHostPageMessage.Type;
+
+/** Native to page. */
+export const CanvasHostNativeMessage = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("load"), document: CanvasDocument, theme: CanvasHostTheme }),
+  /** The answer to `save`; null when the save failed and should be retried. */
+  Schema.Struct({
+    type: Schema.Literal("saved"),
+    requestId: NonNegativeInt,
+    result: Schema.NullOr(CanvasSaveResult),
+  }),
+  /** The answer to `read`; null when the read failed. */
+  Schema.Struct({
+    type: Schema.Literal("document"),
+    requestId: NonNegativeInt,
+    document: Schema.NullOr(CanvasDocument),
+  }),
+  /** The file changed to `revision`, maybe by this editor's own save. */
+  Schema.Struct({ type: Schema.Literal("changed"), revision: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("theme"), theme: CanvasHostTheme }),
+  /** Place an image in the middle of the view. */
+  Schema.Struct({
+    type: Schema.Literal("insert-image"),
+    dataURL: Schema.String,
+    mimeType: Schema.String,
+  }),
+  /** Save pending edits now, for example before the screen closes. */
+  Schema.Struct({ type: Schema.Literal("flush") }),
+]);
+export type CanvasHostNativeMessage = typeof CanvasHostNativeMessage.Type;
 
 export class CanvasNotFoundError extends Schema.TaggedError<CanvasNotFoundError>()(
   "CanvasNotFoundError",

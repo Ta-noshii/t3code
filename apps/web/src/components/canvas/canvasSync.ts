@@ -4,12 +4,13 @@ import type {
   CanvasElement,
   CanvasSaveInput,
   CanvasSaveResult,
+  CanvasSyncStatus,
 } from "@t3tools/contracts";
 import { mergeCanvasElements, storedAppState } from "@t3tools/shared/canvas";
 
 const RETRY_DELAY_MS = 5_000;
 
-export type CanvasSyncStatus = "saved" | "unsaved" | "saving" | "error";
+export type { CanvasSyncStatus };
 
 export interface CanvasSyncHost {
   /** The editor's elements, deleted ones included, its app state and image files. */
