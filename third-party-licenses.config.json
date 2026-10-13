@@ -637,6 +637,20 @@
         "licenseId": "MIT",
         "copyrights": ["Copyright (c) 2019-present Fabio Spampinato, Andrew Maney"]
       }
+    },
+    {
+      "name": "@excalidraw/excalidraw",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2020 Excalidraw"]
+      }
+    },
+    {
+      "repositoryUrl": "https://github.com/radix-ui/primitives",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2022 WorkOS"]
+      }
     }
   ]
 }
