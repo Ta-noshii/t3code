@@ -244,7 +244,6 @@ function ToolCallBody(
   props: ToolOutputState & {
     readonly command?: string;
     readonly args?: unknown;
-    readonly toolName?: string | null;
     readonly exitCode?: number | undefined;
     readonly context?: ToolViewContext | undefined;
   },
@@ -417,7 +416,6 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
 
       {item.type === "dynamic_tool" ? (
         <ToolCallBody
-          toolName={item.toolName}
           args={item.input}
           {...outputState}
           onImageExpand={props.onImageExpand}

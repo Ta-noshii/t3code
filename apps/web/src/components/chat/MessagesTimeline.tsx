@@ -4368,7 +4368,7 @@ function ActivityTrailTool({
       {showTarget ? (
         <span className="min-w-0 truncate font-mono text-2xs text-muted-foreground">{target}</span>
       ) : null}
-      {failed && !toolIconAcceptsTint(iconName, entry.toolIcon) ? (
+      {failed && !toolIconAcceptsTint(entry.toolIcon) ? (
         <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
       ) : null}
     </button>
