@@ -1,3 +1,4 @@
+import { runsAsOwnTurn } from "@t3tools/client-runtime/state/thread-workflows";
 import type { EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { isAttachmentOnlyBootstrapPrompt } from "@t3tools/shared/composerContextReferences";
@@ -23,6 +24,7 @@ export function resolveThreadQueueRowControls(input: {
   /** A guest's message keeps the guest's words; the owner can cancel it, not rewrite it. */
   readonly isGuestMessage?: boolean;
   readonly text: string;
+  readonly attachments: ReadonlyArray<unknown>;
 }): ThreadQueueRowControls {
   const mutationEnabled = !input.busy;
   const isEditing = input.isEditing === true;
@@ -33,7 +35,12 @@ export function resolveThreadQueueRowControls(input: {
     // away whatever has been typed since.
     canEdit:
       mutationEnabled && !isEditing && input.isGuestMessage !== true && input.editBlocked !== true,
-    canSend: mutationEnabled && (input.canPromoteToSteer || input.canSendNow) && !isEditing,
+    // /compact and /logout cannot join a running turn, so they offer Send now only.
+    canSend:
+      mutationEnabled &&
+      ((input.canPromoteToSteer && !runsAsOwnTurn(input.text, input.attachments)) ||
+        input.canSendNow) &&
+      !isEditing,
     dismissAccessibilityLabel: REMOVE_QUEUED_MESSAGE_ACCESSIBILITY_LABEL,
     // Editing and sending keep the original text so quoted citations stay linked.
     displayText: isAttachmentOnlyBootstrapPrompt(input.text)
