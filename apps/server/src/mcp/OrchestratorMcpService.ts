@@ -102,7 +102,6 @@ import {
 } from "./McpInvocationContext.ts";
 import * as Metrics from "../observability/Metrics.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
-import * as ServerSettings from "../serverSettings.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_WAIT_TIMEOUT_MS = 60 * 60 * 1_000;
@@ -967,7 +966,6 @@ const make = Effect.gen(function* () {
         )
       : Effect.succeed(project.defaultModelSelection);
   const secretRequests = yield* SecretRequests.SecretRequests;
-  const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
 
   const requireCapability = (scope: McpInvocationScope) =>
     scope.capabilities.has("orchestration")
@@ -1162,12 +1160,10 @@ const make = Effect.gen(function* () {
    * everything: a short list is a convenience, and hiding models on a read
    * error would look like they vanished.
    */
-  const loadOrchestratorModels = Option.isNone(serverSettings)
-    ? Effect.succeed([] as ReadonlyArray<{ provider: string; model: string }>)
-    : serverSettings.value.getSettings.pipe(
-        Effect.map((settings) => settings.orchestratorModels),
-        Effect.orElseSucceed(() => [] as ReadonlyArray<{ provider: string; model: string }>),
-      );
+  const loadOrchestratorModels = serverSettings.getSettings.pipe(
+    Effect.map((settings) => settings.orchestratorModels),
+    Effect.orElseSucceed(() => [] as ReadonlyArray<{ provider: string; model: string }>),
+  );
 
   /**
    * Instance ids the adapter registry resolves — the same lookup a

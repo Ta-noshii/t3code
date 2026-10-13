@@ -144,7 +144,9 @@ export function deriveLogicalProjectKey(
 
   return (
     deriveRepositoryScopedKey(project, groupingMode) ??
-    deriveFolderKey(project) ??
+    // Scratch folders sit at the same paths on every machine but hold unrelated work.
+    (project.isScratch ? null : deriveFolderKey(project)) ??
+    derivePhysicalProjectKey(project) ??
     scopedProjectKey(scopeProjectRef(project.environmentId, project.id))
   );
 }

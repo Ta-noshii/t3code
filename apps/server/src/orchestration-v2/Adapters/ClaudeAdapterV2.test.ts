@@ -1306,6 +1306,7 @@ describe("ClaudeAdapterV2 thread recap", () => {
                 offer: (message) => Effect.sync(() => void offered.push(message)),
                 setModel: () => Effect.void,
                 setPermissionMode: () => Effect.void,
+                stopTask: () => Effect.void,
                 interrupt: Effect.void,
                 close: Effect.sync(() => void (closed += 1)),
               };
