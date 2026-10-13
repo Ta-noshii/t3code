@@ -19,6 +19,8 @@ import * as Schema from "effect/Schema";
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
+import { fitCanvasScene } from "../canvas/fitScene";
+
 const CHANGE_DELAY_MS = 800;
 const decodeMessage = Schema.decodeUnknownOption(Schema.fromJsonString(CanvasHostMessage));
 
@@ -60,6 +62,7 @@ function EditorHost() {
     knownFileIds: Set<string>;
     sent: string;
     timer: ReturnType<typeof setTimeout> | null;
+    fitted: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -83,6 +86,7 @@ function EditorHost() {
           knownFileIds: new Set(),
           sent: "",
           timer: null,
+          fitted: false,
         };
         adopt(value.document);
         setLoaded(value);
@@ -122,7 +126,12 @@ function EditorHost() {
     files: BinaryFiles,
   ) => {
     const state = stateRef.current;
-    if (!state || loaded?.document.canvas.readOnly || appState.isLoading) return;
+    if (!state || appState.isLoading) return;
+    if (!state.fitted && apiRef.current) {
+      state.fitted = true;
+      fitCanvasScene(apiRef.current);
+    }
+    if (loaded?.document.canvas.readOnly) return;
     const signature = signatureOf(elements, appState, files);
     if (state.sent === "") state.sent = signature;
     if (signature === state.sent) return;

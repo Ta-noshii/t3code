@@ -1,4 +1,4 @@
-import { useAtomSubscribe, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import type {
   CanvasEvent,
   CanvasSummary,
@@ -6,7 +6,6 @@ import type {
   ProjectId,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { AsyncResult } from "effect/reactivity";
 import { FolderOpenIcon, MoreHorizontalIcon, PlusIcon, Shapes } from "lucide-react";
 import { lazy, Suspense, useCallback, useState, type KeyboardEvent } from "react";
 
@@ -23,6 +22,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useCanvasEvents } from "./useCanvasEvents";
 
 const CanvasEditor = lazy(() => import("./CanvasEditor"));
 
@@ -81,12 +81,10 @@ function CanvasLibrary(props: {
   const [draft, setDraft] = useState<LibraryDraft | null>(null);
 
   const canvases = list.data?.canvases ?? [];
-  useAtomSubscribe(
-    canvasEnvironment.events({ environmentId: props.environmentId, input: {} }),
+  useCanvasEvents(
+    props.environmentId,
     useCallback(
-      (result: AsyncResult.AsyncResult<CanvasEvent, unknown>) => {
-        if (!AsyncResult.isSuccess(result)) return;
-        const event = result.value;
+      (event: CanvasEvent) => {
         if (
           (event.type === "library-changed" && event.projectId === props.projectId) ||
           (event.type === "changed" && canvases.some((canvas) => canvas.path === event.path))
