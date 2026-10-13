@@ -63,6 +63,11 @@ the oldest queued message as a steer. This leaves the current draft intact and
 requires an active turn that supports steering. Change
 `thread.steerQueuedMessage` in **Settings → Keybindings** to use another shortcut.
 
+With two or more messages queued, **Send all** steers them into the running turn
+as one message, in queue order, with their attachments. Commands that run as their
+own turn, such as `/compact`, stay queued. Mobile has the same button in the queue
+sheet.
+
 Press `Option+Up` on macOS or `Alt+Up` on Windows and Linux with the cursor at the
 start of the composer to edit the most recently queued message. Change
 `thread.editQueuedMessage` to use another shortcut.

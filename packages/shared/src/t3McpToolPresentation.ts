@@ -287,6 +287,10 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     ["Steer with", "Steering with", "Requested steering with", "a queued message"],
     "queue-steer",
   ),
+  t3_queue_send_all: tool(
+    ["Steer with", "Steering with", "Requested steering with", "all queued messages"],
+    "queue-steer",
+  ),
   t3_pending_request_list: tool(
     ["List", "Listing", "Listed", "pending questions"],
     "question-list",

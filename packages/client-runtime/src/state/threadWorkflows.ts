@@ -180,6 +180,20 @@ export function runsAsOwnTurn(text: string, attachments: ReadonlyArray<unknown>)
   return attachments.length === 0 && ["/compact", "/logout"].includes(text.trim().toLowerCase());
 }
 
+/**
+ * The queued messages "Send all" merges into one steer. Messages that run as their own
+ * turn, and /goal, which never steers, stay queued; the server applies the same rule.
+ */
+export function getSendAllQueuedRuns<
+  T extends { readonly text: string; readonly attachments: ReadonlyArray<unknown> },
+>(queuedRuns: ReadonlyArray<T>): ReadonlyArray<T> {
+  return queuedRuns.filter(
+    ({ text, attachments }) =>
+      !runsAsOwnTurn(text, attachments) &&
+      !(attachments.length === 0 && /^\/goal(?:\s|$)/u.test(text.trim())),
+  );
+}
+
 export function canForkProjectedAssistantItem(input: {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly capabilities?: OrchestrationV2ProviderCapabilities | undefined;

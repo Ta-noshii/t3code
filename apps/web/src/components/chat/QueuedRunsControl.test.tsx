@@ -24,6 +24,7 @@ vi.mock("../../state/threads", () => ({
     cancelQueuedRun: Symbol("cancelQueuedRun"),
     promoteQueuedRun: Symbol("promoteQueuedRun"),
     reorderQueuedRun: Symbol("reorderQueuedRun"),
+    sendAllQueuedMessages: Symbol("sendAllQueuedMessages"),
   },
 }));
 
