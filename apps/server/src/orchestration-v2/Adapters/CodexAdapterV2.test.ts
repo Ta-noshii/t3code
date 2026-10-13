@@ -678,6 +678,33 @@ describe("CodexAdapterV2 process spawning", () => {
     );
   });
 
+  it("gives each thread's shell commands that thread's agent shell credential", () => {
+    const params = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: {
+        environmentId: EnvironmentId.make("environment-codex-mcp"),
+        threadId: ThreadId.make("thread-codex-shell"),
+        providerSessionId: "mcp-session-codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        endpoint: "http://127.0.0.1:43123/mcp",
+        authorizationHeader: "Bearer secret-codex-token",
+        browserToolsAvailable: false,
+        agentShellEnvironment: {
+          T3CODE_THREAD_ID: "thread-codex-shell",
+          T3CODE_AGENT_SHELL_URL: "http://127.0.0.1:43123",
+          T3CODE_AGENT_SHELL_AUTHORIZATION: "Bearer shell-token",
+        },
+      },
+      modelSelection: { model: "gpt-5.4" },
+      runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: "/workspace" },
+    });
+    // One app-server serves many threads, so the values go in thread config.
+    assert.include(params.config, {
+      "shell_environment_policy.set.T3CODE_THREAD_ID": "thread-codex-shell",
+      "shell_environment_policy.set.T3CODE_AGENT_SHELL_URL": "http://127.0.0.1:43123",
+      "shell_environment_policy.set.T3CODE_AGENT_SHELL_AUTHORIZATION": "Bearer shell-token",
+    });
+  });
+
   it.effect("resolves Windows command shims through the shared spawn policy", () =>
     Effect.gen(function* () {
       const command = yield* CodexAdapterV2.makeCodexAppServerSpawnCommand({

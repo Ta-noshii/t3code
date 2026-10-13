@@ -1,7 +1,6 @@
 import {
-  SECRET_REQUEST_DEFAULT_PLACEHOLDER,
-  SECRET_REQUEST_PRIVACY_NOTE,
   secretRequestAnswerInput,
+  secretRequestCopy,
   secretRequestDisplay,
   secretRequestFailureMessage,
   type SecretRequestItem,
@@ -11,6 +10,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
+import * as Clipboard from "expo-clipboard";
 import { useRef, useState } from "react";
 import { Pressable, View, type ColorValue } from "react-native";
 
@@ -21,9 +21,10 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { RequestActionButton } from "./RequestActionButton";
 
 /**
- * Feed card for a secret an agent asked the user for. The typed value lives
- * only in this component's state and the RPC payload: it is never logged,
- * alerted, or persisted, and the field clears once the answer is sent.
+ * Feed card for a secret an agent asked the user for, or a command in its
+ * shell asked for through `t3 secret prompt`. The typed value lives only in
+ * this component's state and the RPC payload: it is never logged, alerted, or
+ * persisted, and the field clears once the answer is sent.
  */
 const LOCK_SYMBOL: AppSymbolName = { ios: "lock", android: "lock" };
 const PRIVATE_SYMBOL: AppSymbolName = { ios: "checkmark.shield", android: "lock" };
@@ -67,6 +68,7 @@ function PendingSecretRequestForm(props: {
   readonly iconColor: ColorValue;
 }) {
   const { item } = props;
+  const copy = secretRequestCopy(item);
   const answer = useAtomCommand(serverEnvironment.answerSecretRequest, {
     label: "answer secret request",
     // The failure cause holds the request; keep it out of the console.
@@ -107,26 +109,47 @@ function PendingSecretRequestForm(props: {
     <View className="mb-3 gap-3 rounded-[20px] border border-border bg-card-alt p-4">
       <View className="gap-1">
         <Text className="font-t3-bold text-base text-foreground">{item.label}</Text>
-        {item.reason.trim() ? (
+        {copy.command !== null ? (
+          <>
+            <Text className="font-sans text-sm leading-5 text-foreground-muted">
+              Enter your password to run as root:
+            </Text>
+            <Text
+              selectable
+              className="rounded-lg bg-subtle px-2 py-1.5 font-mono text-sm text-foreground"
+            >
+              {copy.command}
+            </Text>
+          </>
+        ) : item.reason.trim() ? (
           <Text className="font-sans text-sm leading-5 text-foreground-muted">{item.reason}</Text>
         ) : null}
       </View>
-      <TextInput
-        accessibilityLabel={item.label}
-        placeholder={item.placeholder ?? SECRET_REQUEST_DEFAULT_PLACEHOLDER}
-        value={secret}
-        onChangeText={setSecret}
-        editable={!submitting}
-        secureTextEntry
-        autoCorrect={false}
-        autoCapitalize="none"
-        autoComplete="off"
-        textContentType="none"
-        importantForAutofill="no"
-        spellCheck={false}
-        returnKeyType="done"
-        onSubmitEditing={() => void send({ type: "save", secret })}
-      />
+      {copy.multiline ? (
+        <MultilineSecretPaste
+          secret={secret}
+          disabled={submitting}
+          onChange={setSecret}
+          onError={setError}
+        />
+      ) : (
+        <TextInput
+          accessibilityLabel={item.label}
+          placeholder={copy.placeholder}
+          value={secret}
+          onChangeText={setSecret}
+          editable={!submitting}
+          secureTextEntry
+          autoCorrect={false}
+          autoCapitalize="none"
+          autoComplete="off"
+          textContentType="none"
+          importantForAutofill="no"
+          spellCheck={false}
+          returnKeyType="done"
+          onSubmitEditing={() => void send({ type: "save", secret })}
+        />
+      )}
       {error !== null ? (
         <Text
           accessibilityRole="alert"
@@ -137,7 +160,7 @@ function PendingSecretRequestForm(props: {
         </Text>
       ) : null}
       <RequestActionButton
-        label="Save securely"
+        label={copy.saveLabel}
         disabled={submitting || secret.trim().length === 0}
         onPress={() => void send({ type: "save", secret })}
       />
@@ -149,9 +172,7 @@ function PendingSecretRequestForm(props: {
             tintColor={props.iconColor}
             type="monochrome"
           />
-          <Text className="flex-1 font-sans text-xs text-foreground-muted">
-            {SECRET_REQUEST_PRIVACY_NOTE}
-          </Text>
+          <Text className="flex-1 font-sans text-xs text-foreground-muted">{copy.privacyNote}</Text>
         </View>
         {/* Quiet like the web card's: the field and Save are the action. */}
         <Pressable
@@ -162,9 +183,55 @@ function PendingSecretRequestForm(props: {
           className="px-1 py-1 active:opacity-60 disabled:opacity-50"
           onPress={() => void send({ type: "decline" })}
         >
-          <Text className="font-sans text-xs text-foreground-muted">Decline</Text>
+          <Text className="font-sans text-xs text-foreground-muted">{copy.declineLabel}</Text>
         </Pressable>
       </View>
+    </View>
+  );
+}
+
+/**
+ * A key or certificate for a waiting command. Native secure fields are single
+ * line and drop line breaks, so the value comes from the clipboard and the
+ * card shows only its size.
+ */
+function MultilineSecretPaste(props: {
+  readonly secret: string;
+  readonly disabled: boolean;
+  readonly onChange: (secret: string) => void;
+  readonly onError: (error: string | null) => void;
+}) {
+  const paste = async () => {
+    const text = await Clipboard.getStringAsync().catch(() => "");
+    if (text.trim().length === 0) {
+      props.onError("The clipboard is empty. Copy the value first.");
+      return;
+    }
+    props.onError(null);
+    props.onChange(text);
+  };
+  const lines = props.secret.split("\n").length;
+  return (
+    <View className="flex-row items-center gap-2">
+      <Text className="flex-1 font-sans text-sm text-foreground-muted">
+        {props.secret.length === 0
+          ? "Copy the value, then paste it here."
+          : `Pasted ${props.secret.length} characters on ${lines} ${lines === 1 ? "line" : "lines"}`}
+      </Text>
+      {props.secret.length > 0 ? (
+        <RequestActionButton
+          label="Clear"
+          tone="secondary"
+          disabled={props.disabled}
+          onPress={() => props.onChange("")}
+        />
+      ) : null}
+      <RequestActionButton
+        label="Paste"
+        tone="secondary"
+        disabled={props.disabled}
+        onPress={() => void paste()}
+      />
     </View>
   );
 }

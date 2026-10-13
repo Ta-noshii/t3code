@@ -59,6 +59,32 @@ it.effect("stores only a token hash, resolves the bearer token, and revokes by t
   }),
 );
 
+it.effect("gives agent shells their own credential that cannot open the MCP endpoint", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry(() => 1_000);
+    const threadId = ThreadId.make("thread-shell");
+    const issued = yield* registry.issue({
+      threadId,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      capabilities: new Set(),
+    });
+    const shell = issued.config.agentShellEnvironment!;
+    expect(shell.T3CODE_THREAD_ID).toBe(threadId);
+    expect(shell.T3CODE_AGENT_SHELL_URL).toBe("http://127.0.0.1:43123");
+    const mcpToken = issued.config.authorizationHeader.replace(/^Bearer\s+/, "");
+    const shellToken = (shell.T3CODE_AGENT_SHELL_AUTHORIZATION ?? "").replace(/^Bearer\s+/, "");
+    expect(shellToken).not.toBe(mcpToken);
+
+    expect((yield* registry.resolveShell(shellToken))?.thread.threadId).toBe(threadId);
+    expect(yield* registry.resolve(shellToken)).toBeUndefined();
+    expect(yield* registry.resolveShell(mcpToken)).toBeUndefined();
+    expect(yield* registry.resolveShell(threadId)).toBeUndefined();
+
+    yield* registry.revokeThread(threadId);
+    expect(yield* registry.resolveShell(shellToken)).toBeUndefined();
+  }),
+);
+
 it.effect("always grants pull-requests and gates browser and device access independently", () =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry(() => 1_000);
