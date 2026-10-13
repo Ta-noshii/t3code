@@ -1169,6 +1169,9 @@ export function NewTaskDraftScreen(props: {
     <>
       <ThreadScreenBinding
         environmentId={selectedProject.environmentId}
+        promptSuggestion={null}
+        threadRecap={null}
+        onDismissThreadRecap={() => undefined}
         header={
           <DraftThreadHeader thread={thread} project={selectedProject} cwd={composerWorkspaceCwd} />
         }

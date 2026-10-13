@@ -78,14 +78,15 @@ timestamp shows when the displayed wait started.
 ## Next-prompt suggestions
 
 After a Claude turn finishes, an empty composer shows Claude Code's guess at your
-next message. Press `Tab` to fill it in, then edit or send it. Claude skips the
-first turn of a conversation and plan mode. To turn suggestions off, set
-`promptSuggestionEnabled` to `false` in Claude's `settings.json`.
+next message. Press `Tab` (on mobile, tap the suggestion) to fill it in, then
+edit or send it. Claude skips the first turn of a conversation and plan mode. To
+turn suggestions off, set `promptSuggestionEnabled` to `false` in Claude's
+`settings.json`.
 
 ## Recaps when you return
 
 When you come back to a finished Claude thread after five minutes or more away,
-web and desktop show a one-line "While you were away" summary above the composer.
+every client shows a one-line "While you were away" summary above the composer.
 It comes from Claude Code's `/recap`, run on a copy of the conversation, so it
 adds nothing to the thread. Each turn gets one recap; dismiss it to hide it.
 

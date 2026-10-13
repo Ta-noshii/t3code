@@ -81,6 +81,7 @@ import {
   deriveThreadActivityRun,
   deriveLatestThreadRun,
   deriveThreadStructureRuntime,
+  latestPromptSuggestion,
 } from "@t3tools/client-runtime/state/thread-execution";
 import {
   resolveWorkflowOpening,
@@ -125,7 +126,7 @@ import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
-import { composerRequiresModifier, latestPromptSuggestion } from "../composer-logic";
+import { composerRequiresModifier } from "../composer-logic";
 import {
   derivePhase,
   deriveActivePlanState,

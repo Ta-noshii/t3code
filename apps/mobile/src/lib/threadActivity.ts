@@ -224,6 +224,8 @@ type ThreadFeedEntryContent =
       readonly live: boolean;
       readonly shimmer: boolean;
       readonly thought?: string;
+      /** Steps listed under the collapsed header. */
+      readonly trail?: ThreadFeedActivityTrail;
     }
   | {
       readonly type: "run-fold";
@@ -239,6 +241,28 @@ type ThreadFeedEntryContent =
       readonly createdAt: string;
       readonly runId: RunId | null;
     };
+
+/** One line of a collapsed group's trail: a stretch of thinking or one tool call. */
+export type ThreadFeedTrailStep =
+  | {
+      readonly kind: "thought";
+      readonly id: string;
+      readonly text: string;
+      readonly durationMs: number;
+      readonly live: boolean;
+    }
+  | {
+      readonly kind: "tool";
+      readonly id: string;
+      readonly activity: ThreadFeedActivity;
+      readonly live: boolean;
+    };
+
+/** The newest steps a collapsed group lists under its header; expanding shows the rest. */
+export interface ThreadFeedActivityTrail {
+  readonly steps: ReadonlyArray<ThreadFeedTrailStep>;
+  readonly hiddenCount: number;
+}
 
 export interface ThreadFeedLatestRun {
   readonly runId: RunId;
@@ -1709,8 +1733,10 @@ function appendToolGroupRows(
   const shimmer = activeTail && (active || latestActivity.status === "success");
   const singleActivity = activities.length === 1 ? latestActivity : null;
   const groupSummary = summarizeToolGroup(activities.map((activity) => activity.workEntry));
+  const trail = expanded ? undefined : collapsedActivityTrail(activities, live);
+  // The trail lists the thoughts itself, so the preview line is for groups without one.
   const latestThought =
-    live && !expanded
+    live && !expanded && !trail
       ? activities.findLast(
           (activity) =>
             activity.workEntry.itemType === "reasoning" &&
@@ -1719,7 +1745,7 @@ function appendToolGroupRows(
       : undefined;
   const thought = latestThought ? liveThoughtLine(latestThought) : "";
   const summary = live
-    ? (expanded || thought) && latestActivity.workEntry.itemType === "reasoning"
+    ? (expanded || thought || trail) && latestActivity.workEntry.itemType === "reasoning"
       ? latestActivity.lifecycleStatus === "inProgress"
         ? "Thinking"
         : "Thought"
@@ -1788,6 +1814,7 @@ function appendToolGroupRows(
     ...(groupToolIcon ? { toolIcon: groupToolIcon } : {}),
     ...(summaryToolIcon ? { summaryToolIcon } : {}),
     ...(thought ? { thought } : {}),
+    ...(trail ? { trail } : {}),
     hasFailure: (() => {
       const lastToolLike = activities.findLast((activity) => activity.toolLike);
       return (
@@ -1813,6 +1840,76 @@ function appendToolGroupRows(
         activity.runId === activeRunId,
     })),
   });
+}
+
+const ACTIVITY_TRAIL_MAX_STEPS = 6;
+
+function activityStartMs(activity: ThreadFeedActivity): number {
+  const item = activity.workEntry.structuredPayload;
+  return item?.startedAt ? DateTime.toEpochMillis(item.startedAt) : Date.parse(activity.createdAt);
+}
+
+function activityEndMs(activity: ThreadFeedActivity): number {
+  const item = activity.workEntry.structuredPayload;
+  const end = item?.completedAt ?? item?.updatedAt;
+  return end ? DateTime.toEpochMillis(end) : Date.parse(activity.createdAt);
+}
+
+/**
+ * The steps of a group, in order. Consecutive reasoning items form one thought,
+ * timed from the first one's start to the last one's end. Only the last step of
+ * a live group is live, and only while it is still running.
+ */
+export function buildActivityTrail(
+  activities: ReadonlyArray<ThreadFeedActivity>,
+  live: boolean,
+): ThreadFeedTrailStep[] {
+  const steps: ThreadFeedTrailStep[] = [];
+  for (let index = 0; index < activities.length; index += 1) {
+    const activity = activities[index]!;
+    if (activity.workEntry.itemType !== "reasoning") {
+      steps.push({ kind: "tool", id: activity.id, activity, live: false });
+      continue;
+    }
+    const thoughts = [activity];
+    while (activities[index + 1]?.workEntry.itemType === "reasoning") {
+      thoughts.push(activities[++index]!);
+    }
+    steps.push({
+      kind: "thought",
+      id: activity.id,
+      text: thoughts
+        .map((thought) => thought.workEntry.detail?.trim() ?? "")
+        .filter(Boolean)
+        .join("\n\n"),
+      durationMs: Math.max(0, activityEndMs(thoughts.at(-1)!) - activityStartMs(activity)),
+      live: false,
+    });
+  }
+  const last = steps.at(-1);
+  if (last && live && activities.at(-1)?.lifecycleStatus === "inProgress") {
+    steps[steps.length - 1] = { ...last, live: true };
+  }
+  return steps;
+}
+
+/**
+ * The trail a collapsed group shows, or nothing when it would repeat the header:
+ * a lone tool call or a settled lone thought is already the header's label.
+ */
+function collapsedActivityTrail(
+  activities: ReadonlyArray<ThreadFeedActivity>,
+  live: boolean,
+): ThreadFeedActivityTrail | undefined {
+  const steps = buildActivityTrail(activities, live);
+  if (
+    steps.length === 0 ||
+    (steps.length === 1 && (steps[0]!.kind === "tool" || !steps[0]!.live))
+  ) {
+    return undefined;
+  }
+  const hiddenCount = Math.max(0, steps.length - ACTIVITY_TRAIL_MAX_STEPS);
+  return { steps: steps.slice(hiddenCount), hiddenCount };
 }
 
 function liveToolActivitySummary(activity: ThreadFeedActivity, presentTense: boolean): string {

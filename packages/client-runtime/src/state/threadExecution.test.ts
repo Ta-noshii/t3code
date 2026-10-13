@@ -25,6 +25,9 @@ import {
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
   deriveThreadRuntime,
+  latestPromptSuggestion,
+  shouldRecapThread,
+  THREAD_RECAP_AWAY_MS,
   threadRuntimeHasInterruptibleRun,
 } from "./threadExecution.ts";
 
@@ -391,5 +394,62 @@ describe("provider-reported model selection", () => {
         ],
       }),
     ).toBeNull();
+  });
+});
+
+describe("latestPromptSuggestion", () => {
+  type Projection = NonNullable<Parameters<typeof latestPromptSuggestion>[0]>;
+  const run = (ordinal: number, status: Projection["runs"][number]["status"]) =>
+    ({
+      ordinal,
+      status,
+      activeAttemptId: `attempt-${ordinal}`,
+    }) as unknown as Projection["runs"][number];
+  const turn = (attempt: number, ordinal: number, promptSuggestion?: string) =>
+    ({
+      runAttemptId: `attempt-${attempt}`,
+      ordinal,
+      status: "completed",
+      ...(promptSuggestion === undefined ? {} : { promptSuggestion }),
+    }) as unknown as Projection["providerTurns"][number];
+
+  it("offers the suggestion recorded on the latest completed run's last turn", () => {
+    expect(
+      latestPromptSuggestion({
+        runs: [run(1, "completed"), run(2, "completed")],
+        providerTurns: [turn(1, 1, "old idea"), turn(2, 2, "earlier"), turn(2, 3, "run the tests")],
+      }),
+    ).toBe("run the tests");
+  });
+
+  it("offers nothing while the latest run works or once a newer run has no suggestion", () => {
+    const providerTurns = [turn(1, 1, "old idea")];
+    expect(latestPromptSuggestion({ runs: [run(1, "running")], providerTurns })).toBeNull();
+    expect(
+      latestPromptSuggestion({ runs: [run(1, "completed"), run(2, "completed")], providerTurns }),
+    ).toBeNull();
+    expect(latestPromptSuggestion({ runs: [run(1, "interrupted")], providerTurns })).toBeNull();
+    expect(latestPromptSuggestion(null)).toBeNull();
+  });
+});
+
+describe("shouldRecapThread", () => {
+  const completedAt = "2026-09-28T10:00:00.000Z";
+  const completed = Date.parse(completedAt);
+  const base = { completedAt, idle: true } as const;
+
+  it("recaps a finished thread the user has been away from for five minutes", () => {
+    const now = completed + THREAD_RECAP_AWAY_MS + 1_000;
+    expect(shouldRecapThread({ ...base, now, lastSeenAt: undefined })).toBe(true);
+    expect(shouldRecapThread({ ...base, now, lastSeenAt: now - 60_000 })).toBe(false);
+    expect(shouldRecapThread({ ...base, now, lastSeenAt: now - THREAD_RECAP_AWAY_MS })).toBe(true);
+  });
+
+  it("leaves busy and unfinished threads alone", () => {
+    const now = completed + THREAD_RECAP_AWAY_MS * 3;
+    expect(shouldRecapThread({ ...base, now, lastSeenAt: undefined, idle: false })).toBe(false);
+    expect(shouldRecapThread({ ...base, now, lastSeenAt: undefined, completedAt: null })).toBe(
+      false,
+    );
   });
 });

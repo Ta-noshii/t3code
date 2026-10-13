@@ -22,7 +22,6 @@ import {
   extendReplacementRangeForTrailingSpace,
   formatAssistantCitationForComposer,
   isCollapsedCursorAdjacentToInlineToken,
-  latestPromptSuggestion,
   isPathSuggestionCurrent,
   replaceTextRange,
 } from "./composer-logic";
@@ -572,41 +571,5 @@ describe("extendReplacementRangeForTrailingSpace", () => {
     expect(extendReplacementRangeForTrailingSpace("@firest", 3, "@file ")).toBe(3);
     expect(extendReplacementRangeForTrailingSpace("@fi rest", 3, "@file")).toBe(3);
     expect(extendReplacementRangeForTrailingSpace("@fi", 3, "@file ")).toBe(3);
-  });
-});
-
-describe("latestPromptSuggestion", () => {
-  type Projection = NonNullable<Parameters<typeof latestPromptSuggestion>[0]>;
-  const run = (ordinal: number, status: Projection["runs"][number]["status"]) =>
-    ({
-      ordinal,
-      status,
-      activeAttemptId: `attempt-${ordinal}`,
-    }) as unknown as Projection["runs"][number];
-  const turn = (attempt: number, ordinal: number, promptSuggestion?: string) =>
-    ({
-      runAttemptId: `attempt-${attempt}`,
-      ordinal,
-      status: "completed",
-      ...(promptSuggestion === undefined ? {} : { promptSuggestion }),
-    }) as unknown as Projection["providerTurns"][number];
-
-  it("offers the suggestion recorded on the latest completed run's last turn", () => {
-    expect(
-      latestPromptSuggestion({
-        runs: [run(1, "completed"), run(2, "completed")],
-        providerTurns: [turn(1, 1, "old idea"), turn(2, 2, "earlier"), turn(2, 3, "run the tests")],
-      }),
-    ).toBe("run the tests");
-  });
-
-  it("offers nothing while the latest run works or once a newer run has no suggestion", () => {
-    const providerTurns = [turn(1, 1, "old idea")];
-    expect(latestPromptSuggestion({ runs: [run(1, "running")], providerTurns })).toBeNull();
-    expect(
-      latestPromptSuggestion({ runs: [run(1, "completed"), run(2, "completed")], providerTurns }),
-    ).toBeNull();
-    expect(latestPromptSuggestion({ runs: [run(1, "interrupted")], providerTurns })).toBeNull();
-    expect(latestPromptSuggestion(null)).toBeNull();
   });
 });

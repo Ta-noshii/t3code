@@ -1328,6 +1328,7 @@ function renderFeedEntry(
             />
           ) : null
         }
+        trail={entry.trail}
         onToggle={() => props.onToggleWorkGroup(entry.groupId, entry.id)}
       />
     );
@@ -2882,7 +2883,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       case "run-fold":
         return resolveThreadFeedFixedItemSize(entry.type);
       case "work-toggle":
-        return entry.thought ? undefined : WORK_GROUP_TOGGLE_HEIGHT;
+        return entry.thought || entry.trail ? undefined : WORK_GROUP_TOGGLE_HEIGHT;
       case "thinking":
         return WORK_GROUP_TOGGLE_HEIGHT;
       case "activity-group":

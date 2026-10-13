@@ -69,8 +69,11 @@ import {
   type AgentSpawnSummary,
   formatItemFullDetail,
   type ThreadFeedActivity,
+  type ThreadFeedActivityTrail,
+  type ThreadFeedTrailStep,
   workEntryRowLabel,
 } from "../../lib/threadActivity";
+import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import {
   toolCallLines,
   turnItemOutputImages,
@@ -91,6 +94,7 @@ import {
   type ThreadWorkGroupScrollPosition,
 } from "./thread-feed-live-follow";
 import {
+  liveThoughtLine,
   resolveWorkEntryToolPresentation,
   toolGroupAction,
   type ToolGroupSummaryKind,
@@ -1344,6 +1348,7 @@ export function ThreadWorkGroupToggle(props: {
   readonly shimmer: boolean;
   readonly thought?: string | undefined;
   readonly trailing?: ReactNode;
+  readonly trail?: ThreadFeedActivityTrail | undefined;
   readonly onToggle: () => void;
 }) {
   const statusLabel = props.hasFailure ? `${props.summary}, tool call failed` : props.summary;
@@ -1424,7 +1429,157 @@ export function ThreadWorkGroupToggle(props: {
         </View>
         {props.trailing}
       </View>
+      {props.trail ? (
+        <ActivityTrailList
+          trail={props.trail}
+          environmentId={props.environmentId}
+          iconSubtleColor={props.iconSubtleColor}
+          themeAppearance={props.themeAppearance}
+          onOpen={props.onToggle}
+        />
+      ) : null}
     </WorkLogBlock>
+  );
+}
+
+/** Characters of live reasoning kept in the tail; about three lines on a phone. */
+const LIVE_THOUGHT_TAIL_CHARS = 240;
+
+/**
+ * The collapsed view of a work group: the tools it called and what it was
+ * thinking, one line each, with the reasoning streaming in while the turn runs.
+ * Any line opens the full view.
+ */
+function ActivityTrailList(props: {
+  readonly trail: ThreadFeedActivityTrail;
+  readonly environmentId: EnvironmentId;
+  readonly iconSubtleColor: ColorValue;
+  readonly themeAppearance: "light" | "dark";
+  readonly onOpen: () => void;
+}) {
+  const { hiddenCount } = props.trail;
+  return (
+    <View className="ml-3 border-l border-border pl-2">
+      {hiddenCount > 0 ? (
+        <Pressable onPress={props.onOpen} className="h-6 justify-center rounded-md px-0.5">
+          <Text selectable={false} className="text-xs text-foreground-subtle">
+            {hiddenCount} earlier step{hiddenCount === 1 ? "" : "s"}
+          </Text>
+        </Pressable>
+      ) : null}
+      {props.trail.steps.map((step) => (
+        <ActivityTrailLine key={step.id} {...props} step={step} />
+      ))}
+    </View>
+  );
+}
+
+function ActivityTrailLine(props: {
+  readonly step: ThreadFeedTrailStep;
+  readonly environmentId: EnvironmentId;
+  readonly iconSubtleColor: ColorValue;
+  readonly themeAppearance: "light" | "dark";
+  readonly onOpen: () => void;
+}) {
+  const { step } = props;
+  if (step.kind === "thought" && step.live) {
+    const text = step.text
+      .replace(/\s+/g, " ")
+      .replace(/[*_`#>~|]+/g, "")
+      .trim();
+    const tail =
+      text.length > LIVE_THOUGHT_TAIL_CHARS
+        ? text.slice(text.indexOf(" ", text.length - LIVE_THOUGHT_TAIL_CHARS) + 1)
+        : text;
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={tail || "Thinking"}
+        onPress={props.onOpen}
+        className="flex-row items-start gap-1.5 rounded-md px-0.5 active:bg-subtle"
+      >
+        <View className="h-6 w-4 shrink-0 items-center justify-center">
+          <WorkLogIcon icon="brain" color={props.iconSubtleColor} />
+        </View>
+        {/* Bottom-aligned so the newest words stay in view as older lines scroll off. */}
+        <View className="max-h-16 min-w-0 flex-1 justify-end overflow-hidden py-0.5">
+          <Text selectable={false} className="text-sm text-foreground-muted">
+            {tail || "Thinking"}
+          </Text>
+        </View>
+      </Pressable>
+    );
+  }
+  if (step.kind === "thought") {
+    const preview = liveThoughtLine(step.text);
+    const label =
+      step.durationMs >= 1_000 ? `Thought for ${formatDuration(step.durationMs)}` : "Thought";
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={preview ? `${label}: ${preview}` : label}
+        onPress={props.onOpen}
+        className="h-6 flex-row items-center gap-1.5 rounded-md px-0.5 active:bg-subtle"
+      >
+        <View className="w-4 shrink-0 items-center">
+          <WorkLogIcon icon="brain" color={props.iconSubtleColor} />
+        </View>
+        <Text selectable={false} numberOfLines={1} className="min-w-0 flex-1 text-sm">
+          <Text className="text-foreground-muted">{label}</Text>
+          {preview ? <Text className="text-foreground-subtle">{`  ${preview}`}</Text> : null}
+        </Text>
+      </Pressable>
+    );
+  }
+  const { activity } = step;
+  const failed = activity.status === "failure";
+  const label = workEntryRowLabel(activity.workEntry);
+  const toolIcon = activity.workEntry.toolIcon ?? activity.workEntry.toolSource?.icon;
+  const icon =
+    resolveWorkEntryToolPresentation(activity.workEntry)?.icon ?? workRowSymbolName(activity.icon);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={failed ? `${label}, tool call failed` : label}
+      onPress={props.onOpen}
+      className="h-6 flex-row items-center gap-1.5 rounded-md px-0.5 active:bg-subtle"
+    >
+      <View className="w-4 shrink-0 items-center">
+        {toolIcon ? (
+          <ToolActivityIconView
+            environmentId={props.environmentId}
+            icon={toolIcon}
+            fallback={icon}
+            fallbackColor={props.iconSubtleColor}
+            themeAppearance={props.themeAppearance}
+          />
+        ) : (
+          <WorkLogIcon
+            icon={icon}
+            color={props.iconSubtleColor}
+            {...(failed ? { colorClassName: "accent-danger-foreground/40" } : {})}
+          />
+        )}
+      </View>
+      <Text
+        selectable={false}
+        numberOfLines={1}
+        className={cn(
+          "min-w-0 flex-1 text-sm",
+          step.live ? "text-foreground" : "text-foreground-muted",
+        )}
+      >
+        {label}
+      </Text>
+      {failed && toolIcon !== undefined ? (
+        <SymbolView
+          name="xmark"
+          size={11}
+          tintColorClassName="accent-danger-foreground/40"
+          type="monochrome"
+        />
+      ) : null}
+    </Pressable>
   );
 }
 

@@ -425,3 +425,44 @@ export function notificationChildThreadId(
       return undefined;
   }
 }
+
+/**
+ * The provider's guess at the next prompt, for an empty composer. Only the
+ * latest run counts, and only once it completed: a newer run, or one still
+ * working, makes the suggestion stale.
+ */
+export function latestPromptSuggestion(
+  projection: Pick<OrchestrationV2ThreadProjection, "runs" | "providerTurns"> | null,
+): string | null {
+  const latestRun = projection?.runs.reduce<
+    OrchestrationV2ThreadProjection["runs"][number] | undefined
+  >(
+    (latest, run) => (latest === undefined || run.ordinal > latest.ordinal ? run : latest),
+    undefined,
+  );
+  if (!projection || latestRun?.status !== "completed" || latestRun.activeAttemptId === null) {
+    return null;
+  }
+  const latestTurn = projection.providerTurns
+    .filter((turn) => turn.runAttemptId === latestRun.activeAttemptId)
+    .reduce<OrchestrationV2ThreadProjection["providerTurns"][number] | undefined>(
+      (latest, turn) => (latest === undefined || turn.ordinal > latest.ordinal ? turn : latest),
+      undefined,
+    );
+  return latestTurn?.status === "completed" ? (latestTurn.promptSuggestion ?? null) : null;
+}
+
+/** How long a thread has to be out of view before coming back to it earns a recap. */
+export const THREAD_RECAP_AWAY_MS = 5 * 60_000;
+
+/** Whether a user returning now, after last seeing the thread at `lastSeenAt`, should get a recap. */
+export function shouldRecapThread(input: {
+  readonly now: number;
+  readonly lastSeenAt: number | undefined;
+  readonly completedAt: string | null;
+  readonly idle: boolean;
+}): boolean {
+  if (!input.idle || input.completedAt === null) return false;
+  const since = input.lastSeenAt ?? Date.parse(input.completedAt);
+  return Number.isFinite(since) && input.now - since >= THREAD_RECAP_AWAY_MS;
+}
