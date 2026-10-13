@@ -1,5 +1,6 @@
 import { type StaticScreenProps, useNavigation } from "@react-navigation/native";
 import { useAtomValue } from "@effect/atom-react";
+import { getSendAllQueuedRuns } from "@t3tools/client-runtime/state/thread-workflows";
 import type { ChatAttachment, EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { Image } from "expo-image";
@@ -71,6 +72,10 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
   const reorder = useAtomCommand(threadEnvironment.reorderQueuedRun, "reorder queued message");
   const promote = useAtomCommand(threadEnvironment.promoteQueuedRun, "promote queued message");
   const cancel = useAtomCommand(threadEnvironment.cancelQueuedRun, "remove queued message");
+  const sendAllQueued = useAtomCommand(
+    threadEnvironment.sendAllQueuedMessages,
+    "send all queued messages",
+  );
   const resume = useAtomCommand(threadEnvironment.resumeThreadQueue, "resume queue");
   const [resuming, setResuming] = useState(false);
   const [busyRunId, setBusyRunId] = useState<RunId | null>(null);
@@ -165,6 +170,26 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
     setBusyRunId(null);
   };
 
+  const sendAllCount = getSendAllQueuedRuns(queuedRuns).length;
+  const activeRun = workflow?.activeRun ?? null;
+  const canSendAll =
+    activeRun !== null && workflow?.canPromoteToSteer === true && sendAllCount >= 2;
+  const sendAll = async () => {
+    if (busyRef.current || activeRun === null || !canSendAll) return;
+    busyRef.current = true;
+    setBusyRunId(activeRun.id);
+    void Haptics.selectionAsync();
+    try {
+      await sendAllQueued({
+        ...target,
+        input: { threadId: target.threadId, targetRunId: activeRun.id },
+      });
+    } finally {
+      busyRef.current = false;
+      setBusyRunId(null);
+    }
+  };
+
   const canReorder = workflow?.canReorder === true && queuedRuns.length > 1;
   const sourceLayout = dragRows?.find((row) => row.id === draggedRunId);
   const lastLayout = dragRows?.at(-1);
@@ -203,6 +228,16 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
               busyRef.current = false;
               setResuming(false);
             }}
+          />
+        </View>
+      ) : null}
+      {canSendAll ? (
+        <View className="py-3">
+          <MaterialButton
+            label={`Send all ${sendAllCount} as one steer`}
+            tone="primary"
+            disabled={busyRunId !== null || draggedRunId !== null}
+            onPress={() => void sendAll()}
           />
         </View>
       ) : null}

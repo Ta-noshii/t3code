@@ -5,6 +5,7 @@ import {
   buildEarlierConversationTranscript,
   canForkProjectedAssistantItem,
   deriveThreadQueueWorkflowState,
+  getSendAllQueuedRuns,
   isCompactCommand,
   planEditInNewThread,
   resolveLatestMergeBackRun,
@@ -396,6 +397,25 @@ describe("commands that run as their own turn", () => {
     expect(runsAsOwnTurn("/logout ", [])).toBe(true);
     expect(runsAsOwnTurn("/logout", [{}])).toBe(false);
     expect(runsAsOwnTurn("Fix the parser", [])).toBe(false);
+  });
+});
+
+describe("send all queued messages", () => {
+  it("keeps queue order and leaves out messages that cannot join a steer", () => {
+    const queued = [
+      { text: "First", attachments: [] },
+      { text: "/compact", attachments: [] },
+      { text: "/goal ship it", attachments: [] },
+      { text: "/compact", attachments: [{}] },
+      { text: " /logout", attachments: [] },
+      { text: "Second", attachments: [] },
+    ];
+    expect(getSendAllQueuedRuns(queued).map(({ text }) => text)).toEqual([
+      "First",
+      "/compact",
+      "Second",
+    ]);
+    expect(getSendAllQueuedRuns(queued)[1]?.attachments).toHaveLength(1);
   });
 });
 

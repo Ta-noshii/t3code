@@ -126,6 +126,12 @@ const QueuePromoteTool = Tool.make("t3_queue_promote_to_steer", {
     "Deliver a queued message as steering to the specified active run. Existing provider and run-state rules apply.",
   parameters: Schema.Struct({ ...queueTarget, targetRunId: RunId }),
 }).annotate(Tool.Destructive, true);
+const QueueSendAllTool = Tool.make("t3_queue_send_all", {
+  ...commandTool,
+  description:
+    "Deliver every queued message as one steer to the specified active run, in queue order, with texts separated by a blank line and all attachments kept. Messages that must run as their own turn, such as /compact, stay queued. Omit threadId for this thread.",
+  parameters: Schema.Struct({ threadId: Schema.optional(ThreadId), targetRunId: RunId }),
+}).annotate(Tool.Destructive, true);
 
 const requestTarget = { threadId: Schema.optional(ThreadId), requestId: RuntimeRequestId };
 const question = Schema.Struct({
@@ -289,4 +295,5 @@ export const ThreadToolkit = Toolkit.make(
   QueueCancelTool,
   QueueReorderTool,
   QueuePromoteTool,
+  QueueSendAllTool,
 );

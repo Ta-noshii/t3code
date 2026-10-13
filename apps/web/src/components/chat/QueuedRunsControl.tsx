@@ -1,6 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   deriveThreadQueueWorkflowState,
+  getSendAllQueuedRuns,
   runsAsOwnTurn,
 } from "@t3tools/client-runtime/state/thread-workflows";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
@@ -86,6 +87,7 @@ export function QueuedRunsControl({
   const reorder = useAtomCommand(threadEnvironment.reorderQueuedRun);
   const promote = useAtomCommand(threadEnvironment.promoteQueuedRun);
   const resume = useAtomCommand(threadEnvironment.resumeThreadQueue);
+  const sendAllQueued = useAtomCommand(threadEnvironment.sendAllQueuedMessages);
   const cancel = useAtomCommand(threadEnvironment.cancelQueuedRun);
   const [expanded, setExpanded] = useState(true);
   const queueListId = useId();
@@ -194,6 +196,24 @@ export function QueuedRunsControl({
     setBusyRunId(null);
   };
 
+  const sendAllCount = getSendAllQueuedRuns(queued).length;
+  const canSendAll =
+    activeRun !== null && workflow?.canPromoteToSteer === true && sendAllCount >= 2;
+  const sendAll = async () => {
+    if (activeRun === null || !canSendAll || steerInFlightRef.current) return;
+    steerInFlightRef.current = true;
+    setBusyRunId(activeRun.id);
+    try {
+      await sendAllQueued({
+        environmentId: props.environmentId,
+        input: { threadId: props.threadId, targetRunId: activeRun.id },
+      });
+    } finally {
+      steerInFlightRef.current = false;
+      setBusyRunId(null);
+    }
+  };
+
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
       const next = queued[0];
@@ -240,19 +260,43 @@ export function QueuedRunsControl({
         data-chat-composer-collapsed-controls="true"
         className="relative z-0"
       >
-        <ComposerBanner.Row
-          render={<button type="button" />}
-          aria-label={expanded ? "Collapse queued messages" : "Expand queued messages"}
-          aria-expanded={expanded}
-          aria-controls={queueListId}
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={() => setExpanded((value) => !value)}
-        >
+        {/* The toggle stretches over the whole row so "Send all" can sit beside it. */}
+        <ComposerBanner.Row className="relative">
           <ComposerBanner.Icon>
             <ListOrderedIcon />
           </ComposerBanner.Icon>
-          <ComposerBanner.Content className="text-muted-foreground">Queued</ComposerBanner.Content>
+          <ComposerBanner.Content className="text-muted-foreground">
+            <button
+              type="button"
+              aria-label={expanded ? "Collapse queued messages" : "Expand queued messages"}
+              aria-expanded={expanded}
+              aria-controls={queueListId}
+              className="cursor-pointer text-start outline-none after:absolute after:inset-0 after:rounded-md focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ring"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => setExpanded((value) => !value)}
+            >
+              Queued
+            </button>
+          </ComposerBanner.Content>
           <ComposerBanner.Actions>
+            {canSendAll ? (
+              <Tooltip>
+                <TooltipTrigger render={<span className="relative z-1 flex shrink-0" />}>
+                  <Button
+                    size="xs"
+                    variant="ghost-muted"
+                    disabled={busyRunId !== null}
+                    onClick={() => void sendAll()}
+                  >
+                    <CornerUpRightIcon />
+                    Send all
+                  </Button>
+                </TooltipTrigger>
+                <TooltipPopup>
+                  {`Send ${sendAllCount} queued messages now as one steer`}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
             <ComposerBanner.Count>{items.length}</ComposerBanner.Count>
             <ComposerBanner.ToggleIcon expanded={expanded} />
           </ComposerBanner.Actions>

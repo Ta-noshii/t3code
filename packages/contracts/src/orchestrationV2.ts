@@ -2907,6 +2907,16 @@ export const OrchestrationV2Command = Schema.Union([
     queuedRunId: RunId,
     targetRunId: RunId,
   }),
+  /**
+   * Steers every queued user message into the target run as one message, in queue order.
+   * Messages that must run as their own turn, such as /compact, stay queued.
+   */
+  Schema.Struct({
+    type: Schema.Literal("queued-messages.send-all"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    targetRunId: RunId,
+  }),
   Schema.Struct({
     type: Schema.Literal("queue.resume"),
     commandId: CommandId,

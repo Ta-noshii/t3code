@@ -128,7 +128,11 @@ import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderSwitchServiceV2 } from "./ProviderSwitchService.ts";
-import { isAutomaticCompletionRun, queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
+import {
+  isAutomaticCompletionRun,
+  mergeQueuedMessages,
+  queuedRunsInDeliveryOrder,
+} from "./QueuedRunOrder.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
 import {
   endOrphanedNativeSubagent,
@@ -481,6 +485,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "subagent.stop":
     case "run.interrupt":
     case "queued-message.promote-to-steer":
+    case "queued-messages.send-all":
     case "queued-run.start":
     case "queue.resume":
     case "queued-run.reorder":
@@ -4104,7 +4109,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const dispatchSteerIntoRun = Effect.fn("Orchestrator.dispatchSteerIntoRun")(function* (input: {
     readonly command: Extract<
       OrchestrationV2Command,
-      { readonly type: "message.dispatch" | "queued-message.promote-to-steer" }
+      {
+        readonly type:
+          | "message.dispatch"
+          | "queued-message.promote-to-steer"
+          | "queued-messages.send-all";
+      }
     >;
     readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
     readonly effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>;
@@ -4324,9 +4334,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           type: "user_message",
           messageId: input.messageId,
           inputIntent:
-            input.command.type === "queued-message.promote-to-steer"
-              ? "promoted_queued_to_steer"
-              : "steer",
+            input.command.type === "message.dispatch" ? "steer" : "promoted_queued_to_steer",
           text: input.text,
           attachments: input.attachments,
           ...(input.context ? { context: input.context } : {}),
@@ -8156,6 +8164,125 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
   });
 
+  /**
+   * "Send all": cancels the queued user messages and steers them into the target run as
+   * one message, reusing the first message's id. Cancelling and steering commit together,
+   * so a run that ends mid-command fails it with the queue untouched.
+   */
+  const dispatchQueuedMessagesSendAll = Effect.fn("Orchestrator.dispatchQueuedMessagesSendAll")(
+    function* (
+      command: Extract<OrchestrationV2Command, { readonly type: "queued-messages.send-all" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+      effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+    ) {
+      const projection = yield* projectionStore
+        .getThreadRecords(
+          command.threadId,
+          [
+            "runs",
+            "nodes",
+            "attempts",
+            "messages",
+            "providerThreads",
+            "providerTurns",
+            "providerSessions",
+            "turnItems",
+            "runtimeRequests",
+            "subagents",
+          ],
+          { turnItemTypes: [], messageRoles: ["user"] },
+        )
+        .pipe(
+          Effect.mapError(() => new OrchestratorProjectionError({ threadId: command.threadId })),
+        );
+      if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} is not active.`,
+        });
+      }
+      // Automatic deliveries and messages that run as their own turn keep their places.
+      const sendable = queuedRunsInDeliveryOrder(projection).flatMap((run) => {
+        const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
+        const rootNode = projection.nodes.find((candidate) => candidate.id === run.rootNodeId);
+        const attempt = projection.attempts.find(
+          (candidate) => candidate.id === run.activeAttemptId,
+        );
+        if (
+          message === undefined ||
+          rootNode === undefined ||
+          attempt === undefined ||
+          message.delegatedCompletion !== undefined ||
+          message.notification !== undefined ||
+          isNativeMaintenanceCommand(message) ||
+          isGoalCommand(message)
+        ) {
+          return [];
+        }
+        return [{ run, message, rootNode, attempt }];
+      });
+      const first = sendable[0];
+      if (first === undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} has no queued messages that can be sent now.`,
+        });
+      }
+
+      const now = yield* DateTime.now;
+      const emitEvent = emit(events, command);
+      for (const { run, rootNode, attempt } of sendable) {
+        const scope = {
+          threadId: command.threadId,
+          runId: run.id,
+          nodeId: rootNode.id,
+          providerInstanceId: run.providerInstanceId,
+          occurredAt: now,
+        };
+        yield* emitEvent({
+          type: "run.updated",
+          ...scope,
+          payload: { ...run, status: "cancelled", queuePosition: null, completedAt: now },
+        });
+        yield* emitEvent({
+          type: "run-attempt.updated",
+          ...scope,
+          payload: { ...attempt, status: "cancelled", completedAt: now },
+        });
+        yield* emitEvent({
+          type: "node.updated",
+          ...scope,
+          payload: { ...rootNode, status: "cancelled", completedAt: now },
+        });
+      }
+
+      const merged = mergeQueuedMessages(sendable.map(({ message }) => message));
+      yield* dispatchSteerIntoRun({
+        command,
+        events,
+        effects,
+        projection,
+        modelSelection: projection.thread.modelSelection,
+        targetRunId: command.targetRunId,
+        messageId: first.message.id,
+        text: merged.text,
+        attachments: merged.attachments,
+        context: merged.context,
+        createdBy: first.message.createdBy,
+        creationSource: first.message.creationSource,
+        ...(first.message.scheduledTaskId === undefined
+          ? {}
+          : { scheduledTaskId: first.message.scheduledTaskId }),
+        ...(first.message.senderThreadId === undefined
+          ? {}
+          : { senderThreadId: first.message.senderThreadId }),
+        forceRestart: false,
+      });
+    },
+  );
+
   const dispatchQueuedRunReorder = Effect.fn("Orchestrator.dispatchQueuedRunReorder")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "queued-run.reorder" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -11571,6 +11698,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "queued-message.promote-to-steer":
         yield* dispatchQueuedMessagePromoteToSteer(command, events, effects);
+        break;
+      case "queued-messages.send-all":
+        yield* dispatchQueuedMessagesSendAll(command, events, effects);
         break;
       case "queued-run.start":
       case "queue.resume": {
