@@ -5,8 +5,9 @@
  * terminal-fallback agents run `t3 acp-mcp-call` per tool call, so their
  * startup sits on first-message latency. Both dispatch here before the full
  * CLI module graph (seconds of evaluation) loads, as does `t3 secret prompt`,
- * which must report quickly when it cannot show a card. Everything else
- * defers to the real CLI in ./binCli.ts.
+ * which must report quickly when it cannot show a card, and the long-running
+ * `t3 bar-bridge` for the Omarchy bar, which needs none of the CLI. Everything
+ * else defers to the real CLI in ./binCli.ts.
  */
 import { isEntrypoint } from "./entrypoint.ts";
 
@@ -24,6 +25,9 @@ if (
   } else if (command === "secret") {
     const { runSecretCliFastPath } = await import("./secrets/secretPromptCli.ts");
     await runSecretCliFastPath(process.argv.slice(3));
+  } else if (command === "bar-bridge") {
+    const { runBarBridge } = await import("./barBridge/bridge.ts");
+    await runBarBridge();
   } else {
     // A server started from an agent shell must not pass that shell's thread
     // credential on to its own agents.
