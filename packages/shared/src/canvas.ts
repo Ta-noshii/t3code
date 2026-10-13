@@ -50,7 +50,7 @@ export function canvasSlug(title: string): string {
 }
 
 /** "auth-flow_v2" → "Auth flow v2", for files that carry no title. */
-export function canvasTitleFromName(name: string): string {
+function canvasTitleFromName(name: string): string {
   const words = name.replace(/[-_]+/gu, " ").trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Untitled";
 }
@@ -239,22 +239,6 @@ export function mergeCanvasElements(input: {
   return merged;
 }
 
-/** Whether two element lists hold the same versions of the same elements. */
-export function sameCanvasElements(
-  left: ReadonlyArray<CanvasElement>,
-  right: ReadonlyArray<CanvasElement>,
-): boolean {
-  if (left.length !== right.length) return false;
-  return left.every((element, index) => {
-    const other = right[index]!;
-    return (
-      element.id === other.id &&
-      version(element) === version(other) &&
-      nonce(element) === nonce(other)
-    );
-  });
-}
-
 // Screenshot geometry. Scene units are Excalidraw's canvas coordinates.
 
 function num(value: unknown): number {
@@ -319,7 +303,7 @@ export function unionCanvasRects(rects: ReadonlyArray<CanvasRect>): CanvasRect |
 
 export class CanvasCropError extends Error {}
 
-export const CANVAS_SCREENSHOT_DEFAULT_PADDING = 24;
+const CANVAS_SCREENSHOT_DEFAULT_PADDING = 24;
 // A small crop is enlarged at most this much, so a single shape does not
 // come back as a blurry 1600 px blow-up.
 const MAX_AUTO_SCALE = 3;

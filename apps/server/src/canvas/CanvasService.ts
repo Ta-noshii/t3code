@@ -166,7 +166,7 @@ export interface CanvasReadFull {
 }
 
 /** Full element JSON is refused past this many characters; pass ids instead. */
-export const CANVAS_FULL_READ_MAX_CHARS = 200_000;
+const CANVAS_FULL_READ_MAX_CHARS = 200_000;
 
 /** An agent tool named no canvas and the thread has not used one yet. */
 export class CanvasNoCurrentError extends Schema.TaggedError<CanvasNoCurrentError>()(
