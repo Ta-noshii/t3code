@@ -131,6 +131,10 @@
       "types": "./src/state/attachments.ts",
       "default": "./src/state/attachments.ts"
     },
+    "./state/canvas": {
+      "types": "./src/state/canvas.ts",
+      "default": "./src/state/canvas.ts"
+    },
     "./text-paste": {
       "types": "./src/textPaste.ts",
       "default": "./src/textPaste.ts"

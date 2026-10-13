@@ -505,6 +505,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["git submodule init recursive top-level none worktree t3.json"],
   },
   {
+    id: "canvas-folder",
+    title: "Canvas folder",
+    to: "/settings/general",
+    scope: "project-defaults",
+    searchTerms: ["excalidraw canvases diagrams drawing folder t3.json"],
+  },
+  {
     id: "start-from-origin",
     title: "Start from origin",
     to: "/settings/general",
