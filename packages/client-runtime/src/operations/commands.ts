@@ -233,6 +233,10 @@ export interface PromoteQueuedRunInput extends ThreadCommandInput {
   readonly targetRunId: RunId;
 }
 
+export interface SendAllQueuedMessagesInput extends ThreadCommandInput {
+  readonly targetRunId: RunId;
+}
+
 export interface CancelQueuedRunInput extends ThreadCommandInput {
   readonly runId: RunId;
 }
@@ -1011,6 +1015,17 @@ export const promoteQueuedRun = Effect.fn("EnvironmentCommands.promoteQueuedRun"
     targetRunId: input.targetRunId,
   });
 });
+
+export const sendAllQueuedMessages = Effect.fn("EnvironmentCommands.sendAllQueuedMessages")(
+  function* (input: SendAllQueuedMessagesInput) {
+    return yield* dispatch({
+      type: "queued-messages.send-all",
+      commandId: yield* allocateCommandId(input),
+      threadId: input.threadId,
+      targetRunId: input.targetRunId,
+    });
+  },
+);
 
 export const cancelQueuedRun = Effect.fn("EnvironmentCommands.cancelQueuedRun")(function* (
   input: CancelQueuedRunInput,

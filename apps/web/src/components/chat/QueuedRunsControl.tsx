@@ -1,6 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   deriveThreadQueueWorkflowState,
+  getSendAllQueuedRuns,
   runsAsOwnTurn,
 } from "@t3tools/client-runtime/state/thread-workflows";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
@@ -19,6 +20,7 @@ import {
   CalendarClockIcon,
   ChevronDownIcon,
   Clock3Icon,
+  CornerUpRightIcon,
   MessagesSquareIcon,
   PencilIcon,
   XIcon,
@@ -98,6 +100,7 @@ export function QueuedRunsControl({
   )?.projection;
   const promote = useAtomCommand(threadEnvironment.promoteQueuedRun);
   const resume = useAtomCommand(threadEnvironment.resumeThreadQueue);
+  const sendAllQueued = useAtomCommand(threadEnvironment.sendAllQueuedMessages);
   const cancel = useAtomCommand(threadEnvironment.cancelQueuedRun);
   const [showAll, setShowAll] = useState(false);
   const queueListId = useId();
@@ -182,6 +185,27 @@ export function QueuedRunsControl({
     setBusyRunId(null);
   };
 
+  const sendAllCount = getSendAllQueuedRuns(queued).length;
+  const canSendAll =
+    activeRun !== null &&
+    workflow?.canPromoteToSteer === true &&
+    !workflow.promoteSkipsCompaction &&
+    sendAllCount >= 2;
+  const sendAll = async () => {
+    if (activeRun === null || !canSendAll || steerInFlightRef.current) return;
+    steerInFlightRef.current = true;
+    setBusyRunId(activeRun.id);
+    try {
+      await sendAllQueued({
+        environmentId: props.environmentId,
+        input: { threadId: props.threadId, targetRunId: activeRun.id },
+      });
+    } finally {
+      steerInFlightRef.current = false;
+      setBusyRunId(null);
+    }
+  };
+
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
       const next = queued[0];
@@ -239,6 +263,24 @@ export function QueuedRunsControl({
       <span className="sr-only" aria-live="polite">
         {items.length} queued
       </span>
+      {canSendAll ? (
+        <div className="flex justify-end">
+          <Tooltip>
+            <TooltipTrigger render={<span className="flex shrink-0" />}>
+              <Button
+                size="xs"
+                variant="ghost-muted"
+                disabled={busyRunId !== null}
+                onClick={() => void sendAll()}
+              >
+                <CornerUpRightIcon />
+                Send all {sendAllCount}
+              </Button>
+            </TooltipTrigger>
+            <TooltipPopup>{`Send ${sendAllCount} queued messages now as one steer`}</TooltipPopup>
+          </Tooltip>
+        </div>
+      ) : null}
       <ol className="flex flex-col items-end gap-3" id={queueListId}>
         {visibleItems.map((item, position) => {
           const previewText = assistantCitationsToPlainText(

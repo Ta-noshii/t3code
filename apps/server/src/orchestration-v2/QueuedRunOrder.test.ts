@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
+import { mergeQueuedMessages, queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
 
 describe("queued run delivery order", () => {
   it("keeps automatic completion delivery ahead of visible queued messages", () => {
@@ -47,5 +47,36 @@ describe("queued run delivery order", () => {
       "run:visible-first",
       "run:visible-second",
     ]);
+  });
+});
+
+describe("merging queued messages", () => {
+  const image = (id: string) =>
+    ({ type: "image", id, name: `${id}.png`, mimeType: "image/png", sizeBytes: 1 }) as const;
+  const mention = (contextId: string) =>
+    ({ contextId, kind: "mention", label: contextId, path: `src/${contextId}.ts` }) as never;
+
+  it("joins texts in order with a blank line and keeps every attachment", () => {
+    const merged = mergeQueuedMessages([
+      { text: "First\n", attachments: [image("a")] },
+      { text: "   ", attachments: [image("b")] },
+      { text: "Second", attachments: [image("c"), image("a")] },
+    ]);
+    expect(merged.text).toBe("First\n\nSecond");
+    expect(merged.attachments.map((attachment) => attachment.id)).toEqual(["a", "b", "c"]);
+    expect(merged).not.toHaveProperty("context");
+  });
+
+  it("carries each message's context records once", () => {
+    const merged = mergeQueuedMessages([
+      { text: "One", attachments: [], context: { version: 1, records: [mention("x")] } },
+      { text: "Two", attachments: [] },
+      {
+        text: "Three",
+        attachments: [],
+        context: { version: 1, records: [mention("y"), mention("x")] },
+      },
+    ]);
+    expect(merged.context?.records.map((record) => record.contextId)).toEqual(["x", "y"]);
   });
 });
