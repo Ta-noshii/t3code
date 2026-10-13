@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   canvasHostUrl,
   canvasNativeMessageScript,
+  isCanvasHostOrigin,
   isCanvasHostUrl,
   readCanvasPageMessage,
 } from "./canvasHostProtocol";
@@ -19,6 +20,17 @@ describe("canvas host protocol", () => {
     expect(isCanvasHostUrl(`${host}#x`, host)).toBe(true);
     expect(isCanvasHostUrl("https://abc.t3.dev/canvas-host.html.evil.com/", host)).toBe(false);
     expect(isCanvasHostUrl("https://abc.t3.dev/", host)).toBe(false);
+  });
+
+  it("takes messages from the host page's origin only", () => {
+    const host = "https://abc.t3.dev/canvas-host.html";
+    // Android passes the origin, iOS the page URL.
+    expect(isCanvasHostOrigin("https://abc.t3.dev", host)).toBe(true);
+    expect(isCanvasHostOrigin(host, host)).toBe(true);
+    expect(isCanvasHostOrigin("https://ABC.t3.dev/", host)).toBe(true);
+    expect(isCanvasHostOrigin("https://abc.t3.dev.evil.com", host)).toBe(false);
+    expect(isCanvasHostOrigin("http://abc.t3.dev", host)).toBe(false);
+    expect(isCanvasHostOrigin("about:blank", host)).toBe(false);
   });
 
   it("reads page messages and drops anything else", () => {
