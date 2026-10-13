@@ -1359,7 +1359,7 @@ export const CODEX_THREAD_CONFIG = {
 // that limit so the server's own wait timeout ends a long call.
 const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 
-function codexThreadRuntimeParams(input: {
+export function codexThreadRuntimeParams(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly modelSelection?: { readonly model: string };
   readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
@@ -1386,6 +1386,15 @@ function codexThreadRuntimeParams(input: {
               },
             },
           }),
+      // One app-server serves every thread of an instance, so the agent shell
+      // variables go per thread into the shell policy, not the process env.
+      // Dotted keys add to the user's policy instead of replacing it.
+      ...Object.fromEntries(
+        Object.entries(mcpSession?.agentShellEnvironment ?? {}).map(([name, value]) => [
+          `shell_environment_policy.set.${name}`,
+          value,
+        ]),
+      ),
     },
   };
 }

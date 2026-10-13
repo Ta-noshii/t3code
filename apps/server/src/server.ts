@@ -65,6 +65,7 @@ import * as ProviderInstanceRegistryHydration from "./provider/ProviderInstanceR
 import * as ProjectSettingsOverrideSweep from "./provider/ProjectSettingsOverrideSweep.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
+import * as SecretPromptHttp from "./secrets/SecretPromptHttp.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
@@ -708,6 +709,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerOtlpTracesProxyRoute,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
+    SecretPromptHttp.layer,
     DeviceHubProxy.layer,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,

@@ -33,6 +33,14 @@ export interface McpSessionRegistryShape {
   readonly resolve: (
     rawToken: string,
   ) => Effect.Effect<McpInvocationContext.McpThreadInvocationScope | undefined>;
+  /**
+   * Resolves the agent shell token issued beside an MCP credential. It only
+   * opens shell-facing routes such as `t3 secret prompt`, never `/mcp`, so a
+   * script the agent runs cannot reach the `t3-code` toolkits with it.
+   */
+  readonly resolveShell: (
+    rawToken: string,
+  ) => Effect.Effect<McpInvocationContext.McpThreadInvocationScope | undefined>;
   readonly touch: (threadId: ThreadId) => Effect.Effect<void>;
   readonly revokeProviderSession: (providerSessionId: string) => Effect.Effect<void>;
   readonly revokeThread: (threadId: ThreadId) => Effect.Effect<void>;
@@ -46,6 +54,8 @@ export class McpSessionRegistry extends Context.Service<
 
 interface CredentialRecord {
   readonly tokenHash: string;
+  /** `mcp` opens `/mcp`; `shell` opens only the agent shell routes. */
+  readonly kind: "mcp" | "shell";
   readonly scope: McpInvocationContext.McpThreadInvocationScope;
   readonly lastAliveAt: number;
 }
@@ -71,6 +81,14 @@ const bytesToHex = (bytes: Uint8Array): string =>
 
 const tokenFromBytes = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
 
+/**
+ * Variables every provider puts in its agent's shell so `t3 secret prompt`
+ * can reach this server as the agent's thread. The names avoid KEY, SECRET
+ * and TOKEN, which Codex strips from shell environments by default.
+ */
+const [AGENT_SHELL_THREAD_ID_ENV, AGENT_SHELL_URL_ENV, AGENT_SHELL_AUTHORIZATION_ENV] =
+  McpProviderSession.AGENT_SHELL_ENVIRONMENT_NAMES;
+
 const getHttpMcpEndpointHost = (address: NetAddress.IpAddress): string =>
   NetAddress.isUnspecified(address)
     ? "127.0.0.1"
@@ -86,9 +104,10 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   const state = yield* SynchronizedRef.make<RegistryState>({ records: new Map() });
   const currentTimeMillis = options.now ? Effect.sync(options.now) : Clock.currentTimeMillis;
   const livenessWindowMs = options.livenessWindowMs ?? DEFAULT_LIVENESS_WINDOW_MS;
-  const endpoint = NetAddress.isInetAddress(httpServer.address)
-    ? `http://${getHttpMcpEndpointHost(httpServer.address.address)}:${httpServer.address.port}/mcp`
-    : "http://127.0.0.1/mcp";
+  const origin = NetAddress.isInetAddress(httpServer.address)
+    ? `http://${getHttpMcpEndpointHost(httpServer.address.address)}:${httpServer.address.port}`
+    : "http://127.0.0.1";
+  const endpoint = `${origin}/mcp`;
 
   const hashToken = (token: string) =>
     crypto
@@ -101,6 +120,10 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       const providerSessionId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
       const rawToken = yield* crypto.randomBytes(32).pipe(Effect.map(tokenFromBytes), Effect.orDie);
       const tokenHash = yield* hashToken(rawToken);
+      const rawShellToken = yield* crypto
+        .randomBytes(32)
+        .pipe(Effect.map(tokenFromBytes), Effect.orDie);
+      const shellTokenHash = yield* hashToken(rawShellToken);
       const browserToolsAvailable = request.browserToolsAvailable ?? true;
       const scope: McpInvocationContext.McpThreadInvocationScope = {
         environmentId,
@@ -121,7 +144,13 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       };
       yield* SynchronizedRef.update(state, ({ records }) => {
         const next = new Map(records);
-        next.set(tokenHash, { tokenHash, scope, lastAliveAt: issuedAt });
+        next.set(tokenHash, { tokenHash, kind: "mcp", scope, lastAliveAt: issuedAt });
+        next.set(shellTokenHash, {
+          tokenHash: shellTokenHash,
+          kind: "shell",
+          scope,
+          lastAliveAt: issuedAt,
+        });
         return { records: next };
       });
       return {
@@ -134,27 +163,41 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           authorizationHeader: `Bearer ${rawToken}`,
           browserToolsAvailable: scope.capabilities.has("preview"),
           capabilities: scope.capabilities,
+          agentShellEnvironment: {
+            [AGENT_SHELL_THREAD_ID_ENV]: scope.thread.threadId,
+            [AGENT_SHELL_URL_ENV]: origin,
+            [AGENT_SHELL_AUTHORIZATION_ENV]: `Bearer ${rawShellToken}`,
+          },
         },
       };
     },
   );
 
-  const resolve: McpSessionRegistryShape["resolve"] = Effect.fn("McpSessionRegistry.resolve")(
-    function* (rawToken) {
+  const resolveKind = (kind: CredentialRecord["kind"], rawToken: string) =>
+    Effect.gen(function* () {
       if (rawToken.length === 0) return undefined;
       const tokenHash = yield* hashToken(rawToken);
       const timestamp = yield* currentTimeMillis;
       return yield* SynchronizedRef.modify(state, ({ records }) => {
         const record = records.get(tokenHash);
-        if (!record || timestamp - record.lastAliveAt > livenessWindowMs) {
+        if (!record || record.kind !== kind || timestamp - record.lastAliveAt > livenessWindowMs) {
           return [undefined, { records }] as const;
         }
         const next = new Map(records);
         next.set(tokenHash, { ...record, lastAliveAt: timestamp });
         return [record.scope, { records: next }] as const;
       });
+    });
+  const resolve: McpSessionRegistryShape["resolve"] = Effect.fn("McpSessionRegistry.resolve")(
+    function* (rawToken) {
+      return yield* resolveKind("mcp", rawToken);
     },
   );
+  const resolveShell: McpSessionRegistryShape["resolveShell"] = Effect.fn(
+    "McpSessionRegistry.resolveShell",
+  )(function* (rawToken) {
+    return yield* resolveKind("shell", rawToken);
+  });
 
   const touch: McpSessionRegistryShape["touch"] = Effect.fn("McpSessionRegistry.touch")(
     function* (threadId) {
@@ -179,6 +222,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
   return McpSessionRegistry.of({
     issue,
     resolve,
+    resolveShell,
     touch,
     revokeProviderSession: Effect.fn("McpSessionRegistry.revokeProviderSession")(
       function* (providerSessionId) {

@@ -3,12 +3,21 @@
  * one-use SecretRef; orchestration only records the request and its status.
  * A tool that needs the value takes the ref and consumes it, so the value
  * never reaches the transcript, projections, clients, or model context.
+ *
+ * A prompt from a process in the agent's shell (`t3 secret prompt`) shows the
+ * same card, but the answer goes back to that waiting process through memory
+ * and is never stored. Withdrawing the prompt closes the card as cancelled.
  */
 import {
   CommandId,
   SecretRef,
   SecretRequestError,
+  TurnItemId,
+  type NodeId,
+  type OrchestrationV2SecretPrompt,
   type ProjectId,
+  type ProviderInstanceId,
+  type RunId,
   type SecretRequestAnswerInput,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -17,10 +26,14 @@ import * as NodeCrypto from "node:crypto";
 
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -49,6 +62,53 @@ const StoredSecret = Schema.fromJsonString(
 const encodeStored = Schema.encodeEffect(StoredSecret);
 const decodeStored = Schema.decodeUnknownOption(StoredSecret);
 
+/** A shell prompt waits this long for the user before it closes the card. */
+export const SECRET_PROMPT_TIMEOUT_MS = 15 * 60 * 1000;
+
+export interface SecretPromptInput {
+  readonly threadId: ThreadId;
+  /** The provider the asking shell belongs to; the run must be its. */
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly title: string;
+  readonly description: string;
+  readonly shellPrompt: OrchestrationV2SecretPrompt;
+  readonly timeoutMs?: number;
+}
+
+/** How a shell prompt ended. Only `saved` carries the value. */
+export type SecretPromptOutcome =
+  | { readonly status: "saved"; readonly value: string }
+  | { readonly status: "declined" | "cancelled" | "timed_out" };
+
+/** The card is shown; `outcome` waits for the answer, `withdraw` closes the card. */
+export interface SecretPromptHandle {
+  readonly turnItemId: TurnItemId;
+  readonly outcome: Effect.Effect<SecretPromptOutcome>;
+  readonly withdraw: Effect.Effect<void>;
+}
+
+/** A shell prompt could not be shown: the thread has no run the shell belongs to. */
+export class SecretPromptUnavailableError extends Data.TaggedError("SecretPromptUnavailableError")<{
+  readonly reason: "no_active_run" | "record_failed";
+  readonly cause?: unknown;
+}> {}
+
+type ShellAnswer =
+  | { readonly type: "save"; readonly secret: string }
+  | { readonly type: "decline" };
+
+/**
+ * One open shell prompt. `answering` holds it while the answer is recorded,
+ * so a withdraw in that window leaves the outcome to the answer.
+ */
+interface ShellPromptWaiter {
+  readonly state: Ref.Ref<"open" | "answering" | "withdrawn" | "closed">;
+  readonly answer: Deferred.Deferred<ShellAnswer>;
+  readonly record: (
+    status: "saved" | "declined" | "cancelled",
+  ) => Effect.Effect<void, SecretRequestError>;
+}
+
 export class SecretRequests extends Context.Service<
   SecretRequests,
   {
@@ -61,6 +121,13 @@ export class SecretRequests extends Context.Service<
       readonly ref: SecretRef;
       readonly projectId: ProjectId;
     }) => Effect.Effect<string, SecretRequestError>;
+    /**
+     * Shows a card for a process in the agent's shell and returns once it is
+     * recorded. The value reaches only `outcome`; nothing stores it.
+     */
+    readonly prompt: (
+      input: SecretPromptInput,
+    ) => Effect.Effect<SecretPromptHandle, SecretPromptUnavailableError>;
   }
 >()("t3/secrets/SecretRequests") {}
 
@@ -72,6 +139,139 @@ const make = Effect.gen(function* () {
   const salt = Buffer.from(
     yield* store.getOrCreateRandom("secret-request-salt", 32).pipe(Effect.orDie),
   ).toString("hex");
+
+  // Open shell prompts by turn item. Memory only: after a restart the asking
+  // process has lost its connection, and recovery closes the card.
+  const shellPrompts = new Map<TurnItemId, ShellPromptWaiter>();
+
+  const answerShellPrompt = (turnItemId: TurnItemId, reply: ShellAnswer) =>
+    Effect.gen(function* () {
+      const waiter = shellPrompts.get(turnItemId);
+      const claimed =
+        waiter === undefined
+          ? "missing"
+          : yield* Ref.modify(waiter.state, (state) =>
+              state === "open" ? (["claimed", "answering"] as const) : ([state, state] as const),
+            );
+      if (waiter === undefined || claimed !== "claimed") {
+        return yield* new SecretRequestError({
+          reason:
+            claimed === "answering" || claimed === "closed" ? "already_answered" : "agent_stopped",
+        });
+      }
+      const recorded = yield* waiter
+        .record(reply.type === "save" ? "saved" : "declined")
+        .pipe(Effect.exit);
+      if (recorded._tag === "Failure") {
+        // The card still says pending; reopen it for another try unless the
+        // process went away meanwhile, which closes it instead.
+        const next = yield* Ref.modify(waiter.state, (state) =>
+          state === "withdrawn" ? (["withdrawn", "closed"] as const) : (["open", "open"] as const),
+        );
+        if (next === "withdrawn") {
+          shellPrompts.delete(turnItemId);
+          yield* waiter.record("cancelled").pipe(Effect.ignore);
+        }
+        return yield* recorded;
+      }
+      yield* Ref.set(waiter.state, "closed");
+      shellPrompts.delete(turnItemId);
+      yield* Deferred.succeed(waiter.answer, reply);
+    });
+
+  const prompt: SecretRequests["Service"]["prompt"] = (input) =>
+    Effect.gen(function* () {
+      const records = yield* threadManagement
+        .getThreadRecords(input.threadId, ["runs"], { turnItemTypes: [], messageRoles: [] })
+        .pipe(
+          Effect.mapError(
+            (cause) => new SecretPromptUnavailableError({ reason: "no_active_run", cause }),
+          ),
+        );
+      // The card belongs to the run whose shell asked, as with request_secret.
+      const run = ThreadManagementService.latestActiveRun(records);
+      if (
+        run === undefined ||
+        run.rootNodeId === null ||
+        run.providerInstanceId !== input.providerInstanceId
+      ) {
+        return yield* new SecretPromptUnavailableError({ reason: "no_active_run" });
+      }
+      const runId: RunId = run.id;
+      const nodeId: NodeId = run.rootNodeId;
+      const key = NodeCrypto.randomUUID();
+      const turnItemId = TurnItemId.make(`turn-item:secret-prompt:${key}`);
+      const record = (secretStatus: "pending" | "saved" | "declined" | "cancelled") =>
+        threadManagement
+          .dispatch({
+            type: "secret_request.record",
+            commandId: CommandId.make(`secret-prompt:${key}:${secretStatus}`),
+            threadId: input.threadId,
+            runId,
+            nodeId,
+            turnItemId,
+            label: input.title,
+            reason: input.description,
+            shellPrompt: input.shellPrompt,
+            secretStatus,
+          })
+          .pipe(
+            Effect.mapError((cause) => new SecretRequestError({ reason: "record_failed", cause })),
+          );
+      const waiter: ShellPromptWaiter = {
+        state: yield* Ref.make<"open" | "answering" | "withdrawn" | "closed">("open"),
+        answer: yield* Deferred.make<ShellAnswer>(),
+        record,
+      };
+      shellPrompts.set(turnItemId, waiter);
+      yield* record("pending").pipe(
+        Effect.mapError(
+          (cause) => new SecretPromptUnavailableError({ reason: "record_failed", cause }),
+        ),
+        Effect.tapError(() => Effect.sync(() => shellPrompts.delete(turnItemId))),
+      );
+
+      const withdraw = Effect.gen(function* () {
+        const previous = yield* Ref.modify(waiter.state, (state) =>
+          state === "open"
+            ? (["open", "closed"] as const)
+            : state === "answering"
+              ? (["answering", "withdrawn"] as const)
+              : ([state, state] as const),
+        );
+        if (previous !== "open") return;
+        shellPrompts.delete(turnItemId);
+        yield* record("cancelled").pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Could not close a secret prompt card", { cause }),
+          ),
+        );
+      }).pipe(Effect.uninterruptible);
+
+      const toOutcome = (reply: ShellAnswer): SecretPromptOutcome =>
+        reply.type === "save" ? { status: "saved", value: reply.secret } : { status: "declined" };
+      const outcome: Effect.Effect<SecretPromptOutcome> = Deferred.await(waiter.answer).pipe(
+        Effect.timeoutOption(Duration.millis(input.timeoutMs ?? SECRET_PROMPT_TIMEOUT_MS)),
+        Effect.flatMap((answered) =>
+          Option.isSome(answered)
+            ? Effect.succeed(toOutcome(answered.value))
+            : Effect.gen(function* () {
+                yield* withdraw;
+                // An answer already being recorded when time ran out still wins.
+                if ((yield* Ref.get(waiter.state)) !== "withdrawn") {
+                  return { status: "timed_out" } as const;
+                }
+                const late = yield* Deferred.await(waiter.answer).pipe(
+                  Effect.timeoutOption(Duration.seconds(10)),
+                );
+                return Option.isSome(late)
+                  ? toOutcome(late.value)
+                  : ({ status: "timed_out" } as const);
+              }),
+        ),
+      );
+      return { turnItemId, outcome, withdraw };
+    }).pipe(Effect.withSpan("SecretRequests.prompt"));
 
   const answer: SecretRequests["Service"]["answer"] = Effect.fn("SecretRequests.answer")(
     function* (input) {
@@ -92,6 +292,11 @@ const make = Effect.gen(function* () {
       if (item.secretStatus !== "pending") {
         return yield* new SecretRequestError({ reason: "already_answered" });
       }
+      // A shell prompt's liveness is its waiting process, not the run: a
+      // background command can outlive the turn that started it.
+      if (item.shellPrompt !== undefined) {
+        return yield* answerShellPrompt(item.id, input.answer);
+      }
       const run = records.runs.find((candidate) => candidate.id === item.runId);
       if (run === undefined || ThreadManagementService.isTerminalRunStatus(run.status)) {
         return yield* new SecretRequestError({ reason: "agent_stopped" });
@@ -103,7 +308,7 @@ const make = Effect.gen(function* () {
       if (input.answer.type === "save") {
         const encoded = yield* encodeStored({
           projectId: records.thread.projectId,
-          value: input.answer.secret,
+          value: input.answer.secret.trim(),
           savedAt: yield* Clock.currentTimeMillis,
         }).pipe(Effect.orDie);
         yield* store
@@ -248,7 +453,7 @@ const make = Effect.gen(function* () {
     Effect.forkScoped,
   );
 
-  return SecretRequests.of({ answer, savedRef, consume });
+  return SecretRequests.of({ answer, savedRef, consume, prompt });
 });
 
 export const layer = Layer.effect(SecretRequests, make);

@@ -1,16 +1,17 @@
 import * as Schema from "effect/Schema";
 
-import { ThreadId, TrimmedNonEmptyString, TurnItemId } from "./baseSchemas.ts";
+import { NonBlankString, ThreadId, TurnItemId } from "./baseSchemas.ts";
 
 /**
- * A saved value is kept by the server under a one-use SecretRef; the thread
- * learns only the status.
+ * A saved value is kept by the server under a one-use SecretRef, or handed to the
+ * shell process that asked; the thread learns only the status. The value arrives
+ * exactly as typed: the ref store trims it, a shell prompt keeps it (passwords).
  */
 export const SecretRequestAnswerInput = Schema.Struct({
   threadId: ThreadId,
   turnItemId: TurnItemId,
   answer: Schema.Union([
-    Schema.Struct({ type: Schema.Literal("save"), secret: TrimmedNonEmptyString }),
+    Schema.Struct({ type: Schema.Literal("save"), secret: NonBlankString }),
     Schema.Struct({ type: Schema.Literal("decline") }),
   ]),
 });

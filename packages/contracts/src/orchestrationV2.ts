@@ -1338,11 +1338,23 @@ export const OrchestrationV2SecretRequestStatus = Schema.Literals([
 ]);
 export type OrchestrationV2SecretRequestStatus = typeof OrchestrationV2SecretRequestStatus.Type;
 
+/**
+ * Set when a process in the agent's shell asked (`t3 secret prompt`): the
+ * value goes back to that waiting process instead of the server's ref store.
+ * `sudo` asks for the password to run the command in the request's reason.
+ */
+export const OrchestrationV2SecretPrompt = Schema.Struct({
+  kind: Schema.Literals(["sudo", "secret"]),
+  multiline: Schema.Boolean,
+});
+export type OrchestrationV2SecretPrompt = typeof OrchestrationV2SecretPrompt.Type;
+
 const OrchestrationV2SecretRequestFields = {
   type: Schema.Literal("secret_request"),
   label: TrimmedNonEmptyString,
   reason: Schema.String,
   placeholder: Schema.optional(Schema.String),
+  shellPrompt: Schema.optional(OrchestrationV2SecretPrompt),
   secretStatus: OrchestrationV2SecretRequestStatus,
 } as const;
 
@@ -3092,6 +3104,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     label: TrimmedNonEmptyString,
     reason: Schema.String,
     placeholder: Schema.optional(Schema.String),
+    shellPrompt: Schema.optional(OrchestrationV2SecretPrompt),
     secretStatus: OrchestrationV2SecretRequestStatus,
   }),
 ]);
