@@ -68,6 +68,7 @@ import { useProject, useThreadShells } from "../../state/entities";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 import { ComposerAttachmentButton } from "../../components/ComposerAttachmentButton";
 import {
   ComposerAttachmentStrip,
@@ -180,6 +181,8 @@ export interface ThreadComposerProps {
     readonly saving: boolean;
     readonly onRemoveExistingAttachment: (attachmentId: string) => void;
   } | null;
+  /** The provider's guess at the next prompt, offered while the composer is empty. */
+  readonly promptSuggestion?: string | null;
   /** The user's configured behavior for a message sent during a running turn. */
   readonly followUpBehavior: FollowUpBehavior;
   /** Whether the live turn can actually be steered by this provider. */
@@ -773,6 +776,17 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     [navigation, settingsSheetPresentation.onStackTransitionsFinished],
   );
 
+  // Only an idle, empty composer offers the suggestion; tapping it fills the draft.
+  const offeredPromptSuggestion =
+    props.promptSuggestion &&
+    !props.activeThreadBusy &&
+    props.draftMessage.trim().length === 0 &&
+    props.draftAttachments.length === 0 &&
+    queuedEdit === null &&
+    !voiceInput.isBusy
+      ? props.promptSuggestion
+      : null;
+
   return (
     <Animated.View
       className="px-[12px]"
@@ -836,6 +850,28 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         {modelUnavailable ? (
           <Pressable accessibilityRole="button" className="px-3 py-2" onPress={openSettings}>
             <Text className="text-xs text-foreground">Model unavailable. Open model settings.</Text>
+          </Pressable>
+        ) : null}
+
+        {offeredPromptSuggestion ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Use suggestion: ${offeredPromptSuggestion}`}
+            className="mb-1.5 max-w-full flex-row items-center gap-1.5 self-start rounded-full border border-border bg-card px-3 py-1.5 active:bg-subtle"
+            onPress={() => {
+              props.onChangeDraftMessage(offeredPromptSuggestion);
+              inputRef.current?.focus();
+            }}
+          >
+            <SymbolView
+              name={{ ios: "sparkles", android: "auto_awesome" }}
+              size={12}
+              tintColorClassName="accent-foreground-muted"
+              type="monochrome"
+            />
+            <Text numberOfLines={2} className="min-w-0 shrink text-sm text-foreground-muted">
+              {offeredPromptSuggestion}
+            </Text>
           </Pressable>
         ) : null}
 

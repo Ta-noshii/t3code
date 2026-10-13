@@ -3,9 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { orchestrationEnvironment } from "~/state/orchestration";
 import { useEnvironmentQuery } from "~/state/query";
-
-/** How long a thread has to be out of view before coming back to it earns a recap. */
-export const THREAD_RECAP_AWAY_MS = 5 * 60_000;
+import { shouldRecapThread } from "@t3tools/client-runtime/state/thread-execution";
 
 // Window-lifetime state, keyed by environment and thread (and run for recaps). A thread
 // with no last-seen entry counts from its latest run's completion instead.
@@ -26,18 +24,6 @@ export interface ThreadRecapInput {
   /** No turn running and nothing waiting on the user. */
   readonly idle: boolean;
   readonly supported: boolean;
-}
-
-/** Whether a user returning now, after last seeing the thread at `lastSeenAt`, should get a recap. */
-export function shouldRecapThread(input: {
-  readonly now: number;
-  readonly lastSeenAt: number | undefined;
-  readonly completedAt: string | null;
-  readonly idle: boolean;
-}): boolean {
-  if (!input.idle || input.completedAt === null) return false;
-  const since = input.lastSeenAt ?? Date.parse(input.completedAt);
-  return Number.isFinite(since) && input.now - since >= THREAD_RECAP_AWAY_MS;
 }
 
 /**

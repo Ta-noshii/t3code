@@ -2359,7 +2359,10 @@ it.each(["First paragraph.\n\nSecond paragraph.", ""])(
     if (text) {
       expect(rows.find((row) => row.type === "work-toggle")).toMatchObject({
         summary: "Thinking",
-        thought: "First paragraph.",
+        trail: {
+          hiddenCount: 0,
+          steps: [{ kind: "thought", text: "First paragraph.\n\nSecond paragraph.", live: true }],
+        },
         live: true,
       });
     } else {
@@ -2373,7 +2376,7 @@ it.each(["First paragraph.\n\nSecond paragraph.", ""])(
   },
 );
 
-it("keeps the latest thought under the live tool status", () => {
+it("lists the thought and the live tool under the live tool status", () => {
   const at = "2026-06-20T00:00:02.000Z";
   const thought: OrchestrationV2TurnItem = {
     ...base("found-thought", at, 1),
@@ -2391,7 +2394,12 @@ it("keeps the latest thought under the live tool status", () => {
     at,
   );
   expect(rows.find((row) => row.type === "work-toggle")).toMatchObject({
-    thought: "Found the cause: no commits yet.",
+    trail: {
+      steps: [
+        { kind: "thought", text: "Found the cause: no commits yet. Checking the UI next." },
+        { kind: "tool", live: true },
+      ],
+    },
     live: true,
   });
   expect(rows.find((row) => row.type === "work-toggle")).not.toMatchObject({
@@ -2423,7 +2431,7 @@ it("stops stranded thinking after a steer and follows the next thought or tool",
     );
   expect(rows([first]).find((row) => row.type === "work-toggle")).toMatchObject({
     summary: "Thinking",
-    thought: "first-thought",
+    trail: { steps: [{ text: "first-thought", live: true }] },
     live: true,
     shimmer: true,
   });
@@ -2449,7 +2457,10 @@ it("stops stranded thinking after a steer and follows the next thought or tool",
     expect(live).toHaveLength(1);
     expect(live[0]).toMatchObject(
       items.at(-1)!.type === "reasoning"
-        ? { summary: "Thinking", thought: "next-thought" }
+        ? {
+            summary: "Thinking",
+            trail: { steps: [{ text: expect.stringMatching(/next-thought$/), live: true }] },
+          }
         : { summary: "Running vp" },
     );
   }
@@ -2651,4 +2662,43 @@ describe("MCP apps", () => {
   it("keeps a running app call an ordinary work row", () => {
     expect(feed("running").some((candidate) => candidate.type === "mcp-app")).toBe(false);
   });
+});
+
+it("lists the last six steps under a collapsed settled group and none once expanded", () => {
+  const thought: OrchestrationV2TurnItem = {
+    ...base("trail-thought", "2026-06-20T00:00:02.000Z", 1),
+    startedAt: DateTime.makeUnsafe("2026-06-20T00:00:00.000Z"),
+    completedAt: DateTime.makeUnsafe("2026-06-20T00:00:02.000Z"),
+    type: "reasoning",
+    streaming: false,
+    text: "Planning",
+  };
+  const tools = Array.from({ length: 7 }, (_, index) => ({
+    ...command("2026-06-20T00:00:03.000Z"),
+    id: TurnItemId.make(`trail-tool-${index}`),
+    ordinal: index + 2,
+  }));
+  const feed = buildThreadFeed(
+    [userMessage(), thought, ...tools, { ...assistantMessage(), ordinal: 20 }].map(
+      (item, position) => projected(item, position),
+    ),
+  );
+  const run = {
+    runId,
+    status: "completed" as const,
+    startedAt: "2026-06-20T00:00:01.000Z",
+    completedAt: "2026-06-20T00:00:04.000Z",
+  };
+  const collapsed = deriveThreadFeedPresentation(feed, run, new Set([runId]));
+  const header = collapsed.find((row) => row.type === "work-toggle");
+  if (header?.type !== "work-toggle") throw new Error("Expected work toggle");
+  expect(header.trail?.hiddenCount).toBe(2);
+  expect(header.trail?.steps.map((step) => step.kind)).toEqual(Array(6).fill("tool"));
+  const expanded = deriveThreadFeedPresentation(
+    feed,
+    run,
+    new Set([runId]),
+    new Set([header.groupId]),
+  );
+  expect(expanded.find((row) => row.type === "work-toggle")).not.toHaveProperty("trail");
 });
