@@ -9,6 +9,7 @@
  * `renderer-missing`.
  */
 import {
+  CANVAS_HOST_PAGE_PATH,
   CanvasRenderError,
   type CanvasElement,
   type CanvasRect,
@@ -32,7 +33,6 @@ import * as HeadlessChrome from "../htmlRender/headlessChrome.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
 
-const HOST_PAGE = "canvas-host.html";
 const INPUT_PATH = "/__t3/input.json";
 // Each op is its own Chrome process; a burst of screenshots queues here.
 const MAX_CONCURRENT_BROWSERS = 2;
@@ -130,7 +130,7 @@ const make = Effect.gen(function* () {
   const run = Effect.fn("CanvasRenderer.run")(function* (op: CanvasHostOp) {
     const root = yield* staticRoot;
     const html = yield* fileSystem
-      .readFileString(path.join(root, HOST_PAGE))
+      .readFileString(path.join(root, CANVAS_HOST_PAGE_PATH))
       .pipe(Effect.mapError(rendererMissing));
     const executable = yield* previewBrowser.executable;
     // @effect-diagnostics-next-line preferSchemaOverJson:off - the op is plain JSON data for the page.
