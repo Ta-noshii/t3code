@@ -6,7 +6,7 @@ import * as NodeModule from "node:module";
 import type { Plugin } from "vite-plus";
 
 /** Where the canvas editor and the canvas host page load Excalidraw's fonts from. */
-export const EXCALIDRAW_ASSETS_PATH = "/excalidraw-assets/";
+const EXCALIDRAW_ASSETS_PATH = "/excalidraw-assets/";
 
 // Xiaolai (CJK, about 13 MB) stays out of the bundle. Excalidraw falls back to
 // its CDN for fonts it cannot find here, so CJK text still renders when online.
