@@ -840,6 +840,13 @@ function ThreadRouteContent(
       mergeBackTargetThreadId !== null && mergeBackRun !== null
         ? () => void handleMergeBack()
         : undefined,
+    onOpenCanvases: selectedThread
+      ? () =>
+          navigation.navigate("CanvasLibrary", {
+            environmentId: selectedThread.environmentId,
+            projectId: selectedThread.projectId,
+          })
+      : undefined,
     currentBranch: selectedThread?.branch ?? null,
     gitStatus: gitStatus.data,
     gitOperationLabel: gitState.gitOperationLabel,

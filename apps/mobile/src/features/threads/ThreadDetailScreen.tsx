@@ -120,6 +120,7 @@ import type {
 } from "../../lib/threadActivity";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { ComposerErrorNotice } from "./ComposerErrorNotice";
+import { CanvasFocusNotice } from "../canvas/CanvasFocusNotice";
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ThreadRecapNotice } from "./ThreadRecapNotice";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
@@ -1320,6 +1321,10 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                       />
                     </Animated.View>
                   ) : null}
+                  <CanvasFocusNotice
+                    environmentId={props.environmentId}
+                    threadId={props.selectedThread.id}
+                  />
                   {props.feedbackSubmissions.map((submission) => (
                     <ComposerFeedback
                       key={submission.id}

@@ -20,7 +20,7 @@ export function ThreadHeader(
 ) {
   const returnToList = useWorkspaceListNavigation("threads");
   const { layout, panes, toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
-  const { onOpenTerminal, onMergeBack } = props.gitControls;
+  const { onOpenTerminal, onMergeBack, onOpenCanvases } = props.gitControls;
   const native = useThreadHeaderOptions(props);
   const androidHeaderActions = useMemo<ReadonlyArray<ScreenHeaderAction>>(() => {
     const actions: ScreenHeaderAction[] = [];
@@ -52,6 +52,13 @@ export function ThreadHeader(
       icon: "point.topleft.down.curvedto.point.bottomright.up",
       onPress: props.onOpenGitInspector,
     });
+    if (onOpenCanvases) {
+      actions.push({
+        accessibilityLabel: "Canvases",
+        icon: "scribble.variable",
+        onPress: onOpenCanvases,
+      });
+    }
     if (onMergeBack) {
       actions.push({
         accessibilityLabel: "Merge back to source",
@@ -66,6 +73,7 @@ export function ThreadHeader(
     props.onOpenFilesInspector,
     onOpenTerminal,
     onMergeBack,
+    onOpenCanvases,
     props.onOpenGitInspector,
     toggleAuxiliaryPane,
     props.onReturnToThread,
