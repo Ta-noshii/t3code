@@ -293,6 +293,14 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
     ),
     writesThread((input) =>
       Effect.gen(function* () {
+        if (input.action === "send_all") {
+          const targetRunId = yield* required(input.targetRunId, "targetRunId");
+          return yield* dispatch(input.threadId, (common) => ({
+            ...common,
+            type: "queued-messages.send-all",
+            targetRunId,
+          }));
+        }
         const runId = yield* required(input.queuedRunId, "queuedRunId");
         switch (input.action) {
           case "edit": {
