@@ -1161,6 +1161,10 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__t3_queue_read",
   "mcp__t3-code__html_preview",
   "mcp__t3-code__html_render",
+  "mcp__t3-code__canvas_list",
+  "mcp__t3-code__canvas_open",
+  "mcp__t3-code__canvas_read",
+  "mcp__t3-code__canvas_screenshot",
 ];
 
 // Claude Code aborts an HTTP MCP call after 60 s ("The operation timed out.")
