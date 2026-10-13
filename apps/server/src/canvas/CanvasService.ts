@@ -45,11 +45,13 @@ import {
   canvasElementBounds,
   canvasExportScale,
   canvasFormatForPath,
+  canvasGroup,
   canvasSceneCounts,
   canvasSlug,
   canvasTitle,
   emptyCanvasScene,
   mergeCanvasElements,
+  normalizeCanvasGroup,
   parseCanvasScene,
   serializeCanvasScene,
   unionCanvasRects,
@@ -74,6 +76,7 @@ import * as Exit from "effect/Exit";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
 
 import {
   parseThreadSegmentFromAttachmentId,
@@ -200,6 +203,7 @@ export class CanvasService extends Context.Service<
     readonly rename: (input: {
       readonly path: string;
       readonly title: string;
+      readonly group?: string | undefined;
     }) => Effect.Effect<CanvasSummary, CanvasFailure>;
     readonly delete: (input: { readonly path: string }) => Effect.Effect<void, CanvasFailure>;
     readonly screenshot: (
@@ -218,8 +222,21 @@ export class CanvasService extends Context.Service<
     ) => Effect.Effect<CanvasListResult & { readonly current: string | null }, CanvasFailure>;
     readonly agentCreate: (
       context: CanvasThreadContext,
-      input: { readonly title: string; readonly path?: string | undefined },
+      input: {
+        readonly title: string;
+        readonly path?: string | undefined;
+        readonly group?: string | undefined;
+      },
     ) => Effect.Effect<CanvasSummary, CanvasFailure>;
+    /** Renames a library canvas or moves it to another folder of the library. */
+    readonly agentMove: (
+      context: CanvasThreadContext,
+      input: {
+        readonly canvas?: string | undefined;
+        readonly title?: string | undefined;
+        readonly group?: string | undefined;
+      },
+    ) => Effect.Effect<CanvasSummary, CanvasAgentFailure>;
     /** Makes the canvas the thread's current one and shows it to the user. */
     readonly agentOpen: (
       context: CanvasThreadContext,
@@ -393,20 +410,56 @@ const make = Effect.gen(function* () {
 
   // Path resolution.
 
+  /**
+   * The library a folder belongs to and the folder's group inside it ("" at
+   * its top), or null outside every known library. Hidden folders and ones
+   * nested too deep are not groups.
+   */
+  const libraryContaining = (dir: string) => {
+    let found: {
+      readonly dir: string;
+      readonly projectId: ProjectId;
+      readonly group: string;
+    } | null = null;
+    for (const [libraryDir, projectId] of libraries) {
+      if (found !== null && found.dir.length >= libraryDir.length) continue;
+      if (dir === libraryDir) {
+        found = { dir: libraryDir, projectId, group: "" };
+      } else if (dir.startsWith(`${libraryDir}${path.sep}`)) {
+        const group = path.relative(libraryDir, dir).split(path.sep).join("/");
+        if (normalizeCanvasGroup(group) === group) found = { dir: libraryDir, projectId, group };
+      }
+    }
+    return found;
+  };
+
+  const slugIn = (group: string, file: string) =>
+    group === "" ? canvasBaseName(file) : `${group}/${canvasBaseName(file)}`;
+
+  const groupOrFail = (input: string) => {
+    const group = normalizeCanvasGroup(input);
+    return group === null
+      ? Effect.fail(new CanvasInvalidPathError({ path: input, reason: "invalid-group" }))
+      : Effect.succeed(group);
+  };
+
   const resolveRef = Effect.fn("CanvasService.resolveRef")(function* (ref: CanvasRef) {
     if ("slug" in ref) {
       const library = yield* libraryOf(ref.projectId);
-      const base = path.join(library.dir, ref.slug);
+      const group = yield* groupOrFail(canvasGroup(ref.slug));
+      const name = ref.slug.slice(ref.slug.lastIndexOf("/") + 1).trim();
+      const dir = path.join(library.dir, group);
+      const base = path.join(dir, name);
       const json = `${base}${CANVAS_FILE_EXTENSION}.json`;
       const exists = yield* fileSystem.exists(json).pipe(Effect.orElseSucceed(() => false));
       const file = exists ? json : `${base}${CANVAS_FILE_EXTENSION}`;
-      if (path.dirname(file) !== library.dir) {
+      if (name.startsWith(".") || path.dirname(file) !== dir) {
         return yield* new CanvasInvalidPathError({ path: ref.slug, reason: "outside-library" });
       }
       return {
         path: file,
         projectId: ref.projectId,
-        slug: canvasBaseName(file),
+        slug: slugIn(group, file),
         format: "excalidraw",
       } satisfies Resolved;
     }
@@ -425,19 +478,26 @@ const make = Effect.gen(function* () {
     if (format === null) {
       return yield* new CanvasInvalidPathError({ path: ref.path, reason: "not-excalidraw" });
     }
-    const dir = path.dirname(absolute);
-    const projectId = library?.dir === dir ? ref.projectId! : (libraries.get(dir) ?? null);
+    const owner = libraryContaining(path.dirname(absolute));
+    // Two projects can share a library folder; the one asked about wins.
+    const projectId =
+      owner === null ? null : library?.dir === owner.dir ? ref.projectId! : owner.projectId;
     return {
       path: absolute,
       projectId,
-      slug: projectId !== null && format === "excalidraw" ? canvasBaseName(absolute) : null,
+      slug: owner !== null && format === "excalidraw" ? slugIn(owner.group, absolute) : null,
       format,
     } satisfies Resolved;
   });
 
-  /** A slug, a project-relative path, `~/…`, or an absolute path. */
+  /**
+   * A slug (`auth-flow`, `design/auth-flow`), a project-relative path to a
+   * canvas file, `~/…`, or an absolute path.
+   */
   const refFor = (projectId: ProjectId, canvas: string): CanvasRef =>
-    /[\\/]/u.test(canvas) || canvasFormatForPath(canvas) !== null
+    canvasFormatForPath(canvas) !== null ||
+    /^(?:~|\.\.?)(?:[\\/]|$)/u.test(canvas) ||
+    path.isAbsolute(canvas)
       ? { path: canvas, projectId }
       : { projectId, slug: canvas };
 
@@ -569,7 +629,7 @@ const make = Effect.gen(function* () {
   // Watching for edits made outside T3.
 
   const onFolderChange = Effect.fn("CanvasService.onFolderChange")(function* (dir: string) {
-    const projectId = libraries.get(dir);
+    const projectId = libraryContaining(dir)?.projectId;
     if (projectId !== undefined) yield* publish({ type: "library-changed", projectId });
     for (const [canvasPath, revision] of known) {
       if (path.dirname(canvasPath) !== dir) continue;
@@ -615,40 +675,61 @@ const make = Effect.gen(function* () {
 
   // Client operations.
 
+  /** Adds the canvases in one library folder and the groups below it to `canvases`. */
+  const listGroup = Effect.fn("CanvasService.listGroup")(function* (
+    projectId: ProjectId,
+    dir: string,
+    group: string,
+    canvases: CanvasSummary[],
+  ): Effect.fn.Return<void, CanvasOperationError> {
+    const names = yield* fileSystem.readDirectory(dir).pipe(
+      Effect.mapError(fileError("list", dir)),
+      Effect.catchTags({
+        CanvasNotFoundError: () => Effect.succeed<ReadonlyArray<string>>([]),
+      }),
+    );
+    if (names.length > 0) yield* watchFolder(dir);
+    for (const name of names.toSorted()) {
+      if (name.startsWith(".")) continue;
+      const file = path.join(dir, name);
+      const format = canvasFormatForPath(name);
+      if (format === null) {
+        const child = group === "" ? name : `${group}/${name}`;
+        if (normalizeCanvasGroup(child) !== child) continue;
+        const info = yield* fileSystem.stat(file).pipe(Effect.option);
+        if (Option.isSome(info) && info.value.type === "Directory") {
+          yield* listGroup(projectId, file, child, canvases);
+        }
+        continue;
+      }
+      if (format !== "excalidraw") continue;
+      const resolved: Resolved = {
+        path: file,
+        projectId,
+        slug: slugIn(group, file),
+        format: "excalidraw",
+      };
+      const info = yield* fileSystem.stat(file).pipe(Effect.option);
+      if (Option.isNone(info) || info.value.type !== "File") continue;
+      const key = `${modifiedAtOf(info.value.mtime)}:${info.value.size}`;
+      const cached = summaryCache.get(file);
+      if (cached?.key === key) {
+        canvases.push(cached.summary);
+        continue;
+      }
+      const stored = yield* readStored(resolved).pipe(Effect.option);
+      if (Option.isNone(stored)) continue;
+      const summary = summaryOf(resolved, stored.value);
+      summaryCache.set(file, { key, summary });
+      canvases.push(summary);
+    }
+  });
+
   const list: CanvasService["Service"]["list"] = Effect.fn("CanvasService.list")(
     function* (projectId) {
       const library = yield* libraryOf(projectId);
-      const names = yield* fileSystem.readDirectory(library.dir).pipe(
-        Effect.mapError(fileError("list", library.dir)),
-        Effect.catchTags({
-          CanvasNotFoundError: () => Effect.succeed<ReadonlyArray<string>>([]),
-        }),
-      );
-      if (names.length > 0) yield* watchFolder(library.dir);
       const canvases: CanvasSummary[] = [];
-      for (const name of names) {
-        if (canvasFormatForPath(name) !== "excalidraw") continue;
-        const file = path.join(library.dir, name);
-        const resolved: Resolved = {
-          path: file,
-          projectId,
-          slug: canvasBaseName(file),
-          format: "excalidraw",
-        };
-        const info = yield* fileSystem.stat(file).pipe(Effect.option);
-        if (Option.isNone(info) || info.value.type !== "File") continue;
-        const key = `${modifiedAtOf(info.value.mtime)}:${info.value.size}`;
-        const cached = summaryCache.get(file);
-        if (cached?.key === key) {
-          canvases.push(cached.summary);
-          continue;
-        }
-        const stored = yield* readStored(resolved).pipe(Effect.option);
-        if (Option.isNone(stored)) continue;
-        const summary = summaryOf(resolved, stored.value);
-        summaryCache.set(file, { key, summary });
-        canvases.push(summary);
-      }
+      yield* listGroup(projectId, library.dir, "", canvases);
       canvases.sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt));
       return { folder: library.folder, canvases };
     },
@@ -710,6 +791,24 @@ const make = Effect.gen(function* () {
     );
   });
 
+  /**
+   * Removes a library group folder left empty, then any parent group that
+   * leaves empty, so a group lasts as long as it holds something.
+   */
+  const pruneGroup = Effect.fn("CanvasService.pruneGroup")(function* (dir: string) {
+    let current = dir;
+    while (libraryContaining(current)?.group) {
+      const folder = current;
+      // rmdir only removes an empty folder, so a file added meanwhile stays.
+      const removed = yield* Effect.tryPromise(() => NodeFSP.rmdir(folder)).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      );
+      if (!removed) return;
+      current = path.dirname(current);
+    }
+  });
+
   const uniqueLibraryPath = Effect.fn("CanvasService.uniqueLibraryPath")(function* (
     dir: string,
     title: string,
@@ -728,14 +827,18 @@ const make = Effect.gen(function* () {
   const create: CanvasService["Service"]["create"] = Effect.fn("CanvasService.create")(
     function* (input) {
       const library = yield* libraryOf(input.projectId);
+      const group = yield* groupOrFail(input.group ?? "");
       const resolved: Resolved =
         input.path === undefined
-          ? yield* Effect.map(uniqueLibraryPath(library.dir, input.title), (file) => ({
-              path: file,
-              projectId: input.projectId,
-              slug: canvasBaseName(file),
-              format: "excalidraw" as const,
-            }))
+          ? yield* Effect.map(
+              uniqueLibraryPath(path.join(library.dir, group), input.title),
+              (file) => ({
+                path: file,
+                projectId: input.projectId,
+                slug: slugIn(group, file),
+                format: "excalidraw" as const,
+              }),
+            )
           : yield* resolveRef({ path: input.path, projectId: input.projectId });
       yield* requireWritable(resolved);
       return yield* writes.withPermits(1)(
@@ -759,6 +862,11 @@ const make = Effect.gen(function* () {
     function* (input) {
       const resolved = yield* resolveRef({ path: input.path });
       yield* requireWritable(resolved);
+      const owner =
+        resolved.projectId === null ? null : libraryContaining(path.dirname(resolved.path));
+      if (owner === null && input.group !== undefined) {
+        return yield* new CanvasInvalidPathError({ path: input.path, reason: "outside-library" });
+      }
       return yield* writes.withPermits(1)(
         Effect.gen(function* () {
           const stored = yield* readStored(resolved);
@@ -766,11 +874,18 @@ const make = Effect.gen(function* () {
             ...stored.scene,
             appState: { ...stored.scene.appState, name: input.title },
           };
-          // Library canvases also move to a file named after the new title.
+          // Library canvases also move to a file named after the new title,
+          // in the group asked for.
           let target = resolved;
-          if (resolved.projectId !== null && canvasSlug(input.title) !== resolved.slug) {
-            const file = yield* uniqueLibraryPath(path.dirname(resolved.path), input.title);
-            target = { ...resolved, path: file, slug: canvasBaseName(file) };
+          if (owner !== null) {
+            const group = input.group === undefined ? owner.group : yield* groupOrFail(input.group);
+            if (
+              group !== owner.group ||
+              canvasSlug(input.title) !== canvasBaseName(resolved.path)
+            ) {
+              const file = yield* uniqueLibraryPath(path.join(owner.dir, group), input.title);
+              target = { ...resolved, path: file, slug: slugIn(group, file) };
+            }
           }
           const { stored: next } = yield* commit(
             target,
@@ -788,6 +903,7 @@ const make = Effect.gen(function* () {
             for (const [threadId, canvasPath] of currentByThread) {
               if (canvasPath === resolved.path) currentByThread.set(threadId, target.path);
             }
+            yield* pruneGroup(path.dirname(resolved.path));
           }
           return summaryOf(target, next);
         }),
@@ -807,6 +923,7 @@ const make = Effect.gen(function* () {
       );
       known.delete(resolved.path);
       summaryCache.delete(resolved.path);
+      yield* writes.withPermits(1)(pruneGroup(path.dirname(resolved.path)));
       yield* publish({ type: "library-changed", projectId: resolved.projectId });
     },
   );
@@ -869,6 +986,22 @@ const make = Effect.gen(function* () {
     currentByThread.set(context.threadId, document.canvas.path);
     return document.canvas;
   });
+
+  const agentMove: CanvasService["Service"]["agentMove"] = Effect.fn("CanvasService.agentMove")(
+    function* (context, input) {
+      const resolved = yield* agentTarget(context, input.canvas);
+      if (resolved.projectId === null) {
+        return yield* new CanvasInvalidPathError({
+          path: resolved.path,
+          reason: "outside-library",
+        });
+      }
+      const title = input.title ?? summaryOf(resolved, yield* readStored(resolved)).title;
+      const summary = yield* rename({ path: resolved.path, title, group: input.group });
+      currentByThread.set(context.threadId, summary.path);
+      return summary;
+    },
+  );
 
   const agentOpen: CanvasService["Service"]["agentOpen"] = Effect.fn("CanvasService.agentOpen")(
     function* (context, canvas) {
@@ -1279,6 +1412,7 @@ const make = Effect.gen(function* () {
     events: Stream.fromPubSub(events),
     agentList,
     agentCreate,
+    agentMove,
     agentOpen,
     agentRead,
     agentUpdate,

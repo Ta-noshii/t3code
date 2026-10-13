@@ -6,8 +6,17 @@ import type {
   ProjectId,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { FolderOpenIcon, MoreHorizontalIcon, PlusIcon, Shapes } from "lucide-react";
-import { lazy, Suspense, useCallback, useState, type KeyboardEvent } from "react";
+import { canvasGroup, normalizeCanvasGroup } from "@t3tools/shared/canvas";
+import {
+  ChevronRightIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
+  Shapes,
+} from "lucide-react";
+import { lazy, Suspense, useCallback, useMemo, useState, type KeyboardEvent } from "react";
 
 import { requestConfirmDialog } from "~/confirmDialog";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
@@ -18,7 +27,16 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "../ui/menu";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -59,9 +77,42 @@ export default function CanvasPanel(props: CanvasPanelProps) {
 }
 
 type LibraryDraft =
-  | { readonly kind: "new" }
+  | { readonly kind: "new"; readonly group: string }
+  | { readonly kind: "folder" }
   | { readonly kind: "open" }
-  | { readonly kind: "rename"; readonly canvas: CanvasSummary };
+  | { readonly kind: "rename"; readonly canvas: CanvasSummary }
+  | { readonly kind: "move"; readonly canvas: CanvasSummary };
+
+const groupOf = (canvas: CanvasSummary) => (canvas.slug === null ? "" : canvasGroup(canvas.slug));
+
+/** Top-level canvases first, then each group by name; canvases stay newest first. */
+function groupCanvases(canvases: ReadonlyArray<CanvasSummary>) {
+  const groups = new Map<string, CanvasSummary[]>();
+  for (const canvas of canvases) {
+    const group = groupOf(canvas);
+    groups.set(group, [...(groups.get(group) ?? []), canvas]);
+  }
+  return [...groups]
+    .map(([name, entries]) => ({ name, canvases: entries }))
+    .toSorted((left, right) =>
+      left.name === "" ? -1 : right.name === "" ? 1 : left.name.localeCompare(right.name),
+    );
+}
+
+function draftPlaceholder(draft: LibraryDraft): string {
+  switch (draft.kind) {
+    case "new":
+      return draft.group === "" ? "Canvas title" : `New canvas in ${draft.group}`;
+    case "folder":
+      return "Folder name";
+    case "open":
+      return "Path to an .excalidraw file";
+    case "rename":
+      return "Canvas title";
+    case "move":
+      return "New folder name";
+  }
+}
 
 function CanvasLibrary(props: {
   environmentId: EnvironmentId;
@@ -81,6 +132,14 @@ function CanvasLibrary(props: {
   const [draft, setDraft] = useState<LibraryDraft | null>(null);
 
   const canvases = list.data?.canvases ?? [];
+  const groups = useMemo(() => groupCanvases(canvases), [canvases]);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const toggleGroup = (name: string) =>
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (!next.delete(name)) next.add(name);
+      return next;
+    });
   useCanvasEvents(
     props.environmentId,
     useCallback(
@@ -103,12 +162,23 @@ function CanvasLibrary(props: {
     if (draft.kind === "new") {
       const result = await create({
         ...target,
-        input: { projectId: props.projectId, title: text },
+        input: {
+          projectId: props.projectId,
+          title: text,
+          ...(draft.group === "" ? {} : { group: draft.group }),
+        },
       });
       if (result._tag === "Success") {
         setDraft(null);
         props.onOpen(result.value.path);
       }
+    } else if (draft.kind === "folder") {
+      // A folder holds canvases; it is made with its first one.
+      const group = normalizeCanvasGroup(text);
+      if (group) setDraft({ kind: "new", group });
+    } else if (draft.kind === "move") {
+      const group = normalizeCanvasGroup(text);
+      if (group) await move(draft.canvas, group);
     } else if (draft.kind === "open") {
       const result = await read({
         ...target,
@@ -127,6 +197,41 @@ function CanvasLibrary(props: {
     }
   };
 
+  const move = async (canvas: CanvasSummary, group: string) => {
+    const result = await rename({
+      environmentId: props.environmentId,
+      input: { path: canvas.path, title: canvas.title, group },
+    });
+    if (result._tag === "Success") setDraft(null);
+  };
+  const groupNames = groups.map((group) => group.name);
+
+  const renderRow = (canvas: CanvasSummary) =>
+    draft !== null &&
+    (draft.kind === "rename" || draft.kind === "move") &&
+    draft.canvas.path === canvas.path ? (
+      <li key={canvas.path} className="flex h-12 items-center px-1">
+        <DraftField
+          placeholder={draftPlaceholder(draft)}
+          initialValue={draft.kind === "rename" ? canvas.title : ""}
+          onSubmit={submitDraft}
+          onCancel={() => setDraft(null)}
+        />
+      </li>
+    ) : (
+      <CanvasRow
+        key={canvas.path}
+        canvas={canvas}
+        canWrite={canWrite}
+        groups={groupNames}
+        onOpen={() => props.onOpen(canvas.path)}
+        onRename={() => setDraft({ kind: "rename", canvas })}
+        onMove={(group) => void move(canvas, group)}
+        onMoveToNewFolder={() => setDraft({ kind: "move", canvas })}
+        onDelete={() => void confirmDelete(canvas)}
+      />
+    );
+
   const confirmDelete = async (canvas: CanvasSummary) => {
     const confirmed =
       (await requestConfirmDialog(
@@ -140,10 +245,10 @@ function CanvasLibrary(props: {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 px-2">
-        {draft !== null && draft.kind !== "rename" ? (
+        {draft !== null && draft.kind !== "rename" && draft.kind !== "move" ? (
           <DraftField
-            key={draft.kind}
-            placeholder={draft.kind === "new" ? "Canvas title" : "Path to an .excalidraw file"}
+            key={draftPlaceholder(draft)}
+            placeholder={draftPlaceholder(draft)}
             initialValue=""
             onSubmit={submitDraft}
             onCancel={() => setDraft(null)}
@@ -168,11 +273,27 @@ function CanvasLibrary(props: {
               </TooltipTrigger>
               <TooltipPopup>Open an .excalidraw file by path</TooltipPopup>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label="New folder"
+                    disabled={!canWrite}
+                    onClick={() => setDraft({ kind: "folder" })}
+                  />
+                }
+              >
+                <FolderPlusIcon />
+              </TooltipTrigger>
+              <TooltipPopup>New folder</TooltipPopup>
+            </Tooltip>
             <Button
               size="xs"
               variant="ghost"
               disabled={!canWrite}
-              onClick={() => setDraft({ kind: "new" })}
+              onClick={() => setDraft({ kind: "new", group: "" })}
             >
               <PlusIcon />
               New
@@ -194,7 +315,7 @@ function CanvasLibrary(props: {
             size="sm"
             variant="outline"
             disabled={!canWrite}
-            onClick={() => setDraft({ kind: "new" })}
+            onClick={() => setDraft({ kind: "new", group: "" })}
           >
             <PlusIcon />
             New canvas
@@ -203,25 +324,25 @@ function CanvasLibrary(props: {
       ) : (
         <ScrollArea className="min-h-0 flex-1">
           <ul className="flex flex-col p-1.5">
-            {canvases.map((canvas) =>
-              draft?.kind === "rename" && draft.canvas.path === canvas.path ? (
-                <li key={canvas.path} className="flex h-12 items-center px-1">
-                  <DraftField
-                    placeholder="Canvas title"
-                    initialValue={canvas.title}
-                    onSubmit={submitDraft}
-                    onCancel={() => setDraft(null)}
-                  />
-                </li>
+            {groups.map((group) =>
+              group.name === "" ? (
+                group.canvases.map(renderRow)
               ) : (
-                <CanvasRow
-                  key={canvas.path}
-                  canvas={canvas}
-                  canWrite={canWrite}
-                  onOpen={() => props.onOpen(canvas.path)}
-                  onRename={() => setDraft({ kind: "rename", canvas })}
-                  onDelete={() => void confirmDelete(canvas)}
-                />
+                <li key={`group:${group.name}`} className="flex flex-col">
+                  <GroupHeader
+                    name={group.name}
+                    count={group.canvases.length}
+                    open={!collapsed.has(group.name)}
+                    canWrite={canWrite}
+                    onToggle={() => toggleGroup(group.name)}
+                    onCreate={() => setDraft({ kind: "new", group: group.name })}
+                  />
+                  {collapsed.has(group.name) ? null : (
+                    <ul className="ml-3.5 flex flex-col border-l border-border/60 pl-1">
+                      {group.canvases.map(renderRow)}
+                    </ul>
+                  )}
+                </li>
               ),
             )}
           </ul>
@@ -231,14 +352,61 @@ function CanvasLibrary(props: {
   );
 }
 
+function GroupHeader(props: {
+  name: string;
+  count: number;
+  open: boolean;
+  canWrite: boolean;
+  onToggle: () => void;
+  onCreate: () => void;
+}) {
+  return (
+    <div className="group flex items-center rounded-md hover:bg-accent/60">
+      <button
+        type="button"
+        aria-expanded={props.open}
+        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left text-xs font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        onClick={props.onToggle}
+      >
+        <ChevronRightIcon
+          aria-hidden
+          className={`size-3.5 shrink-0 transition-transform ${props.open ? "rotate-90" : ""}`}
+        />
+        <FolderIcon aria-hidden className="size-3.5 shrink-0" />
+        <span className="flex min-w-0 flex-1 text-foreground">
+          <MiddleTruncate value={props.name} className="min-w-0 flex-1" />
+        </span>
+        <span className="shrink-0 tabular-nums">{props.count}</span>
+      </button>
+      <div className="mr-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label={`New canvas in ${props.name}`}
+          disabled={!props.canWrite}
+          onClick={props.onCreate}
+        >
+          <PlusIcon />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function CanvasRow(props: {
   canvas: CanvasSummary;
   canWrite: boolean;
+  /** The library's groups, to offer as move targets. */
+  groups: ReadonlyArray<string>;
   onOpen: () => void;
   onRename: () => void;
+  onMove: (group: string) => void;
+  onMoveToNewFolder: () => void;
   onDelete: () => void;
 }) {
   const { canvas } = props;
+  const current = groupOf(canvas);
+  const targets = [...new Set(["", ...props.groups])].filter((group) => group !== current);
   return (
     <li className="group relative flex items-center rounded-md hover:bg-accent/60">
       <button
@@ -273,6 +441,20 @@ function CanvasRow(props: {
           <MenuItem disabled={!props.canWrite || canvas.slug === null} onClick={props.onRename}>
             Rename
           </MenuItem>
+          {canvas.slug === null ? null : (
+            <MenuSub>
+              <MenuSubTrigger disabled={!props.canWrite}>Move to</MenuSubTrigger>
+              <MenuSubPopup>
+                {targets.map((group) => (
+                  <MenuItem key={group} onClick={() => props.onMove(group)}>
+                    {group === "" ? "Top level" : group}
+                  </MenuItem>
+                ))}
+                {targets.length > 0 ? <MenuSeparator /> : null}
+                <MenuItem onClick={props.onMoveToNewFolder}>New folder…</MenuItem>
+              </MenuSubPopup>
+            </MenuSub>
+          )}
           <MenuItem onClick={() => void writeTextToClipboard(canvas.path)}>Copy path</MenuItem>
           <MenuItem
             variant="destructive"

@@ -36,6 +36,30 @@ export function canvasBaseName(path: string): string {
   return suffix ? name.slice(0, name.length - suffix[0].length) : name;
 }
 
+// Folders nest at most this deep in a canvas library.
+const MAX_GROUP_DEPTH = 4;
+
+/**
+ * A library folder as typed ("Design / auth ") in its stored form
+ * ("Design/auth"): "" for the top level, null when a part is empty after
+ * trimming, hidden, `..`, or the folders nest too deep.
+ */
+export function normalizeCanvasGroup(input: string): string | null {
+  const parts = input
+    .split(/[\\/]/u)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (parts.length > MAX_GROUP_DEPTH) return null;
+  if (parts.some((part) => part.startsWith(".") || part.length > 80)) return null;
+  return parts.join("/");
+}
+
+/** The folder of a library slug: "design" for "design/auth-flow", "" at the top level. */
+export function canvasGroup(slug: string): string {
+  const index = slug.lastIndexOf("/");
+  return index === -1 ? "" : slug.slice(0, index);
+}
+
 /** "Auth flow: v2" → "auth-flow-v2". */
 export function canvasSlug(title: string): string {
   const slug = title
