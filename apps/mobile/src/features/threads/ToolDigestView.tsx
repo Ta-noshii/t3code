@@ -39,6 +39,7 @@ const KIND_ICON: Record<ToolDigestKind, AppSymbolName> = {
   project: "folder",
   request: "questionmark.bubble",
   list: "list.number",
+  canvas: "square.and.pencil",
 };
 
 const FACT_ICON: Record<ToolDigestIcon, AppSymbolName> = {

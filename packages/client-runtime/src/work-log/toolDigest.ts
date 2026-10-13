@@ -27,7 +27,8 @@ export type ToolDigestKind =
   | "schedule"
   | "project"
   | "request"
-  | "list";
+  | "list"
+  | "canvas";
 
 /** Icons for facts in a digest's meta line. Clients map them to their own glyphs. */
 export type ToolDigestIcon =
@@ -73,6 +74,8 @@ export interface ToolDigest {
   /** The thing the call acted on or produced: a task name, page title, thread title. */
   readonly title?: string | undefined;
   readonly href?: string | undefined;
+  /** The canvas file the call worked on, for clients that can open it. */
+  readonly canvasPath?: string | undefined;
   /** Short facts read alongside the title: model, viewport, counts. */
   readonly meta: readonly ToolDigestMeta[];
   readonly threads: ReadonlyArray<{ readonly threadId: string; readonly label: string }>;
@@ -577,6 +580,87 @@ function capabilitiesDigest(fields: Fields): ToolDigest {
   };
 }
 
+function countLabel(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+function canvasRow(canvas: Fields): ToolDigestRow | undefined {
+  const title = str(canvas.title);
+  if (!title) return undefined;
+  const elements = num(canvas.elementCount);
+  return {
+    title,
+    kind: "canvas",
+    ...(str(canvas.displayPath) ? { detail: str(canvas.displayPath) } : {}),
+    ...(elements !== undefined ? { chips: [countLabel(elements, "element", "elements")] } : {}),
+  };
+}
+
+/** The canvas tools: the canvas a call worked on, what changed, and a way to open it. */
+function canvasDigest(tool: string, fields: Fields): ToolDigest {
+  if (tool === "canvas_list") {
+    const canvases = Array.isArray(fields.canvases) ? fields.canvases.filter(isRecord) : [];
+    const rows = canvases.flatMap((canvas) => {
+      const row = canvasRow(canvas);
+      return row ? [row] : [];
+    });
+    return {
+      ...base(),
+      kind: "canvas",
+      title: rows.length ? countLabel(rows.length, "canvas", "canvases") : "",
+      meta: facts(str(fields.folder) ? fact(str(fields.folder)!, "folder") : undefined),
+      rows,
+      ...(rows.length ? {} : { empty: "No canvases yet" }),
+    };
+  }
+  const canvas = isRecord(fields.canvas) ? fields.canvas : undefined;
+  if (!canvas) return genericDigest(fields);
+  const ids = (key: string) => (Array.isArray(fields[key]) ? fields[key].length : 0);
+  const changes = [
+    ids("createdIds") ? `${ids("createdIds")} added` : undefined,
+    ids("updatedIds") ? `${ids("updatedIds")} changed` : undefined,
+    ids("deletedIds") ? `${ids("deletedIds")} removed` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  const elements = Array.isArray(fields.elements) ? fields.elements.length : undefined;
+  const shot = isRecord(fields.screenshot) ? fields.screenshot : undefined;
+  const shotWidth = num(shot?.width);
+  const shotHeight = num(shot?.height);
+  const path = str(canvas.path);
+  return {
+    ...base(),
+    kind: "canvas",
+    ...(str(canvas.title) ? { title: str(canvas.title) } : {}),
+    ...(path ? { canvasPath: path } : {}),
+    meta: facts(
+      str(canvas.displayPath) ? fact(str(canvas.displayPath)!, "folder") : undefined,
+      changes.length ? fact(changes.join(", ")) : undefined,
+      elements !== undefined ? fact(countLabel(elements, "element", "elements")) : undefined,
+      shotWidth && shotHeight ? fact(`${shotWidth}×${shotHeight}`, "viewport") : undefined,
+      canvas.readOnly === true ? fact("Read-only") : undefined,
+    ),
+    details: [
+      ...restDetails(
+        fields,
+        new Set([
+          "canvas",
+          "elements",
+          "createdIds",
+          "updatedIds",
+          "deletedIds",
+          "screenshot",
+          "rect",
+        ]),
+      ),
+      ...(["createdIds", "updatedIds", "deletedIds"] as const).flatMap((key) => {
+        const list = Array.isArray(fields[key])
+          ? fields[key].filter((id) => typeof id === "string")
+          : [];
+        return list.length ? [[toolFieldLabel(key), list.join(", ")] as const] : [];
+      }),
+    ],
+  };
+}
+
 function presenterDigest(tool: string, fields: Fields, input: Fields | undefined): ToolDigest {
   switch (tool) {
     case "delegate_task":
@@ -658,6 +742,14 @@ function presenterDigest(tool: string, fields: Fields, input: Fields | undefined
         title: "Answer sent",
         details: restDetails(fields, new Set()),
       };
+    case "canvas_list":
+    case "canvas_create":
+    case "canvas_open":
+    case "canvas_read":
+    case "canvas_update":
+    case "canvas_add_image":
+    case "canvas_screenshot":
+      return canvasDigest(tool, fields);
     default:
       if (tool.startsWith("preview_") || tool.startsWith("device_")) return previewDigest(fields);
       return genericDigest(fields);
