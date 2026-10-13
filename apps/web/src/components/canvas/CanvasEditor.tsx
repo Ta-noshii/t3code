@@ -344,7 +344,8 @@ function CanvasEditorSurface(props: CanvasEditorProps & { readonly initial: Canv
           </TooltipPopup>
         </Tooltip>
       </CanvasToolbar>
-      <div data-canvas-editor className="relative min-h-0 flex-1">
+      {/* Excalidraw's phone layout docks its side tools against the edge on purpose. */}
+      <div data-canvas-editor data-overflow-ok className="relative min-h-0 flex-1">
         <Excalidraw
           initialData={initialData}
           excalidrawAPI={(api) => {
