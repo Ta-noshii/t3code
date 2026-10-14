@@ -38,7 +38,7 @@ trap 'rm -f "$config_file"' EXIT
 (cd apps/mobile && node node_modules/expo/bin/cli config --type public --json) > "$config_file"
 NOWBAR_VERSION=$(node --input-type=module -e 'import {readFileSync} from "node:fs"; console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).version)' "$config_file")
 export NOWBAR_VERSION
-(cd apps/mobile/android && bash gradlew :t3-nowbar:testReleaseUnitTest :t3-agent-notifications:testReleaseUnitTest :app:assembleRelease \
+(cd apps/mobile/android && bash gradlew :t3-nowbar:testDebugUnitTest :t3-agent-notifications:testDebugUnitTest :app:assembleRelease \
   -I ../../../scripts/nowbar-local.gradle -PreactNativeArchitectures=arm64-v8a "-Porg.gradle.java.installations.paths=$JAVA_HOME,$JAVA21_HOME" \
   --build-cache --max-workers="${NOWBAR_BUILD_WORKERS:-4}")
 mkdir -p release
