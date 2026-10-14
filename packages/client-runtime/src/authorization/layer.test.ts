@@ -492,6 +492,15 @@ describe("RemoteEnvironmentAuthorization", () => {
         }),
       );
       expect(harness.fetch.calls).toHaveLength(3);
+      // The pairing grant decides the scopes; asking for this client's own list
+      // would drop permissions it predates, such as filesystem:read.
+      const [tokenUrl, tokenInit] = harness.fetch.calls[1]!;
+      expect(String(tokenUrl)).toBe(`${ENDPOINT.httpBaseUrl}/oauth/token`);
+      const tokenBody =
+        tokenInit.body instanceof Uint8Array
+          ? new TextDecoder().decode(tokenInit.body)
+          : String(tokenInit.body);
+      expect(new URLSearchParams(tokenBody).has("scope")).toBe(false);
     }),
   );
 

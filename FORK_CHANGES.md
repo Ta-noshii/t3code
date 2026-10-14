@@ -4,7 +4,7 @@ This repository is a fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3c
 
 ## How the changes ship
 
-- `nowbar` (default branch) carries the Android Now Bar work and the fork's CI. It merges `upstream/main` by hand.
+- `nowbar` (default branch) carries the Android Now Bar work and the fork's CI. It merges upstream by hand, preferably at the nightly tag the desktop host runs, so the phone and the host speak the same protocol. It also merges `patch/edit-fork-v2`, which gives the app that branch's mobile features (password prompt cards, edit in new thread, collapsed steps, prompt suggestions, recap, tool digests, canvases, send all). Since `patch/edit-fork-v2` is rebuilt on each upstream, merge it after the upstream tag it was rebuilt on.
 - Desktop and server changes live on patch branches based on `upstream/main`. The patched-release workflow cherry-picks them, in the order below, onto every upstream nightly and publishes the result here under the same version number.
   - The Linux AppImage and the Windows installer update themselves from this repository's releases.
   - Servers whose service sets `T3CODE_RELEASE_BASE_URL=https://github.com/Ta-noshii/t3code-nowbar/releases/download` install the patched runtime through the normal in-app Update.
@@ -70,4 +70,5 @@ Based on `patch/edit-fork-v2`, since "Send all" needs its `queued-messages.send-
   6. then applies the same patched tree on a Windows runner, builds the unsigned x64 NSIS installer (embedding the Linux server archive as the WSL runtime) and adds it to that release about 12 minutes later. If the Windows build fails, the notes say so, and the Windows app sees no update until a later release has one.
 
   When the agent changed anything, the release notes say so and the release carries `ai-reconciliation.patch`. Fold that diff into the patch branch so later builds apply cleanly. The agent needs the repository secret `CURSOR_API_KEY`; without it, a conflict or failed check stops the build as before.
+
 - The release tags the `nowbar` commit the workflow ran from, not the patched tree. The workflow token may not push a commit that edits upstream's `.github/workflows` files.
