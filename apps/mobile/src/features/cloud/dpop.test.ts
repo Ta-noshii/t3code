@@ -180,6 +180,6 @@ describe("mobile DPoP", () => {
           nowEpochSeconds: verifierNowSeconds,
         }),
       ).toMatchObject({ ok: true });
-    }).pipe(Effect.provide(cryptoLayer)),
+    }).pipe(Effect.provide(Dpop.layer)),
   );
 });

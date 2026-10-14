@@ -12,7 +12,7 @@ import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { useCallback, useMemo } from "react";
 import { Alert } from "react-native";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 import { environmentCatalog } from "../../connection/catalog";
 import {
