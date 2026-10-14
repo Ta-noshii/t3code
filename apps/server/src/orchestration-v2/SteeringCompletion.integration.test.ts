@@ -702,3 +702,164 @@ it.effect("starts a steer that missed the turn on the saved next-turn selection"
     }),
   ),
 );
+
+const sendAllHarness = Effect.fn("sendAllHarness")(function* (name: string) {
+  const harness = yield* nextTurnSelectionHarness(name);
+  const image = (id: string) =>
+    ({ type: "image", id, name: `${id}.png`, mimeType: "image/png", sizeBytes: 1 }) as const;
+  const queue = (threadId: ThreadId, id: string, text: string, imageIds: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      return yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`queue:${id}`),
+        threadId,
+        messageId: MessageId.make(`message:${id}`),
+        text,
+        attachments: imageIds.map(image),
+        modelSelection: runSelection,
+        dispatchMode: { type: "queue_after_active" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+    });
+  const sendAll = (threadId: ThreadId, id: string) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      return yield* orchestrator.dispatch({
+        type: "queued-messages.send-all",
+        commandId: CommandId.make(id),
+        threadId,
+        targetRunId: harness.started[0]!.runId,
+      });
+    });
+  // Ends the first turn, then lets the queue start its next run.
+  const finishFirstTurn = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      const first = harness.started[0]!;
+      const settled = yield* orchestrator.streamDomainEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.type === "run.updated" &&
+            event.payload.id === first.runId &&
+            event.payload.status === "waiting",
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+        Effect.forkScoped,
+      );
+      const turn = (yield* orchestrator.getThreadProjection(threadId)).providerTurns[0]!;
+      yield* Queue.offer(harness.events, {
+        type: "provider_turn.updated",
+        driver,
+        providerTurn: { ...turn, status: "completed", completedAt: yield* DateTime.now },
+      });
+      yield* Queue.offer(harness.events, {
+        type: "turn.terminal",
+        driver,
+        providerThreadId: turn.providerThreadId,
+        providerTurnId: turn.id,
+        runOrdinal: first.runOrdinal,
+        status: "completed",
+        failure: null,
+        threadDisposition: "reusable",
+      });
+      yield* Fiber.join(settled);
+      yield* worker.drain();
+    });
+  return { ...harness, queue, sendAll, finishFirstTurn };
+});
+
+it.effect("sends every queued message as one steer and leaves /compact queued", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = yield* sendAllHarness("steering-send-all");
+      const { started, steered, queue, sendAll, finishFirstTurn } = harness;
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const threadId = yield* harness.startFirstTurn;
+        yield* queue(threadId, "a", "First", ["a"]);
+        yield* queue(threadId, "compact", "/compact", []);
+        yield* queue(threadId, "b", "Second", ["b1", "b2"]);
+
+        yield* sendAll(threadId, "send-all");
+        yield* worker.drain();
+        assert.deepEqual(steered, ["First\n\nSecond"]);
+        const projection = yield* orchestrator.getThreadProjection(threadId);
+        const steer = projection.messages.find(
+          (message) => message.id === MessageId.make("message:a"),
+        );
+        assert.equal(steer?.runId, started[0]!.runId);
+        assert.deepEqual(
+          steer?.attachments.map((attachment) => attachment.id),
+          ["a", "b1", "b2"],
+        );
+        const steerItem = projection.turnItems.find(
+          (item) => item.type === "user_message" && item.messageId === steer?.id,
+        );
+        assert.equal(
+          steerItem?.type === "user_message" ? steerItem.inputIntent : undefined,
+          "promoted_queued_to_steer",
+        );
+        const queuedStatuses = (current: typeof projection) =>
+          ["a", "compact", "b"].map(
+            (id) =>
+              current.runs.find((run) => run.userMessageId === MessageId.make(`message:${id}`))
+                ?.status,
+          );
+        assert.deepEqual(queuedStatuses(projection), ["cancelled", "queued", "cancelled"]);
+
+        // Only /compact is left, so repeating the action cannot deliver anything twice.
+        yield* sendAll(threadId, "send-all-again").pipe(Effect.flip);
+        yield* finishFirstTurn(threadId);
+        yield* orchestrator.resumeQueuedRuns;
+        yield* worker.drain();
+        const after = yield* orchestrator.getThreadProjection(threadId);
+        assert.deepEqual(steered, ["First\n\nSecond"]);
+        assert.deepEqual(
+          started.map((turn) => turn.message.text),
+          ["first"],
+        );
+        const [a, compact, b] = queuedStatuses(after);
+        assert.deepEqual([a, b], ["cancelled", "cancelled"]);
+        assert.notEqual(compact, "queued", "/compact still runs as its own turn");
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  ),
+);
+
+it.effect("leaves the queue untouched when the turn ends before Send all lands", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = yield* sendAllHarness("steering-send-all-late");
+      const { started, steered, queue, sendAll, finishFirstTurn } = harness;
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const threadId = yield* harness.startFirstTurn;
+        yield* queue(threadId, "a", "First", []);
+        yield* queue(threadId, "b", "Second", []);
+        yield* finishFirstTurn(threadId);
+
+        yield* orchestrator.resumeQueuedRuns;
+        yield* worker.drain();
+
+        // The first queued message already started as its own turn; nothing is merged or lost.
+        yield* sendAll(threadId, "send-all-late").pipe(Effect.flip);
+        const projection = yield* orchestrator.getThreadProjection(threadId);
+        assert.deepEqual(steered, []);
+        assert.deepEqual(
+          started.map((turn) => turn.message.text),
+          ["first", "First"],
+        );
+        assert.deepEqual(
+          projection.runs.filter((run) => run.status === "queued").map((run) => run.userMessageId),
+          [MessageId.make("message:b")],
+        );
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  ),
+);

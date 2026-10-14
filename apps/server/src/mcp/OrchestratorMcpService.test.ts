@@ -954,7 +954,7 @@ describe("OrchestratorMcpService provider resolution", () => {
 
         yield* Effect.gen(function* () {
           const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-          const capabilities = yield* service.capabilities(scope);
+          const capabilities = yield* service.capabilities(scope, { all: true });
           const byId = new Map(
             capabilities.providers.map((provider) => [provider.providerInstanceId, provider]),
           );
@@ -977,7 +977,7 @@ describe("OrchestratorMcpService provider resolution", () => {
               },
             ],
           }));
-          const refreshed = yield* service.capabilities(scope);
+          const refreshed = yield* service.capabilities(scope, { all: true });
           for (const provider of providers) {
             assert.deepEqual(
               refreshed.providers
@@ -1067,6 +1067,144 @@ describe("OrchestratorMcpService provider resolution", () => {
           ["gpt-5.4", "my-model"],
         );
       }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
+  it.effect("keeps the thread's own model when the selection is a model alias", () =>
+    Effect.gen(function* () {
+      const providers: ReadonlyArray<ServerProvider> = [
+        {
+          ...providerSnapshot({
+            instanceId: antigravityInstanceId,
+            driver: ProviderDriverKind.make("antigravity"),
+            model: "gemini-3.8-flash-high",
+          }),
+          models: [
+            {
+              slug: "gemini-3.8-flash-high",
+              name: "Gemini 3.8 Flash (High)",
+              aliases: ["antigravity-default"],
+              isCustom: false,
+              capabilities: null,
+            },
+            { slug: "gemini-3.1-pro-low", name: "Gemini", isCustom: false, capabilities: null },
+          ],
+        },
+      ];
+      const dependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: () =>
+            Effect.succeed(
+              parentProjection([], {
+                instanceId: antigravityInstanceId,
+                model: "antigravity-default",
+              }),
+            ),
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed(providers),
+        }),
+        adapterRegistryLayer([antigravityInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        ServerSettings.layerTest({
+          orchestratorModels: [{ provider: codexInstanceId, model: "gpt-6.1-sol" }],
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const curated = yield* service.capabilities(scope);
+        assert.deepEqual(
+          curated.providers.map((provider) => provider.models.map((model) => model.id)),
+          [["gemini-3.8-flash-high"]],
+        );
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+    }),
+  );
+
+  it.effect("lists only orchestratorModels, the thread's own model, and usable providers", () =>
+    Effect.gen(function* () {
+      const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
+      const disabledInstanceId = ProviderInstanceId.make("antigravity-alt");
+      const withModels = (base: ServerProvider, slugs: ReadonlyArray<string>): ServerProvider => ({
+        ...base,
+        models: slugs.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+      });
+      const providers: ReadonlyArray<ServerProvider> = [
+        withModels(
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: "gpt-5.4",
+          }),
+          ["gpt-5.4", "gpt-6.1-sol", "gpt-5.2"],
+        ),
+        withModels(
+          providerSnapshot({
+            instanceId: claudeInstanceId,
+            driver: ProviderDriverKind.make("claudeAgent"),
+            model: "claude-opus-5-5",
+          }),
+          ["claude-opus-5-5", "claude-opus-4-5"],
+        ),
+        withModels(
+          providerSnapshot({
+            instanceId: disabledInstanceId,
+            driver: ProviderDriverKind.make("antigravity"),
+            model: "ant-model",
+            enabled: false,
+          }),
+          ["ant-model"],
+        ),
+      ];
+      const dependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: () => Effect.succeed(parentProjection([])),
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed(providers),
+        }),
+        adapterRegistryLayer([codexInstanceId, claudeInstanceId, disabledInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        ServerSettings.layerTest({
+          orchestratorModels: [
+            { provider: codexInstanceId, model: "gpt-6.1-sol" },
+            { provider: claudeInstanceId, model: "claude-opus-5-5" },
+            { provider: disabledInstanceId, model: "ant-model" },
+            { provider: claudeInstanceId, model: "not-in-catalog" },
+          ],
+        }),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const curated = yield* service.capabilities(scope);
+        assert.deepEqual(
+          curated.providers.map((provider) => [
+            provider.providerInstanceId,
+            provider.models.map((model) => model.id),
+          ]),
+          [
+            // gpt-5.4 is the parent thread's own model, so it stays listed.
+            [codexInstanceId, ["gpt-5.4", "gpt-6.1-sol"]],
+            [claudeInstanceId, ["claude-opus-5-5"]],
+          ],
+        );
+        assert.strictEqual(curated.hiddenModelCount, 3);
+
+        const everything = yield* service.capabilities(scope, { all: true });
+        assert.deepEqual(
+          everything.providers.map((provider) => provider.models.length),
+          [3, 2, 1],
+        );
+        assert.isUndefined(everything.hiddenModelCount);
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
     }),
   );
 
@@ -1264,6 +1402,102 @@ describe("OrchestratorMcpService provider resolution", () => {
         };
         assert.equal(request.modelSelection.instanceId, antigravityInstanceId);
         assert.equal(request.modelSelection.model, "ant-model");
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
+  it.effect("delegates codex_review to a Codex instance as a /review command", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+      const task = {
+        id: taskId,
+        threadId: parentThreadId,
+        runId: parentRunId,
+        parentNodeId,
+        origin: "app_owned",
+        createdBy: "agent",
+        driver: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        providerThreadId: null,
+        childThreadId,
+        nativeTaskRef: null,
+        prompt: "/review --commit abc1234",
+        title: "Review commit abc1234",
+        model: "gpt-5.4",
+        status: "running",
+        result: null,
+        startedAt: null,
+        completedAt: null,
+      };
+      let delegated = false;
+      const layerDependencies = Layer.mergeAll(
+        ServerSettings.layerTest(),
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: (threadId) =>
+            Effect.succeed(
+              threadId === parentThreadId
+                ? parentProjection(delegated ? [task] : [])
+                : childProjection,
+            ),
+          hasReceipt: () => Effect.succeed(false),
+          dispatch: (command) =>
+            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  delegated = true;
+                }),
+              ),
+              Effect.as({
+                sequence: 1,
+                storedEvents: [
+                  {
+                    sequence: 1,
+                    commandId: null,
+                    event: { type: "subagent.updated", payload: task },
+                  },
+                ],
+              } as never),
+            ),
+        }),
+        providerRegistryLayer([
+          providerSnapshot({
+            instanceId: antigravityInstanceId,
+            driver: ProviderDriverKind.make("antigravity"),
+            model: "ant-model",
+          }),
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: "gpt-5.4",
+          }),
+        ]),
+        adapterRegistryLayer([codexInstanceId, antigravityInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const result = yield* service.codexReview(scope, {
+          target: { type: "commit", sha: "abc1234" },
+          clientRequestId: "codex-review-1",
+        });
+        assert.equal(result.status, "running");
+        const [request] = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+          task: string;
+          title: string;
+          modelSelection: { instanceId: string };
+        }>;
+        assert.equal(request?.task, "/review --commit abc1234");
+        assert.equal(request?.title, "Review commit abc1234");
+        assert.equal(request?.modelSelection.instanceId, codexInstanceId);
+
+        const wrongDriver = yield* service
+          .codexReview(scope, { providerInstanceId: antigravityInstanceId })
+          .pipe(Effect.flip);
+        assert.equal(wrongDriver.code, "invalid_request");
       }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(layerDependencies))));
     }),
   );

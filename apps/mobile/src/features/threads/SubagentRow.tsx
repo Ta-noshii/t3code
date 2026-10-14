@@ -2,6 +2,7 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { resolveProviderInstanceDisplayName } from "@t3tools/client-runtime/state/provider-instance-display";
 import { resolveSubagentMetadata } from "@t3tools/client-runtime/state/subagent-display";
 import type { EnvironmentId, OrchestrationV2Subagent } from "@t3tools/contracts";
+import { subagentCodexReview } from "@t3tools/shared/codexReview";
 import type { ReactNode } from "react";
 import { View } from "react-native";
 
@@ -120,6 +121,13 @@ function SubagentMetadata(props: {
   });
   return (
     <View className="min-w-0 flex-row items-center gap-1.5">
+      {subagentCodexReview(subagent) !== null ? (
+        <>
+          <SymbolView name="magnifyingglass" size={11} tintColorClassName="accent-icon-muted" />
+          <Text className="text-xs font-t3-medium text-foreground">Reviewer</Text>
+          <Text className="text-xs text-foreground-muted">·</Text>
+        </>
+      ) : null}
       <ProviderIcon
         provider={provider?.driver ?? subagent.driver}
         iconUrl={provider?.iconUrl}

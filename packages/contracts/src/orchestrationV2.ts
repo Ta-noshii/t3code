@@ -1089,6 +1089,11 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
   tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
   turnTokenUsage: Schema.optional(TurnTokenUsage),
+  /**
+   * The provider's guess at the user's next prompt, recorded after the turn
+   * completes. The composer offers it while empty.
+   */
+  promptSuggestion: Schema.optional(TrimmedNonEmptyString),
 });
 export type OrchestrationV2ProviderTurn = typeof OrchestrationV2ProviderTurn.Type;
 
@@ -1449,6 +1454,17 @@ export const OrchestrationV2SecretRequestStatus = Schema.Literals([
 export type OrchestrationV2SecretRequestStatus = typeof OrchestrationV2SecretRequestStatus.Type;
 
 /**
+ * Set when a process in the agent's shell asked (`t3 secret prompt`): the
+ * value goes back to that waiting process instead of the server's ref store.
+ * `sudo` asks for the password to run the command in the request's reason.
+ */
+export const OrchestrationV2SecretPrompt = Schema.Struct({
+  kind: Schema.Literals(["sudo", "secret"]),
+  multiline: Schema.Boolean,
+});
+export type OrchestrationV2SecretPrompt = typeof OrchestrationV2SecretPrompt.Type;
+
+/**
  * A secret an agent asked the user for. The value never passes through
  * orchestration: the item carries only what was asked and how it was answered.
  */
@@ -1457,6 +1473,7 @@ const OrchestrationV2SecretRequestFields = {
   label: TrimmedNonEmptyString,
   reason: Schema.String,
   placeholder: Schema.optional(Schema.String),
+  shellPrompt: Schema.optional(OrchestrationV2SecretPrompt),
   secretStatus: OrchestrationV2SecretRequestStatus,
 } as const;
 
@@ -3027,6 +3044,16 @@ export const OrchestrationV2Command = Schema.Union([
     queuedRunId: RunId,
     targetRunId: RunId,
   }),
+  /**
+   * Steers every queued user message into the target run as one message, in queue order.
+   * Messages that must run as their own turn, such as /compact, stay queued.
+   */
+  Schema.Struct({
+    type: Schema.Literal("queued-messages.send-all"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    targetRunId: RunId,
+  }),
   Schema.Struct({
     type: Schema.Literal("queue.resume"),
     commandId: CommandId,
@@ -3240,6 +3267,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     label: TrimmedNonEmptyString,
     reason: Schema.String,
     placeholder: Schema.optional(Schema.String),
+    shellPrompt: Schema.optional(OrchestrationV2SecretPrompt),
     secretStatus: OrchestrationV2SecretRequestStatus,
   }),
 ]);
@@ -3260,6 +3288,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getWorkflowScript: "orchestration.getWorkflowScript",
   stopWorkflow: "orchestration.stopWorkflow",
   getTurnItem: "orchestration.getTurnItem",
+  getThreadRecap: "orchestration.getThreadRecap",
   launchThread: "orchestration.launchThread",
   subscribeArchivedShell: "orchestration.subscribeArchivedShell",
   subscribeShell: "orchestration.subscribeShell",
@@ -3656,6 +3685,29 @@ export const OrchestrationV2GetTurnItemResult = Schema.Struct({
 });
 export type OrchestrationV2GetTurnItemResult = typeof OrchestrationV2GetTurnItemResult.Type;
 
+export const OrchestrationV2GetThreadRecapInput = Schema.Struct({
+  threadId: ThreadId,
+  /** The latest completed run. A new run means a new recap; also keys the client cache. */
+  runId: RunId,
+});
+export type OrchestrationV2GetThreadRecapInput = typeof OrchestrationV2GetThreadRecapInput.Type;
+
+export const OrchestrationV2GetThreadRecapResult = Schema.Struct({
+  /** False when the thread's provider can't summarise it. */
+  available: Schema.Boolean,
+  recap: Schema.NullOr(Schema.String),
+});
+export type OrchestrationV2GetThreadRecapResult = typeof OrchestrationV2GetThreadRecapResult.Type;
+
+export class OrchestrationV2GetThreadRecapError extends Schema.TaggedError<OrchestrationV2GetThreadRecapError>()(
+  "OrchestrationV2GetThreadRecapError",
+  {
+    threadId: ThreadId,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 const WORKFLOW_SCRIPT_ERROR_MESSAGES = {
   "invalid-path": "Workflow scripts must be absolute .js paths.",
   "root-unavailable": "Script root unavailable.",
@@ -3781,6 +3833,10 @@ export const OrchestrationV2RpcSchemas = {
   getTurnItem: {
     input: OrchestrationV2GetTurnItemInput,
     output: OrchestrationV2GetTurnItemResult,
+  },
+  getThreadRecap: {
+    input: OrchestrationV2GetThreadRecapInput,
+    output: OrchestrationV2GetThreadRecapResult,
   },
   launchThread: {
     input: OrchestrationV2ThreadLaunchInput,

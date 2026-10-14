@@ -38,6 +38,8 @@ const MAX_CONSOLE_TEXT_CHARS = 500;
 const VIEWPORT_HEIGHT = 800;
 const MAX_CAPTURE_HEIGHT = 4_000;
 const CAPTURE_TIMEOUT = "20 seconds";
+const EVALUATE_TIMEOUT = "45 seconds";
+const EVALUATE_VIEWPORT_WIDTH = 1_280;
 // Pages load from this made-up web origin, never from a file. Chrome refuses
 // local files to every web page, frame, worker, and popup, so a page cannot
 // read files the agent's provider withholds; local images reach it already
@@ -60,8 +62,22 @@ const textEncoder = new TextEncoder();
  * A page as the base64 bytes `PAGE_URL` serves, encoded once however often it
  * loads. Node's encoder, since pages run to 25 MiB.
  */
-const pageBody = (html: string) =>
-  Buffer.from(Buffer.from(html, "utf8").toString("base64"), "latin1");
+const pageBody = (html: string) => base64Body(Buffer.from(html, "utf8"));
+
+const base64Body = (bytes: Uint8Array) =>
+  Buffer.from(Buffer.from(bytes).toString("base64"), "latin1");
+
+/** A file a page loads from its own origin, such as a script or a font. */
+export interface PageResource {
+  readonly bytes: Uint8Array;
+  readonly contentType: string;
+}
+
+/**
+ * Serves paths under the page's origin other than the page itself. Returns
+ * undefined for a path the page may not load.
+ */
+export type PageResources = (pathname: string) => Effect.Effect<PageResource | undefined>;
 
 const CdpMessage = Schema.fromJsonString(
   Schema.Struct({
@@ -181,6 +197,7 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
   readonly executable: string;
   readonly noSandbox: boolean;
   readonly profileDirectory: string;
+  readonly resources?: PageResources | undefined;
 }) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const proxyPort = yield* publicProxy.pipe(
@@ -262,10 +279,15 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
   // Serves the page. Its body is shared bytes between two small JSON halves,
   // queued together, so loading a page of up to 25 MiB at several widths never
   // copies it on this side.
-  const fulfillPage = (sessionId: string, requestId: string, body: Uint8Array) =>
+  const fulfillPage = (
+    sessionId: string,
+    requestId: string,
+    body: Uint8Array,
+    contentType = "text/html; charset=utf-8",
+  ) =>
     Queue.offerAll(outgoing, [
       textEncoder.encode(
-        `{"id":${++nextId},"sessionId":${JSON.stringify(sessionId)},"method":"Fetch.fulfillRequest","params":{"requestId":${JSON.stringify(requestId)},"responseCode":200,"responseHeaders":[{"name":"Content-Type","value":"text/html; charset=utf-8"}],"body":"`,
+        `{"id":${++nextId},"sessionId":${JSON.stringify(sessionId)},"method":"Fetch.fulfillRequest","params":{"requestId":${JSON.stringify(requestId)},"responseCode":200,"responseHeaders":[{"name":"Content-Type","value":${JSON.stringify(contentType)}}],"body":"`,
       ),
       body,
       textEncoder.encode('"}}\0'),
@@ -300,6 +322,26 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       const url = paused.request.url.split("#", 1)[0]!;
       if (url === PAGE_URL && body !== undefined) {
         return fulfillPage(sessionId, paused.requestId, body);
+      }
+      const resources = input.resources;
+      if (resources !== undefined && url.startsWith(`${PAGE_ORIGIN}/`)) {
+        const deny = post(
+          "Fetch.failRequest",
+          { requestId: paused.requestId, errorReason: "AccessDenied" },
+          sessionId,
+        );
+        return resources(new URL(url).pathname).pipe(
+          Effect.flatMap((resource) =>
+            resource === undefined
+              ? deny
+              : fulfillPage(
+                  sessionId,
+                  paused.requestId,
+                  base64Body(resource.bytes),
+                  resource.contentType,
+                ),
+          ),
+        );
       }
       // A frame inside the page may show another site; Local Network Access
       // still covers it. The main frame and T3's own origin serve nothing else.
@@ -511,10 +553,28 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       Effect.ignore,
     );
 
-    return { load, screenshot, consoleMessages, close };
+    const evaluate = (expression: string) =>
+      send(
+        "Runtime.evaluate",
+        { expression, awaitPromise: true, returnByValue: true },
+        Evaluated,
+        sessionId,
+      );
+
+    return { load, screenshot, evaluate, consoleMessages, close };
   });
 
   return { openPage };
+});
+
+const Evaluated = Schema.Struct({
+  result: Schema.Struct({ value: Schema.optional(Schema.Unknown) }),
+  exceptionDetails: Schema.optional(
+    Schema.Struct({
+      text: Schema.String,
+      exception: Schema.optional(Schema.Struct({ description: Schema.optional(Schema.String) })),
+    }),
+  ),
 });
 
 /** A temporary directory for the browser profile, removed with the scope. */
@@ -597,3 +657,50 @@ export const measureHtmlHeights = Effect.fn("headlessChrome.measureHtmlHeights")
     { concurrency: MEASURE_CONCURRENCY },
   );
 }, Effect.scoped);
+
+/**
+ * Loads `html` with its own-origin files from `resources`, waits for it to
+ * settle, then evaluates `expression` (awaiting a returned promise) and
+ * returns the value. For pages that are programs rather than documents, such
+ * as the canvas renderer.
+ */
+export const evaluatePage = Effect.fn("headlessChrome.evaluatePage")(
+  function* (input: {
+    readonly executable: string;
+    readonly noSandbox: boolean;
+    readonly html: string;
+    readonly resources: PageResources;
+    readonly expression: string;
+  }) {
+    const path = yield* Path.Path;
+    const directory = yield* scratchDirectory;
+    const browser = yield* launchBrowser({
+      executable: input.executable,
+      noSandbox: input.noSandbox,
+      profileDirectory: path.join(directory, "profile"),
+      resources: input.resources,
+    });
+    const page = yield* browser.openPage(EVALUATE_VIEWPORT_WIDTH);
+    yield* page.load(pageBody(input.html), "");
+    const evaluated = yield* page.evaluate(input.expression);
+    if (evaluated.exceptionDetails !== undefined) {
+      const thrown =
+        evaluated.exceptionDetails.exception?.description ?? evaluated.exceptionDetails.text;
+      return yield* new HtmlRenderBrowserError({
+        reason: "the page script failed",
+        cause: [thrown, ...page.consoleMessages().map((message) => message.text)].join("\n"),
+      });
+    }
+    return evaluated.result.value;
+  },
+  Effect.scoped,
+  Effect.timeoutOrElse({
+    duration: EVALUATE_TIMEOUT,
+    orElse: () =>
+      Effect.fail(
+        new HtmlRenderBrowserError({
+          reason: `the page did not finish within ${EVALUATE_TIMEOUT}`,
+        }),
+      ),
+  }),
+);

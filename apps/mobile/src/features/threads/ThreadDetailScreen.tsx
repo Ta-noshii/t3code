@@ -119,7 +119,9 @@ import type {
 } from "../../lib/threadActivity";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { ComposerErrorNotice } from "./ComposerErrorNotice";
+import { CanvasFocusNotice } from "../canvas/CanvasFocusNotice";
 import { ComposerFeedback } from "./ComposerFeedback";
+import { ThreadRecapNotice } from "./ThreadRecapNotice";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import { ProviderSubagentBar } from "./ProviderSubagentBar";
@@ -198,6 +200,13 @@ export interface ThreadDetailScreenProps {
   /** Progressive history controls for oversized mobile thread opens. */
   readonly historyControls?: ThreadFeedHistoryControls;
   readonly activeThreadBusy: boolean;
+  /** The provider's guess at the next prompt, offered in an empty composer. */
+  readonly promptSuggestion: string | null;
+  /** "While you were away" summary of a finished thread, shown above the composer. */
+  readonly threadRecap: string | null;
+  readonly onDismissThreadRecap: () => void;
+  /** Opens a new thread with the conversation before a sent message and the message unsent. */
+  readonly onEditInNewThread: (messageId: MessageId) => Promise<void>;
   readonly canStopThread: boolean;
   /** Set while a queued message is open in the composer for editing. */
   readonly queuedRunEdit: QueuedRunEdit | null;
@@ -1166,6 +1175,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               // A native subagent has no composer to edit a pending message in;
               // Cancel on the edit banner would discard it.
               onEditPendingMessage={isProviderSubagent ? null : handleEditPendingMessage}
+              onEditInNewThread={isProviderSubagent ? null : props.onEditInNewThread}
               contentPresentation={props.contentPresentation}
               agentLabel={agentLabel}
               threadTitle={props.selectedThread.title}
@@ -1295,6 +1305,22 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     key={props.selectedThread.latestRun?.runId}
                     thread={props.selectedThread}
                     environmentId={props.environmentId}
+                  />
+                  {props.threadRecap !== null ? (
+                    <Animated.View
+                      className="shrink-0"
+                      entering={FadeInDown.duration(220)}
+                      exiting={FadeOut.duration(140)}
+                    >
+                      <ThreadRecapNotice
+                        recap={props.threadRecap}
+                        onDismiss={props.onDismissThreadRecap}
+                      />
+                    </Animated.View>
+                  ) : null}
+                  <CanvasFocusNotice
+                    environmentId={props.environmentId}
+                    threadId={props.selectedThread.id}
                   />
                   {props.feedbackSubmissions.map((submission) => (
                     <ComposerFeedback
@@ -1442,6 +1468,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                         serverConfig={props.serverConfig}
                         queueCount={props.selectedThreadQueueCount}
                         activeThreadBusy={props.activeThreadBusy}
+                        promptSuggestion={
+                          props.activePendingApproval === null &&
+                          props.activePendingUserInput === null
+                            ? props.promptSuggestion
+                            : null
+                        }
                         canStopThread={props.canStopThread}
                         environmentId={props.environmentId}
                         projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}

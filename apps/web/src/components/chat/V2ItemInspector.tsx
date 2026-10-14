@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   OrchestrationV2ProjectedTurnItem,
   RunId,
+  ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -13,6 +14,11 @@ import {
 } from "@t3tools/client-runtime/work-log/item-detail";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
+import { toolCallDigest, toolResultDigest } from "@t3tools/client-runtime/work-log/tool-digest";
+import {
+  type ToolOutputBlock,
+  turnItemOutputBlocks,
+} from "@t3tools/client-runtime/work-log/tool-value";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
 import { memo, Suspense, use, useMemo } from "react";
 
@@ -29,6 +35,7 @@ import { RenderErrorBoundary } from "../RenderErrorBoundary";
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
+import { ToolCallDigestView, ToolOutputView, type ToolViewContext } from "./ToolOutputView";
 
 interface V2ItemInspectorProps {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
@@ -36,6 +43,8 @@ interface V2ItemInspectorProps {
   readonly cwd?: string | undefined;
   readonly workspaceRoot?: string | undefined;
   readonly onOpenThread: (threadId: ThreadId) => void;
+  /** Provider statuses, for logos and model names in tool results. */
+  readonly providers?: ReadonlyArray<ServerProvider> | undefined;
   readonly onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   readonly onRollbackCheckpoint?: (input: {
     readonly checkpointId: string;
@@ -134,6 +143,10 @@ function useFetchedTurnItem(
   return {
     item,
     output: {
+      blocks: turnItemOutputBlocks(item),
+      raw: item.type === "dynamic_tool" ? item.output : undefined,
+      toolName: item.type === "dynamic_tool" ? item.toolName : undefined,
+      input: item.type === "dynamic_tool" ? item.input : undefined,
       output: turnItemOutputText(item),
       images: turnItemOutputImages(item),
       environmentId,
@@ -150,6 +163,12 @@ function useFetchedTurnItem(
 }
 
 interface ToolOutputState {
+  /** Structured result for tool items; `output` is the text fallback for the rest. */
+  readonly blocks: readonly ToolOutputBlock[] | null;
+  readonly raw: unknown;
+  readonly toolName: string | null | undefined;
+  readonly input: unknown;
+  readonly hideImages?: boolean | undefined;
   readonly output: string | null;
   readonly images: ReturnType<typeof turnItemOutputImages>;
   readonly environmentId: EnvironmentId;
@@ -159,8 +178,12 @@ interface ToolOutputState {
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }
 
-function ToolOutput(props: ToolOutputState) {
-  const images = props.images.map((resource) => (
+const NO_CONTEXT: ToolViewContext = { cwd: undefined, threadRef: undefined };
+
+function ToolOutput(props: ToolOutputState & { readonly context?: ToolViewContext | undefined }) {
+  // Images load as assets below; the detail read carries no image bytes.
+  const blocks = props.blocks?.filter((block) => block.kind !== "image") ?? null;
+  const images = (props.hideImages ? [] : props.images).map((resource) => (
     <ChatMarkdownAssetImage
       key={resource.index}
       environmentId={props.environmentId}
@@ -170,15 +193,28 @@ function ToolOutput(props: ToolOutputState) {
       onImageExpand={props.onImageExpand}
     />
   ));
-  const text = props.output ? (
-    <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
-  ) : props.pending ? (
-    <div className="text-muted-foreground italic">Loading output…</div>
-  ) : props.error ? (
-    <div className="text-destructive">Couldn&apos;t load output: {props.error}</div>
-  ) : props.empty && images.length === 0 ? (
-    <div className="text-muted-foreground italic">No output.</div>
-  ) : null;
+  // Some tools answer with nothing on purpose, such as a thread wait that ran out.
+  const hasResult =
+    blocks !== null &&
+    (blocks.length > 0 || toolResultDigest(props.toolName, null, props.input) !== null);
+  const text =
+    blocks && hasResult ? (
+      <ToolOutputView
+        blocks={blocks}
+        raw={props.raw}
+        toolName={props.toolName}
+        input={props.input}
+        context={props.context ?? NO_CONTEXT}
+      />
+    ) : props.output ? (
+      <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
+    ) : props.pending ? (
+      <div className="text-muted-foreground italic">Loading output…</div>
+    ) : props.error ? (
+      <div className="text-destructive">Couldn&apos;t load output: {props.error}</div>
+    ) : props.empty && images.length === 0 ? (
+      <div className="text-muted-foreground italic">No output.</div>
+    ) : null;
   return (
     <>
       {images}
@@ -192,11 +228,13 @@ export function FetchedToolOutput(props: {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly environmentId: EnvironmentId;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
+  /** The row already previews the image the tool read. */
+  readonly hideImages?: boolean | undefined;
 }) {
   const { output } = useFetchedTurnItem(props.projectedItem, props.environmentId);
   return (
     <div className={cn("mt-1.5 space-y-1.5", monoClassName)}>
-      <ToolOutput {...output} onImageExpand={props.onImageExpand} />
+      <ToolOutput {...output} onImageExpand={props.onImageExpand} hideImages={props.hideImages} />
     </div>
   );
 }
@@ -206,10 +244,21 @@ function ToolCallBody(
   props: ToolOutputState & {
     readonly command?: string;
     readonly args?: unknown;
-    readonly toolName?: string | null;
     readonly exitCode?: number | undefined;
+    readonly context?: ToolViewContext | undefined;
   },
 ) {
+  const digest = props.toolName ? toolCallDigest(props.toolName, props.args) : null;
+  if (digest) {
+    return (
+      <div className="space-y-3">
+        <ToolCallDigestView digest={digest} context={props.context ?? NO_CONTEXT} />
+        <div className="border-t border-border/40 pt-2">
+          <ToolOutput {...props} />
+        </div>
+      </div>
+    );
+  }
   const call = toolCallLines({ command: props.command, args: props.args });
   return (
     <div className={cn("space-y-1.5", monoClassName)}>
@@ -367,10 +416,18 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
 
       {item.type === "dynamic_tool" ? (
         <ToolCallBody
-          toolName={item.toolName}
           args={item.input}
           {...outputState}
           onImageExpand={props.onImageExpand}
+          context={{
+            cwd: props.cwd,
+            threadRef: {
+              environmentId: props.environmentId,
+              threadId: props.projectedItem.sourceThreadId,
+            },
+            onOpenThread: props.onOpenThread,
+            providers: props.providers,
+          }}
         />
       ) : null}
 

@@ -64,7 +64,8 @@ export type T3McpToolSummaryAction =
   | "browser"
   | "device"
   | "html-preview"
-  | "html-render";
+  | "html-render"
+  | "canvas";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -126,6 +127,7 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "capabilities",
   ),
   delegate_task: tool(["Delegate", "Delegating", "Delegated", "a child task"], "delegate"),
+  codex_review: tool(["Start", "Starting", "Started", "a Codex review"], "delegate"),
   task_status: tool(["Get", "Getting", "Got", "delegated task status"], "task-status"),
   task_cancel: tool(
     ["Cancel", "Canceling", "Requested cancellation of", "delegated task"],
@@ -232,6 +234,11 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
     "browser",
   ),
+  preview_overflow_check: tool(
+    ["Check", "Checking", "Checked", "the preview page for overflow"],
+    "browser",
+    "browser",
+  ),
   preview_wait_for: tool(
     ["Wait", "Waiting", "Waited", "for the preview page"],
     "browser",
@@ -278,6 +285,10 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   t3_queue_reorder: tool(["Reorder", "Reordering", "Reordered", "a queued run"], "queue-reorder"),
   t3_queue_promote_to_steer: tool(
     ["Steer with", "Steering with", "Requested steering with", "a queued message"],
+    "queue-steer",
+  ),
+  t3_queue_send_all: tool(
+    ["Steer with", "Steering with", "Requested steering with", "all queued messages"],
     "queue-steer",
   ),
   t3_pending_request_list: tool(
@@ -332,6 +343,17 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   t3_thread_send_attachments: tool(["Send", "Sending", "Sent", "attachments"], "attachment-send"),
   html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
+  canvas_list: tool(["List", "Listing", "Listed", "canvases"], "canvas"),
+  canvas_create: tool(["Create", "Creating", "Created", "a canvas"], "canvas"),
+  canvas_move: tool(["Move", "Moving", "Moved", "a canvas"], "canvas"),
+  canvas_open: tool(["Open", "Opening", "Opened", "a canvas"], "canvas"),
+  canvas_read: tool(["Read", "Reading", "Read", "a canvas"], "canvas"),
+  canvas_update: tool(["Update", "Updating", "Updated", "a canvas"], "canvas"),
+  canvas_add_image: tool(["Add", "Adding", "Added", "an image to a canvas"], "canvas"),
+  canvas_screenshot: tool(
+    ["Take a screenshot of", "Taking a screenshot of", "Took a screenshot of", "a canvas"],
+    "canvas",
+  ),
 };
 
 /**
@@ -386,6 +408,12 @@ function resolveT3McpToolName(value: string): string | null {
 
 /** The bare T3 tool name (`html_render`) for any provider's spelling of it. */
 export function resolveT3McpToolId(toolName: string | null | undefined): string | null {
+  const name = toolName == null ? null : resolveT3McpToolName(toolName);
+  return name !== null && Object.hasOwn(T3_MCP_TOOLS, name) ? name : null;
+}
+
+/** The bare T3 tool name (`task_status`) behind any provider's prefixed form, or null. */
+export function resolveT3McpToolKey(toolName: string | null | undefined): string | null {
   const name = toolName == null ? null : resolveT3McpToolName(toolName);
   return name !== null && Object.hasOwn(T3_MCP_TOOLS, name) ? name : null;
 }

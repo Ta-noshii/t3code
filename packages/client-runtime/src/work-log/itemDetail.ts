@@ -2,6 +2,9 @@ import type { AssetResource, OrchestrationV2TurnItem } from "@t3tools/contracts"
 import { readToolOutputImage, toolOutputImages } from "@t3tools/shared/toolOutput";
 import * as DateTime from "effect/DateTime";
 
+import { toolDigestText, toolResultDigest } from "./toolDigest.ts";
+import { toolOutputBlocks } from "./toolValue.ts";
+
 const MAX_TEXT_BLOCK_DEPTH = 4;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -167,15 +170,55 @@ function commandOutputText(output: string): string {
     .join("\n");
 }
 
+/** A tool result as its digest text where it has one, so plain-text clients skip the JSON too. */
+function dynamicToolOutputText(
+  item: Extract<OrchestrationV2TurnItem, { type: "dynamic_tool" }>,
+): string | null {
+  const hasImagePreview = item.viewedImagePath !== undefined;
+  const blocks = toolOutputBlocks(item.output);
+  if (blocks.length === 0) {
+    const digest = toolResultDigest(item.toolName, null, item.input);
+    return digest ? toolDigestText(digest) : null;
+  }
+  const digests = blocks.map((block) =>
+    block.kind === "image"
+      ? null
+      : toolResultDigest(
+          item.toolName,
+          block.kind === "data" ? block.value : block.text,
+          item.input,
+        ),
+  );
+  // Without a structured result to summarize, the output reads as it always has,
+  // image placeholders included.
+  const summarized = blocks.some(
+    (block, index) =>
+      block.kind === "data" &&
+      isRecord(block.value) &&
+      // A content block (an image without bytes, say) is not a result to summarize.
+      typeof block.value.type !== "string" &&
+      digests[index] !== null,
+  );
+  if (!summarized) {
+    return formatToolValue(item.output, hasImagePreview);
+  }
+  const parts = blocks.map((block, index) => {
+    if (block.kind === "image") return "[image]";
+    const digest = digests[index];
+    if (digest) return toolDigestText(digest);
+    return block.kind === "text" ? block.text : formatToolValue(block.value);
+  });
+  const text = parts.filter((part): part is string => Boolean(part?.trim())).join("\n\n");
+  return text || formatToolValue(item.output, hasImagePreview);
+}
+
 /** The tool output carried by a fetched item, formatted for display. */
 export function turnItemOutputText(item: OrchestrationV2TurnItem): string | null {
   switch (item.type) {
     case "command_execution":
       return item.output?.trim() ? commandOutputText(item.output) || null : null;
     case "dynamic_tool":
-      return item.outputOmitted === true
-        ? null
-        : formatToolValue(item.output, item.viewedImagePath !== undefined);
+      return item.outputOmitted === true ? null : dynamicToolOutputText(item);
     case "file_search":
       return item.results?.length
         ? item.results

@@ -670,11 +670,39 @@ describe("CodexAdapterV2 process spawning", () => {
               http_headers: {
                 Authorization: "Bearer secret-codex-token",
               },
+              tool_timeout_sec: 3900,
             },
           },
         },
       },
     );
+  });
+
+  it("gives each thread's shell commands that thread's agent shell credential", () => {
+    const params = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: {
+        environmentId: EnvironmentId.make("environment-codex-mcp"),
+        threadId: ThreadId.make("thread-codex-shell"),
+        providerSessionId: "mcp-session-codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        endpoint: "http://127.0.0.1:43123/mcp",
+        authorizationHeader: "Bearer secret-codex-token",
+        browserToolsAvailable: false,
+        agentShellEnvironment: {
+          T3CODE_THREAD_ID: "thread-codex-shell",
+          T3CODE_AGENT_SHELL_URL: "http://127.0.0.1:43123",
+          T3CODE_AGENT_SHELL_AUTHORIZATION: "Bearer shell-token",
+        },
+      },
+      modelSelection: { model: "gpt-5.4" },
+      runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: "/workspace" },
+    });
+    // One app-server serves many threads, so the values go in thread config.
+    assert.include(params.config, {
+      "shell_environment_policy.set.T3CODE_THREAD_ID": "thread-codex-shell",
+      "shell_environment_policy.set.T3CODE_AGENT_SHELL_URL": "http://127.0.0.1:43123",
+      "shell_environment_policy.set.T3CODE_AGENT_SHELL_AUTHORIZATION": "Bearer shell-token",
+    });
   });
 
   it.effect("resolves Windows command shims through the shared spawn policy", () =>
@@ -2950,6 +2978,116 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           ["running", "completed"],
         );
         assert.equal(items[0]?.id, items[1]?.id);
+        assert.equal(harness.terminalEvents()[0]?.status, "completed");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("runs /review through Codex's native review and keeps only the rendered review", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const nativeThreadId = "review-thread";
+        const nativeTurnId = "review-turn";
+        const item = (method: "item/started" | "item/completed", value: object) => ({
+          type: "emit_inbound" as const,
+          label: `${method}/${(value as { id: string }).id}`,
+          frame: {
+            method,
+            params: { threadId: nativeThreadId, turnId: nativeTurnId, item: value },
+          },
+        });
+        const rawFinal = {
+          type: "agentMessage",
+          id: "raw-final",
+          text: "",
+          phase: "final_answer",
+          memoryCitation: null,
+        };
+        const rendered = {
+          type: "agentMessage",
+          id: "rendered",
+          text: "No actionable defects.",
+          phase: null,
+          memoryCitation: null,
+        };
+        const transcript = makeCodexReplayTranscript({
+          scenario: "native-review",
+          entries: [
+            ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "unused" }).slice(0, 5),
+            {
+              type: "expect_outbound",
+              label: "review/start",
+              frame: {
+                id: 3,
+                method: "review/start",
+                params: {
+                  threadId: nativeThreadId,
+                  target: { type: "commit", sha: "a5e88ca156" },
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "review/start",
+              frame: {
+                id: 3,
+                result: {
+                  turn: {
+                    ...makeCodexReplayTurn({ id: nativeTurnId, status: "inProgress" }),
+                    startedAt: null,
+                  },
+                  reviewThreadId: nativeThreadId,
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "nested turn/started",
+              frame: {
+                method: "turn/started",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: "nested-review-turn", status: "inProgress" }),
+                },
+              },
+            },
+            item("item/started", { type: "enteredReviewMode", id: "enter", review: "commit" }),
+            item("item/completed", { type: "enteredReviewMode", id: "enter", review: "commit" }),
+            item("item/started", rawFinal),
+            item("item/started", { type: "exitedReviewMode", id: "exit", review: rendered.text }),
+            item("item/completed", { type: "exitedReviewMode", id: "exit", review: rendered.text }),
+            item("item/started", rendered),
+            item("item/completed", rendered),
+            {
+              type: "emit_inbound",
+              label: "complete",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                },
+              },
+            },
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(transcript);
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("review-attempt"),
+            text: "/review --commit a5e88ca156",
+          }),
+        );
+        yield* harness.firstTerminal;
+        const texts = assistantTurnItems(harness.events).map((entry) => entry.text);
+        assert.deepEqual([...new Set(texts)], ["No actionable defects."]);
         assert.equal(harness.terminalEvents()[0]?.status, "completed");
       }).pipe(
         Effect.provide(

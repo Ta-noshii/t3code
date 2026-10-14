@@ -63,6 +63,11 @@ the oldest queued message as a steer. This leaves the current draft intact and
 requires an active turn that supports steering. Change
 `thread.steerQueuedMessage` in **Settings → Keybindings** to use another shortcut.
 
+With two or more messages queued, **Send all** steers them into the running turn
+as one message, in queue order, with their attachments. Commands that run as their
+own turn, such as `/compact`, stay queued. Mobile has the same button in the queue
+sheet.
+
 Press `Option+Up` on macOS or `Alt+Up` on Windows and Linux with the cursor at the
 start of the composer to edit the most recently queued message. Change
 `thread.editQueuedMessage` to use another shortcut.
@@ -156,6 +161,14 @@ This removes the selected message and later conversation from the active thread
 and provider history. It does not undo external actions or separate provider
 memory. The action is available only when the provider supports rewind.
 
+To keep the original thread, choose **Edit in new thread** instead. It is also
+available on mobile. It opens a new thread with the conversation up to that
+message and puts the message and its attachments in the composer, unsent. On
+mobile the attachments stay in the original thread. The provider continues its own copy of the
+session when it can fork one; otherwise it receives the earlier conversation as
+context. A steer cannot be edited this way, because it belongs to the turn it
+joined.
+
 ## Prompt stash
 
 On web and desktop, press `Cmd+S` on macOS or `Ctrl+S` on Windows and Linux to save
@@ -231,6 +244,8 @@ Provider commands must start the message to run. T3 Code commands such as
 
 Send `/compact` in an existing conversation to reduce context usage when the
 provider supports it. Web and desktop also offer compaction from the context meter.
+While the agent is working, `/compact` waits in the queue and runs after the current
+turn; remove it from the queue to cancel.
 
 ## Goals
 

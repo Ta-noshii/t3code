@@ -22,6 +22,13 @@ export interface McpProviderSessionConfig {
    * already pointed at the server's daemon; the agent never handles a token.
    */
   readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
+  /**
+   * The thread id, server URL and shell-only credential that let a process in
+   * the agent's shell ask the user through the thread (`t3 secret prompt`).
+   * Adapters spread it into the provider subprocess environment with
+   * `withAgentShellEnvironment`; the credential does not open `/mcp`.
+   */
+  readonly agentShellEnvironment?: Readonly<Record<string, string>>;
 }
 
 /** Provider env with the device variables applied over `base`, or `base` untouched. */
@@ -39,4 +46,29 @@ export function withAgentDeviceEnvironment(
     ...rest,
     ...(shimDir ? { PATH: basePath ? `${shimDir}${separator}${basePath}` : shimDir } : {}),
   };
+}
+
+/** Names in `agentShellEnvironment`; the server issues all three together. */
+export const AGENT_SHELL_ENVIRONMENT_NAMES = [
+  "T3CODE_THREAD_ID",
+  "T3CODE_AGENT_SHELL_URL",
+  "T3CODE_AGENT_SHELL_AUTHORIZATION",
+] as const;
+
+/**
+ * Provider env with the agent shell variables and the device variables
+ * applied over `base`. Use it wherever an adapter spawns the process whose
+ * shell commands the agent runs.
+ */
+export function withAgentShellEnvironment(
+  base: NodeJS.ProcessEnv,
+  config:
+    | Pick<McpProviderSessionConfig, "agentDeviceEnvironment" | "agentShellEnvironment">
+    | undefined,
+): NodeJS.ProcessEnv {
+  const environment = { ...withAgentDeviceEnvironment(base, config) };
+  // Variables inherited from whatever launched the server belong to another
+  // thread, possibly on another server; never pass them on.
+  for (const name of AGENT_SHELL_ENVIRONMENT_NAMES) delete environment[name];
+  return { ...environment, ...config?.agentShellEnvironment };
 }

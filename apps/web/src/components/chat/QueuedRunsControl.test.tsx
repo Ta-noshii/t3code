@@ -10,7 +10,8 @@ vi.mock("@t3tools/client-runtime/environment", () => ({
   scopeThreadRef: () => ({}) as never,
 }));
 
-vi.mock("@t3tools/client-runtime/state/thread-workflows", () => ({
+vi.mock("@t3tools/client-runtime/state/thread-workflows", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/client-runtime/state/thread-workflows")>()),
   deriveThreadQueueWorkflowState: () => state.workflow,
 }));
 
@@ -23,6 +24,7 @@ vi.mock("../../state/threads", () => ({
     cancelQueuedRun: Symbol("cancelQueuedRun"),
     promoteQueuedRun: Symbol("promoteQueuedRun"),
     reorderQueuedRun: Symbol("reorderQueuedRun"),
+    sendAllQueuedMessages: Symbol("sendAllQueuedMessages"),
   },
 }));
 

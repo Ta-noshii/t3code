@@ -18,6 +18,7 @@ import {
   isProjectGroupingEnabled,
   projectGroupingModeFromToggle,
   resolveBackgroundActivityProfileOption,
+  resolveEditableProviderInstance,
 } from "./SettingsPanels.logic";
 
 describe("typography settings restore", () => {
@@ -211,6 +212,49 @@ describe("buildProviderInstanceUpdatePatch", () => {
 
     expect(patch.providerInstances).toEqual({ [otherId]: other, [instanceId]: nextInstance });
     expect(patch).not.toHaveProperty("textGenerationModelSelection");
+  });
+});
+
+describe("resolveEditableProviderInstance", () => {
+  const claude = ProviderDriverKind.make("claudeAgent");
+
+  it("gives an unconfigured default slot the driver's default config", () => {
+    expect(
+      resolveEditableProviderInstance({
+        settings: DEFAULT_SERVER_SETTINGS,
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        driver: claude,
+        isDefault: true,
+      }),
+    ).toEqual({ driver: claude });
+  });
+
+  it("prefers an explicit instance and never synthesizes a custom one", () => {
+    const explicit = {
+      driver: claude,
+      config: { autoCompactWindow: "500000" },
+    } satisfies ProviderInstanceConfig;
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: { [ProviderInstanceId.make("claudeAgent")]: explicit },
+    };
+
+    expect(
+      resolveEditableProviderInstance({
+        settings,
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        driver: claude,
+        isDefault: true,
+      }),
+    ).toBe(explicit);
+    expect(
+      resolveEditableProviderInstance({
+        settings,
+        instanceId: ProviderInstanceId.make("claude_work"),
+        driver: claude,
+        isDefault: false,
+      }),
+    ).toBeUndefined();
   });
 });
 

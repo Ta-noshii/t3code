@@ -213,6 +213,56 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
 });
 export type OrchestratorMcpDelegateTaskResult = typeof OrchestratorMcpDelegateTaskResult.Type;
 
+export const OrchestratorMcpCodexReviewTarget = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("uncommitted") }).annotate({
+    description: "Staged, unstaged and untracked changes in the working tree.",
+  }),
+  Schema.Struct({
+    type: Schema.Literal("base"),
+    branch: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+  }).annotate({ description: "The current branch against this base branch." }),
+  Schema.Struct({
+    type: Schema.Literal("commit"),
+    sha: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+    title: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(512))),
+  }).annotate({ description: "The changes one commit introduced." }),
+  Schema.Struct({
+    type: Schema.Literal("custom"),
+    instructions: OrchestratorMcpPrompt,
+  }).annotate({ description: "Free-form review instructions." }),
+]);
+export type OrchestratorMcpCodexReviewTarget = typeof OrchestratorMcpCodexReviewTarget.Type;
+
+export const OrchestratorMcpCodexReviewInput = Schema.Struct({
+  target: Schema.optional(OrchestratorMcpCodexReviewTarget).annotate({
+    description: "What to review, as codex review's flags. Defaults to uncommitted changes.",
+  }),
+  providerInstanceId: Schema.optional(
+    ProviderInstanceId.annotate({
+      description:
+        "Codex provider instance to review with. Defaults to this thread's instance when it is Codex, else the first Codex instance.",
+    }),
+  ),
+  model: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description: "Model for the reviewer. Defaults to the instance's default model.",
+    }),
+  ),
+  title: Schema.optional(OrchestratorMcpTitle),
+  mode: Schema.optional(
+    Schema.Literals(["async", "wait"]).annotate({
+      description:
+        "Defaults to async: the review's completion wakes this thread. Use wait only when this turn needs the findings before it can continue.",
+    }),
+  ),
+  timeoutMs: Schema.optional(Schema.Number).annotate({
+    description:
+      "Wait budget for mode=wait only. Default 10 minutes. Elapsing it does not cancel the review.",
+  }),
+  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
+});
+export type OrchestratorMcpCodexReviewInput = typeof OrchestratorMcpCodexReviewInput.Type;
+
 export const OrchestratorMcpTaskStatusInput = Schema.Struct({
   taskId: NodeId,
 });
@@ -496,6 +546,16 @@ export const OrchestratorMcpProviderCapability = Schema.Struct({
 });
 export type OrchestratorMcpProviderCapability = typeof OrchestratorMcpProviderCapability.Type;
 
+export const OrchestratorMcpCapabilitiesInput = Schema.Struct({
+  all: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "List every model and provider, including ones outside the server's orchestratorModels list and providers that cannot run child tasks.",
+    }),
+  ),
+});
+export type OrchestratorMcpCapabilitiesInput = typeof OrchestratorMcpCapabilitiesInput.Type;
+
 export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   /** The calling thread, or null when the caller is not a T3 thread. */
   parentThreadId: Schema.NullOr(ThreadId),
@@ -505,6 +565,8 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   providers: Schema.Array(OrchestratorMcpProviderCapability),
+  /** Models left out by the orchestratorModels setting or an unusable provider; `all: true` shows them. */
+  hiddenModelCount: Schema.optional(Schema.Number),
   features: Schema.Struct({
     appOwnedSubagents: Schema.Boolean,
     asyncPolling: Schema.Boolean,

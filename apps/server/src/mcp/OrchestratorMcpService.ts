@@ -12,11 +12,14 @@ import {
   type OrchestrationV2ThreadShell,
   type OrchestrationV2TurnItem,
   OrchestratorMcpFailure,
+  type OrchestratorMcpCapabilitiesInput,
   type OrchestratorMcpCapabilitiesResult,
   type OrchestratorMcpCreateThreadsInput,
   type OrchestratorMcpCreateThreadsResult,
   type OrchestratorMcpCreatedThread,
+  type OrchestratorMcpCodexReviewInput,
   type OrchestratorMcpDelegateTaskInput,
+  ProviderDriverKind,
   type OrchestratorMcpDelegateTaskResult,
   type OrchestratorMcpInteractionMode,
   type OrchestratorMcpDeleteScheduledTaskInput,
@@ -57,6 +60,11 @@ import {
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
+import {
+  codexReviewTargetLabel,
+  formatCodexReviewCommand,
+  type CodexReviewTarget,
+} from "@t3tools/shared/codexReview";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -125,10 +133,16 @@ type TerminalTaskStatus = Extract<
 export interface OrchestratorMcpServiceShape {
   readonly capabilities: (
     scope: McpInvocationScope,
+    input?: OrchestratorMcpCapabilitiesInput,
   ) => Effect.Effect<OrchestratorMcpCapabilitiesResult, OrchestratorMcpFailure>;
   readonly delegateTask: (
     scope: McpInvocationScope,
     input: OrchestratorMcpDelegateTaskInput,
+  ) => Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure>;
+  /** A delegated task whose turn runs Codex's built-in reviewer (`/review`). */
+  readonly codexReview: (
+    scope: McpInvocationScope,
+    input: OrchestratorMcpCodexReviewInput,
   ) => Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure>;
   readonly taskStatus: (
     scope: McpInvocationScope,
@@ -673,6 +687,24 @@ function threadTitle(input: {
   return detail.length > 80 ? `${detail.slice(0, 77)}...` : detail;
 }
 
+const CODEX_DRIVER = ProviderDriverKind.make("codex");
+
+function codexReviewTarget(target: OrchestratorMcpCodexReviewInput["target"]): CodexReviewTarget {
+  switch (target?.type) {
+    case undefined:
+    case "uncommitted":
+      return { type: "uncommittedChanges" };
+    case "base":
+      return { type: "baseBranch", branch: target.branch };
+    case "commit":
+      return target.title === undefined
+        ? { type: "commit", sha: target.sha }
+        : { type: "commit", sha: target.sha, title: target.title };
+    case "custom":
+      return { type: "custom", instructions: target.instructions };
+  }
+}
+
 function taskPrompt(input: OrchestratorMcpDelegateTaskInput): string {
   return input.role === undefined || input.role === "general"
     ? input.task
@@ -1122,6 +1154,16 @@ const make = Effect.gen(function* () {
     });
 
   const loadProviders = providerRegistry.getProviders;
+
+  /**
+   * The orchestratorModels server setting. An unreadable settings file lists
+   * everything: a short list is a convenience, and hiding models on a read
+   * error would look like they vanished.
+   */
+  const loadOrchestratorModels = serverSettings.getSettings.pipe(
+    Effect.map((settings) => settings.orchestratorModels),
+    Effect.orElseSucceed(() => [] as ReadonlyArray<{ provider: string; model: string }>),
+  );
 
   /**
    * Instance ids the adapter registry resolves — the same lookup a
@@ -1610,7 +1652,7 @@ const make = Effect.gen(function* () {
       return task;
     });
 
-  return OrchestratorMcpService.of({
+  const service: OrchestratorMcpServiceShape = OrchestratorMcpService.of({
     scheduleTask: (scope, input) =>
       Effect.gen(function* () {
         const { parent, limits } = yield* loadCaller(scope);
@@ -1890,7 +1932,7 @@ const make = Effect.gen(function* () {
         return { status, secretRef: secretRef.value };
       }).pipe(Effect.withSpan("OrchestratorMcpService.requestSecret")),
 
-    capabilities: (scope) =>
+    capabilities: (scope, input) =>
       Effect.gen(function* () {
         const { parent, limits } = yield* loadCaller(scope);
         const providers = yield* loadProviders;
@@ -1900,35 +1942,64 @@ const make = Effect.gen(function* () {
           Effect.map((settings) => settings.providerModelPreferences ?? {}),
           Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
         );
+        const listed = input?.all === true ? [] : yield* loadOrchestratorModels;
+        const curated = input?.all !== true;
+        const inherited = parent?.thread.modelSelection;
+        // A selection may name a model by an alias (Antigravity's
+        // `antigravity-default` points at whichever native model is current),
+        // so both the thread's own model and the list match aliases too.
+        const names = (model: ServerProvider["models"][number]) => [
+          model.slug,
+          ...(model.aliases ?? []),
+        ];
+        const shown = (instanceId: string, model: ServerProvider["models"][number]) =>
+          listed.length === 0 ||
+          (inherited !== undefined &&
+            instanceId === inherited.instanceId &&
+            names(model).includes(inherited.model)) ||
+          listed.some(
+            (entry) => entry.provider === instanceId && names(model).includes(entry.model),
+          );
+        let hiddenModelCount = 0;
+        const entries = providers.flatMap((provider) => {
+          const constraints = providerConstraints(
+            provider,
+            orchestrationCapableInstanceIds.has(provider.instanceId),
+          );
+          const offered = provider.models.filter(
+            (model) =>
+              model.isCustom ||
+              !modelPreferences[provider.instanceId]?.hiddenModels.includes(model.slug),
+          );
+          const models = offered.filter((model) =>
+            curated ? shown(provider.instanceId, model) : true,
+          );
+          const usable = constraints.length === 0;
+          if (curated && (!usable || models.length === 0)) {
+            hiddenModelCount += offered.length;
+            return [];
+          }
+          hiddenModelCount += offered.length - models.length;
+          return [{ provider, models, constraints }];
+        });
         return {
           parentThreadId: parent?.thread.id ?? null,
           inheritedProviderInstanceId: parent?.thread.modelSelection.instanceId ?? null,
           inheritedModel: parent?.thread.modelSelection.model ?? null,
           runtimeMode: limits.runtimeMode,
           interactionMode: limits.interactionMode,
-          providers: providers.map((provider) => {
-            const constraints = providerConstraints(
-              provider,
-              orchestrationCapableInstanceIds.has(provider.instanceId),
-            );
+          providers: entries.map(({ provider, models, constraints }) => {
             return {
               providerInstanceId: provider.instanceId,
               driverKind: provider.driver,
-              displayName: provider?.displayName ?? null,
-              models:
-                provider?.models
-                  .filter(
-                    (model) =>
-                      model.isCustom ||
-                      !modelPreferences[provider.instanceId]?.hiddenModels.includes(model.slug),
-                  )
-                  .map((model) => ({
-                    id: model.slug,
-                    label: model.name ?? null,
-                    ...(model.capabilities?.optionDescriptors === undefined
-                      ? {}
-                      : { options: model.capabilities.optionDescriptors }),
-                  })) ?? [],
+              displayName: provider.displayName ?? null,
+              models: models.map((model) => ({
+                id: model.slug,
+                label: model.name ?? null,
+                ...(model.capabilities?.optionDescriptors === undefined
+                  ? {}
+                  : { options: model.capabilities.optionDescriptors }),
+              })),
               ...(provider.supportedRuntimeModes === undefined ||
               provider.supportedRuntimeModes.length === 0
                 ? {}
@@ -1938,6 +2009,7 @@ const make = Effect.gen(function* () {
               constraints: [...constraints],
             };
           }),
+          ...(hiddenModelCount > 0 ? { hiddenModelCount } : {}),
           features: {
             appOwnedSubagents: true,
             asyncPolling: true,
@@ -2652,7 +2724,50 @@ const make = Effect.gen(function* () {
           status: result.type === "already_terminal" ? result.run.status : "interrupt_requested",
         } satisfies OrchestratorMcpThreadInterruptResult;
       }),
+    codexReview: (scope, input) =>
+      Effect.gen(function* () {
+        const providers = yield* loadProviders;
+        const callerInstanceId = scope.thread?.providerInstanceId;
+        const codex = providers.filter((provider) => provider.driver === CODEX_DRIVER);
+        const provider =
+          input.providerInstanceId === undefined
+            ? (codex.find((candidate) => candidate.instanceId === callerInstanceId) ??
+              codex.find((candidate) => candidate.enabled !== false) ??
+              codex[0])
+            : providers.find((candidate) => candidate.instanceId === input.providerInstanceId);
+        if (provider === undefined) {
+          return yield* failure(
+            "invalid_request",
+            input.providerInstanceId === undefined
+              ? "No Codex provider instance is configured."
+              : `Provider instance ${input.providerInstanceId} was not found.`,
+          );
+        }
+        if (provider.driver !== CODEX_DRIVER) {
+          return yield* failure(
+            "invalid_request",
+            `codex_review needs a Codex instance; ${provider.instanceId} runs ${provider.driver}.`,
+          );
+        }
+        const target = codexReviewTarget(input.target);
+        return yield* service.delegateTask(scope, {
+          task: formatCodexReviewCommand(target),
+          target: {
+            providerInstanceId: provider.instanceId,
+            ...(input.model === undefined ? {} : { model: input.model }),
+          },
+          title: input.title ?? `Review ${codexReviewTargetLabel(target)}`,
+          // The reviewer reads; plan mode would only get in its way.
+          interactionMode: "default",
+          ...(input.mode === undefined ? {} : { mode: input.mode }),
+          ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+          ...(input.clientRequestId === undefined
+            ? {}
+            : { clientRequestId: input.clientRequestId }),
+        });
+      }).pipe(Effect.withSpan("OrchestratorMcpService.codexReview")),
   });
+  return service;
 });
 
 export const layer: Layer.Layer<

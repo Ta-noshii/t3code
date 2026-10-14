@@ -76,6 +76,7 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
   type ProviderRequestKind,
+  ProviderSessionId,
   type ProviderUserInputAnswers,
   type ProviderThreadId,
   type RunId,
@@ -147,6 +148,13 @@ import {
 import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import {
+  CLAUDE_SESSION_EXPORT_FORMAT,
+  ClaudeSessionExport,
+  claudeHomeDir,
+  exportClaudeSession,
+  importClaudeSession,
+} from "./claudeSessionTransfer.ts";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -224,6 +232,37 @@ const CLAUDE_SCRIPT_EXTENSIONS = [".js", ".mjs", ".tsx", ".ts", ".jsx"];
 // The SDK puts no deadline on control requests. The CLI answers
 // mcp_set_servers once each server connected or hit its own 30 s timeout.
 const CLAUDE_MCP_REGISTRATION_TIMEOUT = "90 seconds";
+
+// A settings change rebuilds the provider instance's adapter, but sessions the
+// old adapter opened keep running. These let a new auto-compact window reach
+// their live queries, and any query they reopen later.
+const liveQueriesByInstance = new Map<string, Set<ClaudeAgentSdkQuerySession>>();
+const latestAutoCompactWindowByInstance = new Map<string, string>();
+
+function autoCompactTokens(value: string | undefined): number | null {
+  return value === undefined || value.length === 0 ? null : Number(value);
+}
+
+const applyAutoCompactWindowToLiveQueries = Effect.fnUntraced(function* (
+  instanceId: string,
+  value: string,
+) {
+  const previous = latestAutoCompactWindowByInstance.get(instanceId);
+  latestAutoCompactWindowByInstance.set(instanceId, value);
+  if (previous === undefined || previous === value) return;
+  const tokens = autoCompactTokens(value);
+  for (const query of liveQueriesByInstance.get(instanceId) ?? []) {
+    if (query.setAutoCompactWindow === undefined) continue;
+    yield* query.setAutoCompactWindow(tokens).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("orchestration-v2.claude-auto-compact-live-apply-failed", {
+          instanceId,
+          cause,
+        }),
+      ),
+    );
+  }
+});
 
 export const ClaudeProviderCapabilitiesV2 = {
   sessions: {
@@ -384,6 +423,10 @@ export interface ClaudeAgentSdkQuerySession {
   readonly stopTask: (taskId: string) => Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly interrupt: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly close: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
+  /** Live-applies session flag settings. Absent on test doubles. */
+  readonly setAutoCompactWindow?: (
+    tokens: number | null,
+  ) => Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
 }
 
 type ClaudeQueryStreamExit = Exit.Exit<void, ClaudeAgentSdkQueryRunnerError>;
@@ -535,6 +578,14 @@ export type ClaudeAgentSdkProtocolLogEvent =
       readonly payload: {
         readonly type: "query.stop_task";
         readonly taskId: string;
+      };
+    }
+  | {
+      readonly direction: "outgoing";
+      readonly stage: "decoded";
+      readonly payload: {
+        readonly type: "query.apply_flag_settings";
+        readonly autoCompactWindow: number | null;
       };
     }
   | {
@@ -842,6 +893,22 @@ export const layerQueryRunner: Layer.Layer<
                 }),
               ),
             ),
+          setAutoCompactWindow: (tokens) =>
+            Effect.tryPromise({
+              try: () => queryRuntime.applyFlagSettings({ autoCompactWindow: tokens }),
+              catch: (cause) => queryRunnerError(cause, "applyFlagSettings"),
+            }).pipe(
+              Effect.tap(() =>
+                logProtocolEvent({
+                  direction: "outgoing",
+                  stage: "decoded",
+                  payload: {
+                    type: "query.apply_flag_settings",
+                    autoCompactWindow: tokens,
+                  },
+                }),
+              ),
+            ),
           interrupt: Effect.tryPromise({
             try: () => queryRuntime.interrupt(),
             catch: (cause) => queryRunnerError(cause, "interrupt"),
@@ -1013,6 +1080,9 @@ export function makeClaudeQueryOptions(input: {
         ? "bypassPermissions"
         : (input.permissionMode ?? "default")),
     includePartialMessages: true,
+    // The composer offers Claude's guess at the next prompt. Claude still
+    // honours the user's promptSuggestionEnabled setting.
+    promptSuggestions: true,
     ...(compiledSelection.effort === undefined
       ? {}
       : {
@@ -1091,6 +1161,10 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__t3_queue_read",
   "mcp__t3-code__html_preview",
   "mcp__t3-code__html_render",
+  "mcp__t3-code__canvas_list",
+  "mcp__t3-code__canvas_open",
+  "mcp__t3-code__canvas_read",
+  "mcp__t3-code__canvas_screenshot",
 ];
 
 // Claude Code aborts an HTTP MCP call after 60 s ("The operation timed out.")
@@ -3308,6 +3382,32 @@ export function claudeProposedPlan(input: unknown): string | null {
   return typeof plan === "string" && plan.trim().length > 0 ? plan.trim() : null;
 }
 
+/** How long a recap may take before the user gets none. */
+const CLAUDE_RECAP_TIMEOUT = "60 seconds";
+
+/**
+ * The text Claude Code's `/recap` answers with. The CLI reports a local
+ * command's reply as an assistant message tagged with its source, or as a
+ * local_command_output system message.
+ */
+export function claudeRecapText(message: SDKMessage): string | null {
+  if (
+    message.type === "assistant" &&
+    typeof Reflect.get(message, "local_command_source") === "string"
+  ) {
+    const text = message.message.content
+      .flatMap((block) => (block.type === "text" ? [block.text] : []))
+      .join("")
+      .trim();
+    return text.length > 0 ? text : null;
+  }
+  if (message.type === "system" && message.subtype === "local_command_output") {
+    const text = message.content.trim();
+    return text.length > 0 ? text : null;
+  }
+  return null;
+}
+
 export interface ClaudeAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
   readonly settings: ClaudeSettings;
@@ -3364,11 +3464,118 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
       Effect.provideService(Path.Path, path),
     );
 
+  const usesServerClaudeHome = () => {
+    const home = claudeHomeDir(adapterOptions.environment);
+    return home !== null && home === claudeHomeDir(process.env);
+  };
+
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: adapterOptions.instanceId,
     driver: CLAUDE_PROVIDER,
     getCapabilities: () => Effect.succeed(ClaudeProviderCapabilitiesV2),
     planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
+    // The SDK's session helpers read the Claude home from process.env, the same
+    // limitation forkThread below has. An instance with its own home could
+    // export nothing or import into the wrong home, so it moves no session and
+    // the copy falls back to its imported history.
+    exportNativeThread: Effect.fn("ClaudeAdapterV2.exportNativeThread")(function* (input) {
+      const sessionId = input.providerThread.nativeThreadRef?.nativeId;
+      if (sessionId === undefined || sessionId === null || !usesServerClaudeHome()) return null;
+      // A rolled-back thread continues from this message until its next turn.
+      const upToMessageId = input.providerThread.nativeConversationHeadRef?.nativeId ?? undefined;
+      const data = yield* Effect.tryPromise({
+        try: () => exportClaudeSession(sessionId, { dir: input.cwd ?? undefined, upToMessageId }),
+        catch: (cause) =>
+          new ProviderAdapter.ProviderAdapterTransferThreadError({
+            driver: CLAUDE_PROVIDER,
+            operation: "export",
+            cause,
+          }),
+      });
+      return { format: CLAUDE_SESSION_EXPORT_FORMAT, data };
+    }),
+    importNativeThread: Effect.fn("ClaudeAdapterV2.importNativeThread")(function* (input) {
+      const transferError = (cause: unknown) =>
+        new ProviderAdapter.ProviderAdapterTransferThreadError({
+          driver: CLAUDE_PROVIDER,
+          operation: "import",
+          cause,
+        });
+      if (!usesServerClaudeHome()) {
+        return yield* transferError("This Claude instance uses its own Claude home.");
+      }
+      if (input.format !== CLAUDE_SESSION_EXPORT_FORMAT) {
+        return yield* transferError(`Unsupported Claude session format '${input.format}'.`);
+      }
+      const exported = yield* Schema.decodeUnknownEffect(ClaudeSessionExport)(input.data).pipe(
+        Effect.mapError(transferError),
+      );
+      const imported = yield* Effect.tryPromise({
+        try: () => importClaudeSession(exported, { dir: input.cwd }),
+        catch: transferError,
+      });
+      return { nativeThreadId: imported.sessionId, conversationHeadId: imported.headMessageId };
+    }),
+    // Claude Code's own `/recap`, run in a fork of the session that is never
+    // written to disk, so the recap adds nothing to the conversation it
+    // describes. Settings sources stay empty: hooks have no part in a recap.
+    readThreadRecap: Effect.fn("ClaudeAdapterV2.readThreadRecap")(function* (input) {
+      const nativeThreadId = input.providerThread.nativeThreadRef?.nativeId ?? null;
+      if (nativeThreadId === null) return null;
+      const options: ClaudeAgentSdkQueryOptions = {
+        ...makeClaudeQueryOptions({
+          modelSelection: input.modelSelection,
+          nativeThreadId,
+          resume: true,
+          cwd: input.cwd,
+          settings: adapterOptions.settings,
+          environment: adapterOptions.environment,
+          permissionMode: "default",
+        }),
+        forkSession: true,
+        persistSession: false,
+        settingSources: [],
+        promptSuggestions: false,
+      };
+      const recap = yield* Effect.acquireUseRelease(
+        queryRunner.open({
+          threadId: input.threadId,
+          providerSessionId:
+            input.providerThread.providerSessionId ??
+            ProviderSessionId.make(`recap:${input.providerThread.id}`),
+          options,
+        }),
+        (session) =>
+          session
+            .offer({
+              type: "user",
+              message: { role: "user", content: "/recap" },
+              parent_tool_use_id: null,
+            })
+            .pipe(
+              Effect.andThen(
+                session.messages.pipe(
+                  Stream.takeUntil((message) => message.type === "result"),
+                  Stream.map(claudeRecapText),
+                  Stream.filter((text): text is string => text !== null),
+                  Stream.runHead,
+                ),
+              ),
+            ),
+        (session) => session.close.pipe(Effect.ignore),
+      ).pipe(
+        Effect.timeoutOption(CLAUDE_RECAP_TIMEOUT),
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapter.ProviderAdapterReadThreadRecapError({
+              driver: CLAUDE_PROVIDER,
+              providerThreadId: input.providerThread.id,
+              cause,
+            }),
+        ),
+      );
+      return Option.getOrNull(Option.flatten(recap));
+    }),
     openSession: Effect.fn("ClaudeAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
@@ -3408,6 +3615,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const interruptedTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const steeredTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
+        // The provider turn that last completed, until Claude's guess at the
+        // next prompt arrives for it (after the turn's result) or a new turn
+        // starts.
+        const lastCompletedTurn = yield* Ref.make<{
+          readonly threadId: ThreadId;
+          readonly providerTurn: OrchestrationV2ProviderTurn;
+        } | null>(null);
         const openedNativeThreads = yield* Ref.make(new Set<string>());
         const latestPlanByKind = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact>());
         // Claude 5 task tools edit one list per native session, across turns.
@@ -5906,24 +6120,31 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   failure: null,
                   threadDisposition,
                 };
+          const finalProviderTurn: OrchestrationV2ProviderTurn = {
+            ...providerTurnPayload({
+              context: input.context,
+              status: input.status,
+              completedAt: input.completedAt,
+            }),
+            turnTokenUsage: normalizeClaudeTurnTokenUsage(
+              input.result,
+              input.context.subagentsByTaskId.size > 0 ||
+                input.context.subagentsByToolUseId.size > 0,
+              input.status,
+            ),
+          };
+          yield* Ref.set(
+            lastCompletedTurn,
+            input.status === "completed"
+              ? { threadId: input.context.input.threadId, providerTurn: finalProviderTurn }
+              : null,
+          );
           yield* Effect.all(
             [
               emitProviderEvent({
                 type: "provider_turn.updated",
                 driver: CLAUDE_PROVIDER,
-                providerTurn: {
-                  ...providerTurnPayload({
-                    context: input.context,
-                    status: input.status,
-                    completedAt: input.completedAt,
-                  }),
-                  turnTokenUsage: normalizeClaudeTurnTokenUsage(
-                    input.result,
-                    input.context.subagentsByTaskId.size > 0 ||
-                      input.context.subagentsByToolUseId.size > 0,
-                    input.status,
-                  ),
-                },
+                providerTurn: finalProviderTurn,
               }),
               // Surface this native thread's roster before the root turn
               // terminals so writeFinalRunEvents preserves it. Failed or
@@ -6627,6 +6848,24 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             yield* Ref.update(nestedSubagentTaskIds, (current) =>
               current.has(message.task_id) ? current : new Set(current).add(message.task_id),
             );
+          }
+          if (message.type === "prompt_suggestion") {
+            // Claude's guess at the next prompt follows the turn's result, so
+            // it belongs to the turn that just completed. A turn that already
+            // started makes it stale. The event carries the app thread so the
+            // session ingests it after the run's own event stream has closed.
+            const suggestion = message.suggestion.trim();
+            const completed = yield* Ref.getAndSet(lastCompletedTurn, null);
+            if (suggestion.length === 0 || completed === null || (yield* Ref.get(activeTurn))) {
+              return;
+            }
+            yield* emitProviderEvent({
+              type: "provider_turn.updated",
+              driver: CLAUDE_PROVIDER,
+              threadId: completed.threadId,
+              providerTurn: { ...completed.providerTurn, promptSuggestion: suggestion },
+            });
+            return;
           }
           if (message.type === "rate_limit_event") {
             const rateLimitInfo = message.rate_limit_info;
@@ -8272,8 +8511,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           nativeThreadId: string,
         ) {
           const queryPolicy = claudeRuntimeQueryPolicyForRuntimePolicy(turnInput.runtimePolicy);
+          const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const mcpOverrides = claudeMcpQueryOverrides({
-            mcpSession: yield* mcpSessions.read(turnInput.threadId),
+            mcpSession,
             readOnlySandbox:
               sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly",
             ...(queryPolicy.allowedTools === undefined
@@ -8356,8 +8596,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
             cwd: turnInput.runtimePolicy.cwd,
             attachmentsDir,
-            settings: adapterOptions.settings,
-            environment: adapterOptions.environment,
+            settings: {
+              ...adapterOptions.settings,
+              autoCompactWindow:
+                latestAutoCompactWindowByInstance.get(adapterOptions.instanceId) ??
+                adapterOptions.settings.autoCompactWindow,
+            },
+            // Bash commands inherit this, so `t3 secret prompt` finds the thread.
+            environment: McpProviderSession.withAgentShellEnvironment(
+              adapterOptions.environment,
+              mcpSession,
+            ),
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(mcpOverrides.allowedTools === undefined
               ? {}
@@ -8438,6 +8687,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ),
           };
           yield* Ref.set(queryContext, context);
+          const liveQueries =
+            liveQueriesByInstance.get(adapterOptions.instanceId) ??
+            new Set<ClaudeAgentSdkQuerySession>();
+          liveQueries.add(querySession);
+          liveQueriesByInstance.set(adapterOptions.instanceId, liveQueries);
           yield* querySession.messages.pipe(
             Stream.runForEach((message) =>
               sdkMessageLock.withPermits(1)(
@@ -8482,7 +8736,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 }
               }),
             ),
-            Effect.ensuring(Deferred.succeed(closed, undefined)),
+            Effect.ensuring(
+              Effect.sync(() => liveQueries.delete(querySession)).pipe(
+                Effect.andThen(Deferred.succeed(closed, undefined)),
+              ),
+            ),
             Effect.forkIn(sessionScope),
           );
           return context;
@@ -9344,6 +9602,7 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
       claudeEnvironment,
     );
+    yield* applyAutoCompactWindowToLiveQueries(instanceId, config.autoCompactWindow ?? "");
     return yield* makeClaudeAdapterV2({
       instanceId,
       settings: { ...config, enabled, binaryPath },

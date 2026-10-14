@@ -25,6 +25,8 @@ const isNonBlank = Schema.makeFilter((value: string) => value.trim().length > 0,
   arbitraryConstraint: { minLength: 1 },
 });
 export const TrimmedNonEmptyString = TrimmedString.check(isNonBlank);
+/** Not blank, but kept exactly as given, for values such as passwords. */
+export const NonBlankString = Schema.String.check(isNonBlank);
 
 export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));

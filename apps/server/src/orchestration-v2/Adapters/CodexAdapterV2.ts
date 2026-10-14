@@ -32,6 +32,7 @@ import {
   ProviderDriverKind,
   type ProviderSetupError,
 } from "@t3tools/contracts";
+import { parseCodexReviewCommand, type CodexReviewTarget } from "@t3tools/shared/codexReview";
 import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -1312,6 +1313,12 @@ export class CodexAppServerClientFactory extends Context.Service<
  */
 export const CODEX_THREAD_CONFIG = { "tools.update_plan.enabled": true } as const;
 
+// Codex gives each MCP tool call 60 s unless the server config sets
+// `tool_timeout_sec`. T3's wait tools (t3_thread_wait, delegate_task mode=wait)
+// block for up to an hour (MAX_WAIT_TIMEOUT_MS in OrchestratorMcpService), so
+// this sits just above that, matching CLAUDE_T3_MCP_TOOL_TIMEOUT_MS.
+export const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
+
 export function codexThreadRuntimeParams(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly modelSelection?: { readonly model: string };
@@ -1336,9 +1343,19 @@ export function codexThreadRuntimeParams(input: {
                 http_headers: {
                   Authorization: mcpSession.authorizationHeader,
                 },
+                tool_timeout_sec: CODEX_T3_MCP_TOOL_TIMEOUT_SEC,
               },
             },
           }),
+      // One app-server serves every thread of an instance, so the agent shell
+      // variables go per thread into the shell policy, not the process env.
+      // Dotted keys add to the user's policy instead of replacing it.
+      ...Object.fromEntries(
+        Object.entries(mcpSession?.agentShellEnvironment ?? {}).map(([name, value]) => [
+          `shell_environment_policy.set.${name}`,
+          value,
+        ]),
+      ),
     },
   };
 }
@@ -1851,6 +1868,22 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             context.nativeTurnId,
           ).hasSubagents = true;
         };
+        /**
+         * `/review` turns by native root turn id. Codex streams the reviewer's raw
+         * output as an agent message it never completes, then exits review mode
+         * and sends the rendered review as a normal message, so agent messages
+         * are dropped until `exitedReviewMode`.
+         */
+        const reviewTurns = new Map<
+          string,
+          { readonly nativeThreadId: string; inReview: boolean }
+        >();
+        const startingReviewThreads = new Set<string>();
+        const reviewsNativeThread = (nativeThreadId: string) =>
+          startingReviewThreads.has(nativeThreadId) ||
+          Array.from(reviewTurns.values()).some((turn) => turn.nativeThreadId === nativeThreadId);
+        const inReviewMode = (nativeTurnId: string) =>
+          reviewTurns.get(nativeTurnId)?.inReview === true;
         const pendingRootTurns = yield* Ref.make(
           new Map<string, ProviderAdapter.ProviderAdapterV2TurnInput>(),
         );
@@ -4219,6 +4252,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         yield* client.handleServerNotification("item/agentMessage/delta", (payload) =>
           Effect.gen(function* () {
+            if (inReviewMode(payload.turnId)) return;
             const context = (yield* Ref.get(activeTurns)).get(payload.turnId);
             if (context !== undefined) {
               yield* completeProviderRetry(context, yield* DateTime.now);
@@ -4402,6 +4436,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               }
               return;
             }
+            // A review runs as a nested turn under the one review/start
+            // returned, which itself never reports turn/started.
+            if (reviewsNativeThread(payload.threadId)) return;
             const pendingRootTurn = (yield* Ref.get(pendingRootTurns)).get(payload.threadId);
             if (pendingRootTurn !== undefined) {
               yield* registerRootTurn({
@@ -4620,6 +4657,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         yield* client.handleServerNotification("item/started", (payload) =>
           Effect.gen(function* () {
+            if (payload.item.type === "agentMessage" && inReviewMode(payload.turnId)) return;
             const context = yield* awaitActiveTurn(payload.turnId);
             if (context === undefined) {
               return;
@@ -4746,6 +4784,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         yield* client.handleServerNotification("item/completed", (payload) =>
           Effect.gen(function* () {
+            if (payload.item.type === "exitedReviewMode") {
+              const review = reviewTurns.get(payload.turnId);
+              if (review !== undefined) review.inReview = false;
+              return;
+            }
+            if (payload.item.type === "agentMessage" && inReviewMode(payload.turnId)) return;
             if (payload.item.type === "contextCompaction")
               // The notification callback runs on the input reader. Let it read
               // the injection response while the session-scoped request waits.
@@ -5986,6 +6030,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         yield* client.handleServerNotification("turn/completed", (payload) =>
           Effect.gen(function* () {
+            reviewTurns.delete(payload.turn.id);
             const context = (yield* Ref.get(activeTurns)).get(payload.turn.id);
             if (context === undefined) {
               return;
@@ -6239,6 +6284,33 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               ).pipe(Effect.ignore),
             ),
           );
+
+        /**
+         * Runs `/review` through Codex's built-in reviewer, as `codex review`
+         * does, so Codex writes the review prompt. The thread already carries
+         * this run's model and sandbox from thread/start or its last turn.
+         * Codex sends no turn/started for the turn review/start returns.
+         */
+        const startNativeReview = (
+          turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
+          target: CodexReviewTarget,
+        ) =>
+          Effect.gen(function* () {
+            const threadId = yield* getNativeThreadId(turnInput.providerThread);
+            startingReviewThreads.add(threadId);
+            const started = yield* client
+              .request("review/start", { threadId, target })
+              .pipe(Effect.ensuring(Effect.sync(() => startingReviewThreads.delete(threadId))));
+            reviewTurns.set(started.turn.id, { nativeThreadId: threadId, inReview: true });
+            yield* registerRootTurn({
+              turnInput,
+              nativeTurnId: started.turn.id,
+              startedAt:
+                started.turn.startedAt === null
+                  ? yield* DateTime.now
+                  : codexTimestamp(started.turn.startedAt),
+            });
+          });
 
         /**
          * Runs `/goal` through Codex's native goal API, as the Codex TUI does.
@@ -6637,7 +6709,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ? parseCodexGoalCommand(turnInput.message.text)
                 : null;
             if (goalCommand !== null) return runGoalCommand(turnInput, goalCommand);
+            const reviewTarget =
+              turnInput.message.attachments.length === 0 &&
+              turnInput.restartContinuationOfRunId === undefined
+                ? parseCodexReviewCommand(turnInput.message.text)
+                : null;
             return Effect.gen(function* () {
+              if (reviewTarget !== null) {
+                yield* startNativeReview(turnInput, reviewTarget);
+                return;
+              }
               yield* startNativeTurn(
                 turnInput,
                 turnInput.restartContinuationOfRunId === undefined

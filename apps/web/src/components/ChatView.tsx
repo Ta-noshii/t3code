@@ -9,7 +9,12 @@ import {
   resolveWorktreeSetupProgress,
 } from "./ChatView.logic";
 import * as DateTime from "effect/DateTime";
-import { restorePlanFollowUpComposer } from "./ChatView.logic";
+import {
+  hasQueuedCompactCommand,
+  isCompactCommandMessage,
+  isCompactCommandText,
+  restorePlanFollowUpComposer,
+} from "./ChatView.logic";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { prepareQueuedEditAttachments, recoverQueuedMessageEdit } from "./chat/queuedMessageEdit";
 import {
@@ -78,6 +83,8 @@ import {
   type RuntimeRequestId,
   type KeybindingCommand,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  type ThreadTransferExportResult,
   ProviderInteractionMode,
   ProviderDriverKind,
   resolveEnvironmentMachineKind,
@@ -106,8 +113,13 @@ import {
   deriveThreadRuntime,
   presentPendingBackgroundWork,
   presentProviderGoal,
+  latestPromptSuggestion,
 } from "@t3tools/client-runtime/state/thread-execution";
-import { threadSupportsProviderHandoff } from "@t3tools/client-runtime/state/thread-workflows";
+import {
+  buildEarlierConversationTranscript,
+  planEditInNewThread,
+  threadSupportsProviderHandoff,
+} from "@t3tools/client-runtime/state/thread-workflows";
 import {
   codexFeedbackMessage,
   parseCodexFeedbackCommand,
@@ -259,6 +271,7 @@ import {
   type RightPanelSurface,
   useRightPanelStore,
 } from "../rightPanelStore";
+import { useCanvasFocus } from "./canvas/useCanvasFocus";
 import {
   isPreviewSupportedInRuntime,
   setActivePreviewTab,
@@ -302,6 +315,7 @@ import { resolveChatShortcutCommand, shortcutLabelForCommand } from "../keybindi
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
+  HistoryIcon,
   CheckCircle2Icon,
   MessageCircleIcon,
   PaperclipIcon,
@@ -377,6 +391,7 @@ import {
   composerDraftHasUserContent,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
+  type ComposerThreadTarget,
   type DraftThreadEnvMode,
   useComposerDraftStore,
   DraftId,
@@ -466,6 +481,8 @@ import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImag
 import { ThreadDetailsPanel, type ThreadDetailsPanelProps } from "./chat/ThreadDetailsPanel";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import {
+  buildCopyTargets,
+  type CopyTargetOption,
   type EnvironmentOption,
   resolveEffectiveEnvMode,
   resolveLocalCheckoutBranchMismatch,
@@ -493,6 +510,7 @@ import { useLinkedThreadPullRequest } from "./ThreadStatusIndicators";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
+import { useThreadRecap } from "./chat/useThreadRecap";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
 import {
@@ -578,6 +596,14 @@ import { assetEnvironment } from "../state/assets";
 import { readEnvironmentScope, readPreparedConnection } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
+import { threadExportCommand, threadImportCommand } from "../state/threadTransfer";
+import { requestConfirmDialog } from "../confirmDialog";
+import {
+  buildCopyHandoffMessage,
+  buildCopySummaryPrompt,
+  chatCopyMessages,
+  resolveCopyModelSelection,
+} from "./chatCopy.logic";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { Button, InlineButton } from "./ui/button";
 import {
@@ -712,6 +738,7 @@ const DevicePanel = lazy(() =>
   import("./device/DevicePanel").then((module) => ({ default: module.DevicePanel })),
 );
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const CanvasPanel = lazy(() => import("./canvas/CanvasPanel"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -822,11 +849,6 @@ function formatOutgoingPrompt(params: {
 }
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
-
-function isCompactCommandMessage(message: ChatMessage): boolean {
-  const text = message.text.trim().toLowerCase();
-  return message.role === "user" && text === "/compact" && !message.attachments?.length;
-}
 
 type ChatViewProps =
   | {
@@ -1573,6 +1595,33 @@ function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | n
 /** Runs with a workspace preparation retry in flight, across ChatView instances. */
 const retryingWorkspacePreparationRunIds = new Set<RunId>();
 
+/** Puts a message's downloaded attachments back into a composer, images as previews. */
+function addRestoredComposerAttachments(
+  target: ComposerThreadTarget,
+  files: ReadonlyArray<File>,
+  attachments: ChatMessage["attachments"],
+): void {
+  const images: ComposerImageAttachment[] = [];
+  const restoredFiles: ComposerFileAttachment[] = [];
+  files.forEach((file, index) => {
+    const attachment = {
+      id: randomUUID(),
+      name: file.name,
+      mimeType: file.type,
+      sizeBytes: file.size,
+      file,
+    };
+    if (attachments?.[index]?.type === "image") {
+      images.push({ ...attachment, type: "image", previewUrl: URL.createObjectURL(file) });
+    } else {
+      restoredFiles.push({ ...attachment, type: "file" });
+    }
+  });
+  const store = useComposerDraftStore.getState();
+  store.addImages(target, images, { allowDuplicates: true });
+  store.addFiles(target, restoredFiles, { allowDuplicates: true });
+}
+
 export default function ChatView(props: ChatViewProps) {
   const {
     environmentId,
@@ -1664,6 +1713,8 @@ export default function ChatView(props: ChatViewProps) {
   const forkThreadFromRun = useAtomCommand(threadEnvironment.forkFromRun, {
     reportFailure: false,
   });
+  const exportThreadFromServer = useAtomCommand(threadExportCommand, { reportFailure: false });
+  const importThreadOnServer = useAtomCommand(threadImportCommand, { reportFailure: false });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const { environments } = useEnvironments();
@@ -1727,6 +1778,15 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadLiveTokenUsage = useMemo(
     () => latestProviderTurnTokenUsage(serverProjection?.providerTurns ?? []),
     [serverProjection?.providerTurns],
+  );
+  const projectionRuns = serverProjection?.runs;
+  const projectionProviderTurns = serverProjection?.providerTurns;
+  const promptSuggestion = useMemo(
+    () =>
+      projectionRuns && projectionProviderTurns
+        ? latestPromptSuggestion({ runs: projectionRuns, providerTurns: projectionProviderTurns })
+        : null,
+    [projectionRuns, projectionProviderTurns],
   );
   const serverVisibleTurnItems = useThreadVisibleTurnItems(routeThreadDetailRef);
   const serverThreadHistory = useThreadHistory(routeThreadDetailRef);
@@ -2819,6 +2879,25 @@ export default function ChatView(props: ChatViewProps) {
     logicalProjectEnvironments.find(
       (environment) => environment.environmentId === activeThread?.environmentId,
     ) ?? null;
+  // A started chat can be copied into any project of another environment.
+  const copyTargets = useMemo(
+    () =>
+      isServerThread && activeThread
+        ? buildCopyTargets({
+            currentEnvironmentId: activeThread.environmentId,
+            projectEnvironments: logicalProjectEnvironments,
+            environments: environments.map((environment) => ({
+              environmentId: environment.environmentId,
+              label: environment.label,
+              machine: resolveEnvironmentMachineKind(environment.serverConfig ?? null),
+              connected:
+                environment.connection.phase === "connected" && environment.serverConfig !== null,
+            })),
+            projects: allProjects,
+          })
+        : [],
+    [activeThread, allProjects, environments, isServerThread, logicalProjectEnvironments],
+  );
   const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
     activeEnvironment: activeEnvironmentOption,
     canPickEnvironment: hasMultipleEnvironments,
@@ -3600,6 +3679,8 @@ export default function ChatView(props: ChatViewProps) {
   const compactRequestIsActive =
     (isSendBusy &&
       optimisticCompactionMessage !== undefined &&
+      // A /compact queued behind the running turn has not started compacting yet.
+      optimisticCompactionMessage.inputIntent !== "queued_turn" &&
       isCompactCommandMessage(optimisticCompactionMessage)) ||
     (latestServerUserItem?.type === "user_message" &&
       latestServerUserItem.text.trim().toLowerCase() === "/compact" &&
@@ -5472,6 +5553,11 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
   }, [activeProject, activeThreadRef]);
+  const addCanvasSurface = useCallback(() => {
+    if (!activeThreadRef || !activeProject) return;
+    useRightPanelStore.getState().open(activeThreadRef, "canvas");
+  }, [activeProject, activeThreadRef]);
+  useCanvasFocus(activeThreadRef);
   const supportsThreadPullRequests =
     serverConfig?.environment.capabilities.threadPullRequests === true;
   const visiblePullRequests = visibleThreadPullRequests(
@@ -7489,7 +7575,8 @@ export default function ChatView(props: ChatViewProps) {
   // Commands such as /compact and /goal clear run as their own turn. The draft
   // and its attachments stay local.
   const sendStandaloneCommand = useCallback(
-    async (text: string, failureMessage: string) => {
+    async (text: string, failureMessage: string, options?: { readonly queue?: boolean }) => {
+      const queue = options?.queue === true;
       if (!activeThread || !clientSettingsHydrated || sendInFlightRef.current) return;
       const context = composerRef.current?.getSendContext();
       if (!context?.providerAvailable) return;
@@ -7510,9 +7597,10 @@ export default function ChatView(props: ChatViewProps) {
           createdAt,
           updatedAt: createdAt,
           streaming: false,
+          ...(queue ? { inputIntent: "queued_turn" as const } : {}),
         },
       ]);
-      scrollToEnd();
+      if (!queue) scrollToEnd();
       try {
         const settingsResult = await persistThreadSettingsForNextTurn({
           threadId,
@@ -7534,6 +7622,7 @@ export default function ChatView(props: ChatViewProps) {
                   modelSelection: context.selectedModelSelection,
                   runtimeMode,
                   interactionMode: context.interactionMode,
+                  ...(queue ? { dispatchMode: "queue" as const } : {}),
                   createdAt,
                 },
               });
@@ -7673,6 +7762,38 @@ export default function ChatView(props: ChatViewProps) {
     isStoppingBackgroundWork,
     onOpenRelatedThread,
   ]);
+  const latestCompletedRun = useMemo(() => {
+    const latest = projectionRuns?.reduce<(typeof projectionRuns)[number] | undefined>(
+      (current, run) => (current === undefined || run.ordinal > current.ordinal ? run : current),
+      undefined,
+    );
+    return latest?.status === "completed"
+      ? {
+          runId: latest.id,
+          completedAt: latest.completedAt === null ? null : DateTime.formatIso(latest.completedAt),
+        }
+      : null;
+  }, [projectionRuns]);
+  const threadRecap = useThreadRecap({
+    environmentId: isServerThread ? environmentId : null,
+    threadId: isServerThread ? (activeThread?.id ?? null) : null,
+    ready: serverProjection !== null,
+    completedRun: latestCompletedRun,
+    idle: phase === "ready" && pendingApprovals.length === 0 && pendingUserInputs.length === 0,
+    supported: serverConfig?.environment.capabilities.threadRecap === true,
+  });
+  const threadRecapBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (threadRecap.recap === null) return null;
+    return {
+      id: `thread-recap:${activeThread?.id ?? "unknown"}`,
+      variant: "info",
+      icon: <HistoryIcon />,
+      title: "While you were away",
+      description: threadRecap.recap,
+      dismissLabel: "Dismiss recap",
+      onDismiss: threadRecap.dismiss,
+    };
+  }, [activeThread?.id, threadRecap.dismiss, threadRecap.recap]);
   // Settled, snoozed, and woke are thread state, not composer actions: each
   // gets one quiet line after the last message instead of a banner. A woken
   // thread announces itself here, not just in the sidebar pill. Dismissing
@@ -7733,6 +7854,13 @@ export default function ChatView(props: ChatViewProps) {
       item.type === "user_message" &&
       (item.text.trim().toLowerCase() !== "/compact" || item.attachments.length > 0),
   );
+  // A running turn does not block compacting: the request queues behind it (see
+  // onCompactContext). One queued /compact is enough.
+  const compactQueued = hasQueuedCompactCommand({
+    runs: serverProjection?.runs ?? [],
+    messages: serverProjection?.messages ?? [],
+    optimisticMessages: optimisticUserMessages,
+  });
   const compactThreadUnavailable =
     !canOperateThread ||
     !activeThread ||
@@ -7740,7 +7868,8 @@ export default function ChatView(props: ChatViewProps) {
     !activeProject ||
     !isServerThread ||
     !manualCompactionProviderAvailable ||
-    isWorking ||
+    isCompacting ||
+    compactQueued ||
     isRevertingCheckpoint ||
     threadDetailLoading ||
     isPreparingWorktree ||
@@ -7757,7 +7886,9 @@ export default function ChatView(props: ChatViewProps) {
         ? "Choose a project before compacting"
         : !manualCompactionProviderAvailable
           ? "Compaction is unavailable for this provider"
-          : "Compacting is unavailable right now"
+          : compactQueued
+            ? "Compaction is queued for when the agent finishes"
+            : "Compacting is unavailable right now"
     : null;
   // Tokens a stale Claude session would re-read on its next turn. While set,
   // the composer shows a Compact chip and Enter compacts first; turning the
@@ -7852,6 +7983,7 @@ export default function ChatView(props: ChatViewProps) {
       goalBannerItem,
       backgroundWorkBannerItem,
     ].filter((item) => item !== null);
+    const threadRecapItems = threadRecapBannerItem === null ? [] : [threadRecapBannerItem];
     // The user asked for this one, so it leads the notice tier instead of trailing it.
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
     const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
@@ -7863,6 +7995,7 @@ export default function ChatView(props: ChatViewProps) {
         ...projectCloneItems,
         ...systemComposerBannerItems,
         ...backgroundWorkItems,
+        ...threadRecapItems,
       ];
     }
     return [
@@ -7872,6 +8005,7 @@ export default function ChatView(props: ChatViewProps) {
       ...projectCloneItems,
       ...systemComposerBannerItems,
       ...backgroundWorkItems,
+      ...threadRecapItems,
       {
         id: `branch-mismatch:${activeBranchMismatchKey}`,
         variant: "info",
@@ -7929,6 +8063,7 @@ export default function ChatView(props: ChatViewProps) {
     showBranchMismatchBanner,
     systemComposerBannerItems,
     usageLimitsBanner,
+    threadRecapBannerItem,
   ]);
 
   useEffect(() => {
@@ -8551,24 +8686,7 @@ export default function ChatView(props: ChatViewProps) {
               ? `${currentPrompt}\n\n${restoredPrompt}`
               : restoredPrompt;
         store.setPrompt(composerDraftTarget, nextPrompt);
-        const images: ComposerImageAttachment[] = [];
-        const restoredFiles: ComposerFileAttachment[] = [];
-        files.forEach((file, index) => {
-          const attachment = {
-            id: randomUUID(),
-            name: file.name,
-            mimeType: file.type,
-            sizeBytes: file.size,
-            file,
-          };
-          if (message.attachments?.[index]?.type === "image") {
-            images.push({ ...attachment, type: "image", previewUrl: URL.createObjectURL(file) });
-          } else {
-            restoredFiles.push({ ...attachment, type: "file" });
-          }
-        });
-        store.addImages(composerDraftTarget, images, { allowDuplicates: true });
-        store.addFiles(composerDraftTarget, restoredFiles, { allowDuplicates: true });
+        addRestoredComposerAttachments(composerDraftTarget, files, message.attachments);
         if (currentRouteThreadKeyRef.current === routeThreadKey) {
           promptRef.current = nextPrompt;
           composerRef.current?.resetCursorState({ prompt: nextPrompt, cursor: nextPrompt.length });
@@ -8719,9 +8837,336 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError,
     ],
   );
+  const onEditInNewThread = useCallback(
+    async (messageId: MessageId) => {
+      if (!activeThread) return;
+      if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
+        setThreadError(
+          activeThread.id,
+          `Reconnect ${activeEnvironmentUnavailableLabel} before editing in a new thread.`,
+        );
+        return;
+      }
+      if (phase === "running" || isSendBusy || isConnecting) {
+        setThreadError(
+          activeThread.id,
+          "Interrupt the current turn before editing in a new thread.",
+        );
+        return;
+      }
+      const plan = planEditInNewThread(serverVisibleTurnItems, messageId, {
+        hasEarlierHistory: serverThreadHistory.hasMoreHistory,
+      });
+      if (!plan) return;
+      if (plan.type === "history_not_loaded") {
+        setThreadError(
+          activeThread.id,
+          "Load the earlier messages at the top of this thread, then edit this message again.",
+        );
+        return;
+      }
+      setThreadError(activeThread.id, null);
+      try {
+        const connection = readPreparedConnection(environmentId);
+        if (!connection) throw new Error("The environment is not connected.");
+        const files = await prepareRevertedMessageAttachments({
+          message: plan.message,
+          environmentId,
+          httpBaseUrl: connection.httpBaseUrl,
+          createAssetUrl: createAttachmentAssetUrl,
+        });
+        let target: ComposerThreadTarget;
+        let targetThreadRef: ScopedThreadRef | null = null;
+        let prompt = recallableComposerPrompt(plan.message.text);
+        const transcriptFiles: File[] = [];
+        if (plan.type === "fork") {
+          const targetThreadId = newThreadId();
+          targetThreadRef = scopeThreadRef(environmentId, targetThreadId);
+          const result = await forkThreadFromRun({
+            environmentId,
+            input: {
+              sourceThreadId: plan.sourceThreadId,
+              targetThreadId,
+              runId: plan.runId,
+              title: `${activeThread.title} fork`,
+            },
+          });
+          if (result._tag === "Failure") {
+            if (isAtomCommandInterrupted(result)) return;
+            throw squashAtomCommandFailure(result);
+          }
+          if (!(await waitForThreadShell(targetThreadRef))) {
+            throw new Error(
+              "The new thread was created, but its data did not reach this client. Reconnect and open it from the sidebar.",
+            );
+          }
+          target = targetThreadRef;
+        } else {
+          // Nothing before the message ran in T3 (it is the first message, or the
+          // earlier history was imported), so there is no run to fork. The new thread
+          // starts in the same workspace and carries the earlier messages itself.
+          const draft = await handleNewThread(
+            scopeProjectRef(activeThread.environmentId, activeThread.projectId),
+            {
+              branch: activeThread.branch,
+              worktreePath: activeThread.worktreePath,
+              envMode: activeThread.worktreePath ? "worktree" : "local",
+              startFromOrigin: false,
+            },
+          );
+          if (!draft) throw new Error("Could not start a new thread.");
+          target = draft.draftId;
+          if (plan.earlierMessages.length > 0) {
+            const transcript = buildEarlierConversationTranscript({
+              title: activeThread.title,
+              messages: plan.earlierMessages,
+            });
+            const canAttachFiles =
+              serverConfig?.environment.capabilities.fileAttachments !== undefined;
+            if (canAttachFiles) {
+              transcriptFiles.push(
+                new File([transcript], "earlier-conversation.md", { type: "text/markdown" }),
+              );
+            } else {
+              prompt = prompt.length > 0 ? `${transcript}\n\n---\n\n${prompt}` : transcript;
+            }
+            toastManager.add({
+              type: "info",
+              title: "Earlier messages go with your next message",
+              description: canAttachFiles
+                ? `The ${plan.earlierMessages.length} earlier messages are attached as earlier-conversation.md.`
+                : `The ${plan.earlierMessages.length} earlier messages were added to the prompt.`,
+            });
+          }
+        }
+        useComposerDraftStore.getState().setPrompt(target, prompt);
+        addRestoredComposerAttachments(target, transcriptFiles, undefined);
+        addRestoredComposerAttachments(target, files, plan.message.attachments);
+        if (targetThreadRef) {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(targetThreadRef),
+          });
+        }
+      } catch (error) {
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to edit in a new thread.",
+        );
+      }
+    },
+    [
+      activeEnvironmentUnavailable,
+      activeEnvironmentUnavailableLabel,
+      activeThread,
+      createAttachmentAssetUrl,
+      environmentId,
+      forkThreadFromRun,
+      handleNewThread,
+      isConnecting,
+      isSendBusy,
+      navigate,
+      phase,
+      serverConfig,
+      serverThreadHistory.hasMoreHistory,
+      serverVisibleTurnItems,
+      setThreadError,
+    ],
+  );
+  const [isCopyingThread, setIsCopyingThread] = useState(false);
+  const onCopyToEnvironment = useCallback(
+    async (target: CopyTargetOption) => {
+      const targetEnvironmentId = target.environmentId;
+      if (!activeThread || isCopyingThread || targetEnvironmentId === environmentId) return;
+      const targetEnvironment = environmentById.get(targetEnvironmentId);
+      if (!targetEnvironment) return;
+      const targetLabel = `${target.environmentLabel} (${target.projectLabel})`;
+      const sourceLabel = environmentById.get(environmentId)?.label ?? "another machine";
+      if (phase === "running" || isSendBusy || isConnecting) {
+        setThreadError(activeThread.id, "Stop the current turn before copying this chat.");
+        return;
+      }
+      const targetConfig = targetEnvironment.serverConfig;
+      if (targetEnvironment.connection.phase !== "connected" || !targetConfig) {
+        setThreadError(
+          activeThread.id,
+          `Connect ${target.environmentLabel} before copying this chat to it.`,
+        );
+        return;
+      }
+      const confirmed =
+        (await requestConfirmDialog(
+          [
+            `Copy this chat to ${targetLabel}?`,
+            `A new chat opens on ${target.environmentLabel} with this conversation in it and continues from where you are. It works in the "${target.projectLabel}" project's main folder${activeThread.worktreePath ? ", not this chat's worktree" : ""}. This chat stays here unchanged.`,
+          ].join("\n"),
+        )) ?? true;
+      if (!confirmed) return;
+
+      setIsCopyingThread(true);
+      setThreadError(activeThread.id, null);
+      try {
+        // Instance ids are per machine; the copy needs the same kind of provider there.
+        const modelSelection = resolveCopyModelSelection({
+          source: activeThread.modelSelection,
+          sourceProviders: serverConfig?.providers ?? [],
+          targetProviders: targetConfig.providers,
+        });
+        if (modelSelection === null) {
+          throw new Error(
+            `${target.environmentLabel} has no enabled provider like this chat's. Turn one on there, then copy again.`,
+          );
+        }
+        let exported: ThreadTransferExportResult | null = null;
+        if (serverConfig?.environment.capabilities.threadTransfer === true) {
+          const result = await exportThreadFromServer({
+            environmentId,
+            input: { threadId: activeThread.id },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          exported = result.value;
+        }
+        // An older source has no export, so the copy takes the messages this client holds.
+        const messages = exported?.messages ?? chatCopyMessages(timelineMessages);
+        const threadId = newThreadId();
+        const createdAt = new Date().toISOString();
+        let nativeHistory = false;
+
+        if (targetConfig.environment.capabilities.threadTransfer === true) {
+          const importInput = {
+            threadId,
+            projectId: target.projectId,
+            title: activeThread.title,
+            modelSelection,
+            runtimeMode: activeThread.runtimeMode,
+            interactionMode: activeThread.interactionMode,
+            messages,
+            conversation: exported?.conversation ?? null,
+          };
+          let result = await importThreadOnServer({
+            environmentId: targetEnvironmentId,
+            input: importInput,
+          });
+          // A provider session too large for the connection still copies as history.
+          if (result._tag === "Failure" && importInput.conversation !== null) {
+            result = await importThreadOnServer({
+              environmentId: targetEnvironmentId,
+              input: { ...importInput, conversation: null },
+            });
+          }
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          nativeHistory = result.value.nativeHistory;
+          // Without the agent's session, the target hands the agent the imported
+          // history with this first turn.
+          if (!nativeHistory && messages.length > 0) {
+            const turn = await startThreadTurn({
+              environmentId: targetEnvironmentId,
+              input: {
+                threadId,
+                message: {
+                  messageId: newMessageId(),
+                  role: "user",
+                  text: buildCopySummaryPrompt({
+                    title: activeThread.title,
+                    copiedFrom: sourceLabel,
+                  }),
+                  attachments: [],
+                },
+                modelSelection,
+                runtimeMode: activeThread.runtimeMode,
+                interactionMode: activeThread.interactionMode,
+                dispatchMode: "start",
+              },
+            });
+            if (turn._tag === "Failure") throw squashAtomCommandFailure(turn);
+          }
+        } else {
+          // A target without the import RPC starts the copy with a first message
+          // that carries the conversation.
+          const turn = await startThreadTurn({
+            environmentId: targetEnvironmentId,
+            input: {
+              threadId,
+              message: {
+                messageId: newMessageId(),
+                role: "user",
+                text: buildCopyHandoffMessage({
+                  title: activeThread.title,
+                  messages,
+                  copiedFrom: sourceLabel,
+                  maxChars: PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+                }),
+                attachments: [],
+              },
+              modelSelection,
+              runtimeMode: activeThread.runtimeMode,
+              interactionMode: activeThread.interactionMode,
+              bootstrap: {
+                createThread: {
+                  projectId: target.projectId,
+                  title: activeThread.title,
+                  modelSelection,
+                  runtimeMode: activeThread.runtimeMode,
+                  interactionMode: activeThread.interactionMode,
+                  branch: null,
+                  worktreePath: null,
+                  createdAt,
+                },
+              },
+            },
+          });
+          if (turn._tag === "Failure") throw squashAtomCommandFailure(turn);
+        }
+
+        toastManager.add({
+          type: "success",
+          title: `Copied to ${targetLabel}`,
+          description: nativeHistory
+            ? "The agent's session came along, so it remembers the whole chat."
+            : "The agent is reading the earlier conversation and will reply with a summary.",
+        });
+        const targetThreadRef = scopeThreadRef(targetEnvironmentId, threadId);
+        if (await waitForThreadShell(targetThreadRef)) {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(targetThreadRef),
+          });
+        }
+      } catch (error) {
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to copy this chat.",
+        );
+      } finally {
+        setIsCopyingThread(false);
+      }
+    },
+    [
+      activeThread,
+      environmentById,
+      environmentId,
+      exportThreadFromServer,
+      importThreadOnServer,
+      isConnecting,
+      isCopyingThread,
+      isSendBusy,
+      navigate,
+      phase,
+      serverConfig,
+      setThreadError,
+      startThreadTurn,
+      timelineMessages,
+    ],
+  );
+  const onCopyTargetSelected = useCallback(
+    (target: CopyTargetOption) => void onCopyToEnvironment(target),
+    [onCopyToEnvironment],
+  );
   const onCompactContext = () => {
     if (compactDisabled) return;
-    void sendStandaloneCommand("/compact", "Failed to compact context.");
+    // Mid-turn /compact queues as its own turn, since the server refuses to steer
+    // it into a running one. The queued row's remove button takes it back.
+    void sendStandaloneCommand("/compact", "Failed to compact context.", { queue: isWorking });
   };
 
   const onResume = async () => {
@@ -9344,10 +9789,18 @@ export default function ChatView(props: ChatViewProps) {
       resumeCompactionTokens !== null &&
       !keepFullHistory &&
       messageTextForSend.toLowerCase() !== "/compact";
-    const turnDispatchMode = compactBeforeSend || sendQueuesBehindSetup ? "queue" : dispatchMode;
+    // The server refuses to steer /compact into a running turn, so a typed one
+    // always queues as its own turn.
+    const queueCompactCommand =
+      phase === "running" &&
+      isCompactCommandText(messageTextForSend) &&
+      composerAttachmentsSnapshot.length === 0;
+    const turnDispatchMode =
+      compactBeforeSend || sendQueuesBehindSetup || queueCompactCommand ? "queue" : dispatchMode;
     const shouldQueueBehindActiveRun =
       compactBeforeSend ||
       sendQueuesBehindSetup ||
+      queueCompactCommand ||
       (phase === "running" && dispatchMode === "queue");
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
@@ -11209,6 +11662,16 @@ export default function ChatView(props: ChatViewProps) {
       />
     ) : renderedRightPanelSurface?.kind === "pull-requests" && activeThreadRef ? (
       <ThreadPullRequestsPanel threadRef={activeThreadRef} />
+    ) : renderedRightPanelSurface?.kind === "canvas" && activeThreadRef && activeProject ? (
+      <Suspense fallback={null}>
+        <CanvasPanel
+          key={`${activeThread.environmentId}:${activeProject.id}`}
+          environmentId={activeThread.environmentId}
+          projectId={activeProject.id}
+          threadRef={activeThreadRef}
+          path={renderedRightPanelSurface.path}
+        />
+      </Suspense>
     ) : renderedRightPanelSurface?.kind === "device" ? (
       <Suspense fallback={null}>
         <DevicePanel
@@ -11290,6 +11753,8 @@ export default function ChatView(props: ChatViewProps) {
     isGitRepo,
     envLocked,
     availableEnvironments: logicalProjectEnvironments,
+    copyTargets,
+    onCopyToEnvironment: onCopyTargetSelected,
     autoEnvironmentLabel,
     onAutoEnvironment:
       draftId &&
@@ -11587,6 +12052,7 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenThread={onOpenRelatedThread}
                 parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                 onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRun}
+                onEditInNewThread={paintOnlyDisplayedTimeline ? async () => {} : onEditInNewThread}
                 onRollbackCheckpoint={onTimelineRollbackCheckpoint}
                 supportsConversationRollback={
                   !paintOnlyDisplayedTimeline && supportsConversationRollback
@@ -11835,6 +12301,7 @@ export default function ChatView(props: ChatViewProps) {
                               activeTasksProgress={activeComposerTasksProgress}
                               activeTaskSteps={activeComposerTaskSteps}
                               compactThreadUnavailable={compactThreadUnavailable}
+                              promptSuggestion={promptSuggestion}
                               compactDisabled={compactDisabled}
                               compactDisabledReason={compactDisabledReason}
                               resolvedTheme={resolvedTheme}
@@ -11958,6 +12425,8 @@ export default function ChatView(props: ChatViewProps) {
                                     : undefined
                                 }
                                 availableEnvironments={logicalProjectEnvironments}
+                                copyTargets={copyTargets}
+                                onCopyToEnvironment={onCopyTargetSelected}
                                 composerControlsHostRef={setRestingComposerControlsHost}
                                 contextStripVisible={showComposerContextStrip}
                               />
@@ -12098,6 +12567,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
           onAddDevice={addDeviceSurface}
+          onAddCanvas={addCanvasSurface}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
           diffAvailable={isServerThread && isGitRepo}
@@ -12105,6 +12575,7 @@ export default function ChatView(props: ChatViewProps) {
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
           deviceAvailable={activeThreadRef !== null}
+          canvasAvailable={activeProject !== null}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -12157,6 +12628,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
             onAddDevice={addDeviceSurface}
+            onAddCanvas={addCanvasSurface}
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && canOperateTerminal}
             diffAvailable={isServerThread && isGitRepo}
@@ -12164,6 +12636,7 @@ export default function ChatView(props: ChatViewProps) {
             pullRequestAvailable={pullRequestSurfaceAvailable}
             pullRequestsAvailable={pullRequestsSurfaceAvailable}
             deviceAvailable={activeThreadRef !== null}
+            canvasAvailable={activeProject !== null}
           >
             {rightPanelContent}
           </RightPanelTabs>

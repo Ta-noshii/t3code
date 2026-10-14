@@ -213,9 +213,18 @@ import {
   OrchestrationV2DispatchCommandError,
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2GetThreadProjectionError,
+  OrchestrationV2GetThreadRecapError,
   OrchestrationV2RpcSchemas,
   OrchestrationV2ThreadLaunchError,
 } from "./orchestrationV2.ts";
+import {
+  THREAD_TRANSFER_WS_METHODS,
+  ThreadTransferError,
+  ThreadTransferExportInput,
+  ThreadTransferExportResult,
+  ThreadTransferImportInput,
+  ThreadTransferImportResult,
+} from "./threadTransfer.ts";
 import {
   ProjectCreateNewInput,
   ProjectCreateNewResult,
@@ -285,6 +294,23 @@ import {
   DeviceSession,
   DeviceShutdownInput,
 } from "./device.ts";
+import {
+  CanvasCreateInput,
+  CanvasDeleteInput,
+  CanvasDocument,
+  CanvasError,
+  CanvasEvent,
+  CanvasListInput,
+  CanvasListResult,
+  CanvasReadInput,
+  CanvasRenameInput,
+  CanvasSaveInput,
+  CanvasSaveResult,
+  CanvasScreenshotInput,
+  CanvasScreenshotResult,
+  CanvasSubscribeInput,
+  CanvasSummary,
+} from "./canvas.ts";
 import {} from "./previewAutomation.ts";
 import {
   ServerConfigStreamEvent,
@@ -461,6 +487,15 @@ export const WS_METHODS = {
   previewReportProfiles: "preview.reportProfiles",
   previewReportStatus: "preview.reportStatus",
 
+  // Canvas methods
+  canvasList: "canvas.list",
+  canvasRead: "canvas.read",
+  canvasSave: "canvas.save",
+  canvasCreate: "canvas.create",
+  canvasRename: "canvas.rename",
+  canvasDelete: "canvas.delete",
+  canvasScreenshot: "canvas.screenshot",
+
   // Device methods
   deviceConfigure: "device.configure",
   deviceList: "device.list",
@@ -579,6 +614,7 @@ export const WS_METHODS = {
   subscribePreviewEvents: "subscribePreviewEvents",
   subscribeDiscoveredLocalServers: "subscribeDiscoveredLocalServers",
   subscribeDeviceState: "subscribeDeviceState",
+  subscribeCanvasEvents: "subscribeCanvasEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
@@ -1610,6 +1646,56 @@ const WsDeviceActionRpc = Rpc.make(WS_METHODS.deviceAction, {
   error: Schema.Union([DeviceError, EnvironmentAuthorizationError]),
 });
 
+const CanvasRpcError = Schema.Union([CanvasError, EnvironmentAuthorizationError]);
+
+const WsCanvasListRpc = Rpc.make(WS_METHODS.canvasList, {
+  payload: CanvasListInput,
+  success: CanvasListResult,
+  error: CanvasRpcError,
+});
+
+const WsCanvasReadRpc = Rpc.make(WS_METHODS.canvasRead, {
+  payload: CanvasReadInput,
+  success: CanvasDocument,
+  error: CanvasRpcError,
+});
+
+const WsCanvasSaveRpc = Rpc.make(WS_METHODS.canvasSave, {
+  payload: CanvasSaveInput,
+  success: CanvasSaveResult,
+  error: CanvasRpcError,
+});
+
+const WsCanvasCreateRpc = Rpc.make(WS_METHODS.canvasCreate, {
+  payload: CanvasCreateInput,
+  success: CanvasSummary,
+  error: CanvasRpcError,
+});
+
+const WsCanvasRenameRpc = Rpc.make(WS_METHODS.canvasRename, {
+  payload: CanvasRenameInput,
+  success: CanvasSummary,
+  error: CanvasRpcError,
+});
+
+const WsCanvasDeleteRpc = Rpc.make(WS_METHODS.canvasDelete, {
+  payload: CanvasDeleteInput,
+  error: CanvasRpcError,
+});
+
+const WsCanvasScreenshotRpc = Rpc.make(WS_METHODS.canvasScreenshot, {
+  payload: CanvasScreenshotInput,
+  success: CanvasScreenshotResult,
+  error: CanvasRpcError,
+});
+
+const WsSubscribeCanvasEventsRpc = Rpc.make(WS_METHODS.subscribeCanvasEvents, {
+  payload: CanvasSubscribeInput,
+  success: CanvasEvent,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsSubscribeDeviceStateRpc = Rpc.make(WS_METHODS.subscribeDeviceState, {
   payload: Schema.Struct({}),
   success: DeviceServiceState,
@@ -1699,6 +1785,12 @@ const WsOrchestrationV2GetTurnItemRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.get
   error: Schema.Union([OrchestrationV2GetThreadProjectionError, EnvironmentAuthorizationError]),
 });
 
+const WsOrchestrationV2GetThreadRecapRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.getThreadRecap, {
+  payload: OrchestrationV2RpcSchemas.getThreadRecap.input,
+  success: OrchestrationV2RpcSchemas.getThreadRecap.output,
+  error: Schema.Union([OrchestrationV2GetThreadRecapError, EnvironmentAuthorizationError]),
+});
+
 const WsOrchestrationV2LaunchThreadRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.launchThread, {
   payload: OrchestrationV2RpcSchemas.launchThread.input,
   success: OrchestrationV2RpcSchemas.launchThread.output,
@@ -1727,6 +1819,18 @@ const WsOrchestrationV2SubscribeThreadRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS
   success: OrchestrationV2RpcSchemas.subscribeThread.output,
   error: Schema.Union([OrchestrationV2GetThreadProjectionError, EnvironmentAuthorizationError]),
   stream: true,
+});
+
+const WsThreadTransferExportRpc = Rpc.make(THREAD_TRANSFER_WS_METHODS.exportThread, {
+  payload: ThreadTransferExportInput,
+  success: ThreadTransferExportResult,
+  error: Schema.Union([ThreadTransferError, EnvironmentAuthorizationError]),
+});
+
+const WsThreadTransferImportRpc = Rpc.make(THREAD_TRANSFER_WS_METHODS.importThread, {
+  payload: ThreadTransferImportInput,
+  success: ThreadTransferImportResult,
+  error: Schema.Union([ThreadTransferError, EnvironmentAuthorizationError]),
 });
 
 const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
@@ -2040,6 +2144,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewReportStatusRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
+  WsCanvasListRpc,
+  WsCanvasReadRpc,
+  WsCanvasSaveRpc,
+  WsCanvasCreateRpc,
+  WsCanvasRenameRpc,
+  WsCanvasDeleteRpc,
+  WsCanvasScreenshotRpc,
+  WsSubscribeCanvasEventsRpc,
   WsDeviceConfigureRpc,
   WsDeviceListRpc,
   WsDeviceTestHostRpc,
@@ -2058,6 +2170,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2GetWorkflowScriptRpc,
   WsOrchestrationV2StopWorkflowRpc,
   WsOrchestrationV2GetTurnItemRpc,
+  WsOrchestrationV2GetThreadRecapRpc,
   WsOrchestrationV2GetTurnDiffRpc,
   WsOrchestrationV2GetFullThreadDiffRpc,
   WsOrchestrationV2SearchThreadsRpc,
@@ -2069,4 +2182,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeArchivedShellRpc,
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
+  WsThreadTransferExportRpc,
+  WsThreadTransferImportRpc,
 ).middleware(RpcScopeAuthorization);

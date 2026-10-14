@@ -1,4 +1,9 @@
-import { ORCHESTRATION_V2_WS_METHODS, WS_METHODS, type WsRpcGroup } from "@t3tools/contracts";
+import {
+  ORCHESTRATION_V2_WS_METHODS,
+  THREAD_TRANSFER_WS_METHODS,
+  WS_METHODS,
+  type WsRpcGroup,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
@@ -27,6 +32,9 @@ const RPC_AGGREGATES = {
   [ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getThreadProjection]: "orchestrationV2",
   [ORCHESTRATION_V2_WS_METHODS.launchThread]: "orchestration",
+  [ORCHESTRATION_V2_WS_METHODS.getThreadRecap]: "orchestration",
+  [THREAD_TRANSFER_WS_METHODS.exportThread]: "orchestration",
+  [THREAD_TRANSFER_WS_METHODS.importThread]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.subscribeArchivedShell]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: "orchestrationV2",
   [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: "orchestrationV2",
@@ -204,6 +212,14 @@ const RPC_AGGREGATES = {
   [WS_METHODS.deviceDetail]: "device",
   [WS_METHODS.deviceAction]: "device",
   [WS_METHODS.subscribeDeviceState]: "device",
+  [WS_METHODS.canvasList]: "canvas",
+  [WS_METHODS.canvasRead]: "canvas",
+  [WS_METHODS.canvasSave]: "canvas",
+  [WS_METHODS.canvasCreate]: "canvas",
+  [WS_METHODS.canvasRename]: "canvas",
+  [WS_METHODS.canvasDelete]: "canvas",
+  [WS_METHODS.canvasScreenshot]: "canvas",
+  [WS_METHODS.subscribeCanvasEvents]: "canvas",
   [WS_METHODS.subscribeServerConfig]: "server",
   [WS_METHODS.subscribeServerLifecycle]: "server",
   [WS_METHODS.subscribeAuthAccess]: "auth",

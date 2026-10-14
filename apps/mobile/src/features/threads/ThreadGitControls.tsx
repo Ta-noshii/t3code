@@ -92,6 +92,7 @@ export type ThreadGitMenuProps = {
   readonly onOpenGitInspector?: () => void;
   /** Present only on a thread whose work can be merged into the one it came from. */
   readonly onMergeBack?: () => void;
+  readonly onOpenCanvases?: () => void;
   readonly onPull: () => Promise<void>;
   readonly onRunAction: (input: GitActionRequestInput) => Promise<GitRunStackedActionResult | null>;
 };
@@ -393,6 +394,17 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
                   },
                 ]
               : []),
+            ...(props.onOpenCanvases
+              ? [
+                  {
+                    description: "Drawings you share with the agent",
+                    icon: { name: "scribble.variable", type: "sfSymbol" as const },
+                    label: "Canvases",
+                    onPress: props.onOpenCanvases,
+                    type: "action" as const,
+                  },
+                ]
+              : []),
             {
               description: "Commit, files, branches",
               icon: { name: "ellipsis", type: "sfSymbol" },
@@ -424,6 +436,7 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
       props.canOperateTerminal,
       props.gitStatus,
       props.onMergeBack,
+      props.onOpenCanvases,
       props.onOpenNewTerminal,
       props.onOpenTerminal,
       props.onRunProjectScript,
@@ -590,6 +603,17 @@ function threadGitMenuDefinition(
         subtitle: "Turn diffs and worktree changes",
         onPress: model.openReview,
       },
+      ...(props.onOpenCanvases
+        ? [
+            {
+              id: "canvases",
+              title: "Canvases",
+              icon: "scribble.variable",
+              subtitle: "Drawings you share with the agent",
+              onPress: props.onOpenCanvases,
+            },
+          ]
+        : []),
       {
         id: "git-more",
         title: "More",

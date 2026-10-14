@@ -1,6 +1,8 @@
 import {
+  OrchestratorMcpCapabilitiesInput,
   OrchestratorMcpCapabilitiesResult,
   OrchestrationV2StopWorkflowInput,
+  OrchestratorMcpCodexReviewInput,
   OrchestratorMcpCreateThreadsInput,
   OrchestratorMcpCreateThreadsResult,
   OrchestratorMcpDelegateTaskInput,
@@ -52,7 +54,8 @@ const threadMetadataDependencies = [
 
 const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description:
-    "List the V2 provider instances and their current models from the same live catalog as the composer, including configured custom models, inherited runtime settings, and app-owned orchestration features available to this caller. For a separate top-level thread in a new or existing worktree, use t3_thread_launch with workspaceStrategy.",
+    "List the V2 provider instances and their current models from the same live catalog as the composer, including configured custom models, inherited runtime settings, and app-owned orchestration features available to this caller. By default it lists only the models in the server's orchestratorModels setting (plus the calling thread's own model) and only providers that can run child tasks; hiddenModelCount says how many were left out. Pass all=true for the whole catalog. delegate_task accepts any model in the catalog either way. For a separate top-level thread in a new or existing worktree, use t3_thread_launch with workspaceStrategy.",
+  parameters: OrchestratorMcpCapabilitiesInput,
   success: OrchestratorMcpCapabilitiesResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
@@ -74,6 +77,19 @@ export const DelegateTaskTool = Tool.make("delegate_task", {
 })
   .annotate(Tool.Title, "Delegate a child task")
   .annotate(Tool.Destructive, true)
+  .annotate(Tool.OpenWorld, true);
+
+export const CodexReviewTool = Tool.make("codex_review", {
+  description:
+    "Needs an agent running inside a T3 thread. Run Codex's built-in code review (the same reviewer and prompt as the `codex review` CLI) as a delegated child task of THIS thread, in this thread's checkout. The user watches it live as a reviewer subagent. target picks what to review like codex review's flags: {type:'uncommitted'} (default), {type:'base', branch}, {type:'commit', sha, title?}, or {type:'custom', instructions}. Codex runs on this thread's Codex instance when it has one, else the first Codex instance; pass providerInstanceId or model to choose. The result is a delegated task: async (default) wakes this thread with the findings as the task summary, so end the turn instead of polling; mode='wait' blocks until the review finishes or timeoutMs elapses. Use task_status and task_cancel with the returned taskId. Use a new clientRequestId for each review round, stable across retries of that round.",
+  parameters: OrchestratorMcpCodexReviewInput,
+  success: OrchestratorMcpDelegateTaskResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Run a Codex code review")
+  .annotate(Tool.Destructive, false)
   .annotate(Tool.OpenWorld, true);
 
 const TaskStatusTool = Tool.make("task_status", {
@@ -275,6 +291,7 @@ const ThreadInterruptTool = Tool.make("t3_thread_interrupt", {
 export const OrchestratorToolkit = Toolkit.make(
   OrchestratorCapabilitiesTool,
   DelegateTaskTool,
+  CodexReviewTool,
   TaskStatusTool,
   TaskCancelTool,
   WorkflowStopTool,

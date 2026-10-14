@@ -296,7 +296,11 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
-import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
+import {
+  ContextWindowMeter,
+  ContextWindowMeterPlaceholder,
+  type ContextWindowAutoCompactTarget,
+} from "./ContextWindowMeter";
 import {
   providerSupportsManualCompaction,
   resolveContextWindowModelDisplayName,
@@ -1364,6 +1368,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   activeContextWindow: ContextWindowSnapshot | null;
   reserveContextWindowMeter: boolean;
   activeThreadModelDisplayName: string | null;
+  autoCompactTarget: ContextWindowAutoCompactTarget | null;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -1407,6 +1412,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           onCompact={props.onCompactContext}
           compactDisabled={props.compactDisabled}
           compactDisabledReason={props.compactDisabledReason}
+          compactAfterTurn={props.isRunning}
+          autoCompactTarget={props.autoCompactTarget}
         />
       ) : props.reserveContextWindowMeter ? (
         <ContextWindowMeterPlaceholder />
@@ -1618,6 +1625,8 @@ export interface ChatComposerProps {
   // Context window
   activeContextWindow: ContextWindowSnapshot | null;
   compactThreadUnavailable: boolean;
+  /** The provider's guess at the next prompt, offered while the composer is empty. */
+  promptSuggestion: string | null;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
 
@@ -1766,6 +1775,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProjectId,
     activeContextWindow,
     compactThreadUnavailable,
+    promptSuggestion,
     compactDisabled,
     compactDisabledReason,
     resolvedTheme,
@@ -2424,6 +2434,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => resolveContextWindowModelDisplayName(activeThreadModelSelection, modelOptionsByInstance),
     [activeThreadModelSelection, modelOptionsByInstance],
   );
+  // The meter reports the thread's own provider, so the auto-compact choice
+  // edits that instance on the thread's environment, not the picker's draft.
+  const contextWindowInstanceId =
+    activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId ?? null;
+  const contextWindowDriverKind =
+    contextWindowInstanceId === null
+      ? null
+      : (providerInstanceEntries.find((entry) => entry.instanceId === contextWindowInstanceId)
+          ?.driverKind ?? null);
+  const autoCompactTarget = useMemo<ContextWindowAutoCompactTarget | null>(
+    () =>
+      contextWindowInstanceId !== null && contextWindowDriverKind === "claudeAgent"
+        ? {
+            environmentId,
+            instanceId: contextWindowInstanceId,
+            driverKind: contextWindowDriverKind,
+          }
+        : null,
+    [contextWindowDriverKind, contextWindowInstanceId, environmentId],
+  );
   const reserveContextWindowMeter = shouldReserveContextWindowMeter({
     meterEnabled: settings.contextWindowMeterEnabled,
     detailLoading: props.threadSyncPhase === "loading",
@@ -2893,6 +2923,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const isChoiceOnlyPendingQuestion =
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
+  // Only an idle composer with nothing else to answer offers the suggestion.
+  const offeredPromptSuggestion =
+    phase === "ready" &&
+    !isComposerApprovalState &&
+    pendingUserInputs.length === 0 &&
+    !(showPlanFollowUpPrompt && activeProposedPlan) &&
+    !projectSelectionRequired &&
+    !showProviderUnavailable
+      ? promptSuggestion
+      : null;
   const showComposerTopDrawer =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
@@ -4365,7 +4405,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       noProviderAvailable ||
       activePendingApproval !== null ||
       pendingUserInputs.length > 0 ||
-      phase === "running" ||
       isSendBusy ||
       isConnecting ||
       !activeThreadId
@@ -4384,7 +4423,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     noProviderAvailable,
     onCompactContext,
     pendingUserInputs.length,
-    phase,
   ]);
   const expandMobileComposer = useCallback(() => {
     if (composerBlurFrameRef.current !== null) {
@@ -4509,6 +4547,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const { trigger } = resolveActiveComposerTrigger();
     const menuIsActive =
       !isLiteralPendingAnswer && (composerMenuOpenRef.current || trigger !== null);
+    // Tab fills an empty composer with the suggestion. It shows only after a
+    // finished turn, so it never meets a Tab binding that acts on a running one.
+    if (
+      key === "Tab" &&
+      !event.shiftKey &&
+      submissionIntent === null &&
+      !menuIsActive &&
+      offeredPromptSuggestion !== null &&
+      promptRef.current.trim().length === 0
+    ) {
+      replacePromptFromHistory(offeredPromptSuggestion);
+      return true;
+    }
     if (key === "Escape") {
       if (!menuIsActive || event.isComposing || event.keyCode === 229) return false;
       dismissComposerTrigger(trigger);
@@ -7603,7 +7654,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 ? "Enable a provider in Settings to send a message"
                                 : phase === "disconnected"
                                   ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                  : offeredPromptSuggestion !== null
+                                    ? `${offeredPromptSuggestion}   Tab to use`
+                                    : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
                     disabled={
                       isConnecting ||
@@ -7735,6 +7788,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     }
                     reserveContextWindowMeter={reserveContextWindowMeter}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
+                    autoCompactTarget={autoCompactTarget}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     canInterrupt={canInterrupt}

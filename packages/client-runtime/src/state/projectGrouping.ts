@@ -144,9 +144,21 @@ export function deriveLogicalProjectKey(
 
   return (
     deriveRepositoryScopedKey(project, groupingMode) ??
+    // Scratch folders sit at the same paths on every machine but hold unrelated work.
+    (project.isScratch ? null : deriveFolderKey(project)) ??
     derivePhysicalProjectKey(project) ??
     scopedProjectKey(scopeProjectRef(project.environmentId, project.id))
   );
+}
+
+/**
+ * A folder with no git remote (a plain directory, or a repo without remotes) has no
+ * repository identity to match on, so it groups with folders at the same path in
+ * other environments, such as `~/Work` on a laptop and on a server.
+ */
+function deriveFolderKey(project: Pick<EnvironmentProject, "workspaceRoot">): string | null {
+  const normalizedPath = normalizeProjectPathForComparison(project.workspaceRoot);
+  return normalizedPath.length === 0 ? null : `folder:${normalizedPath}`;
 }
 
 export function deriveLogicalProjectKeyFromSettings(
