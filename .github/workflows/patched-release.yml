@@ -34,7 +34,8 @@ concurrency:
 env:
   UPSTREAM: pingdotgg/t3code
   # Applied in order. A branch that is gone (merged and deleted) is skipped, and commits
-  # upstream already contains drop out as empty cherry-picks.
+  # upstream already contains drop out as empty cherry-picks. A branch based on an earlier
+  # one in the list contributes only its own commits.
   PATCH_BRANCHES: >-
     patch/edit-fork-v2
     fix/hyprland-snapshot-flight-sizing

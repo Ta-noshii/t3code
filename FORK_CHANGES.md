@@ -64,7 +64,7 @@ Based on `patch/edit-fork-v2`, since "Send all" needs its `queued-messages.send-
 
 - `patched-release.yml` runs every 4 hours and builds the newest upstream nightly that has no patched release yet. Stable versions build only when started by hand. For each version it:
   1. installs dependencies on the upstream tree,
-  2. cherry-picks the patch branches, asking the Cursor CLI agent to resolve any conflict,
+  2. cherry-picks the patch branches, asking the Cursor CLI agent to resolve any conflict. A branch based on an earlier patch branch (`patch/bar-bridge` on `patch/edit-fork-v2`) contributes only its own commits; the earlier branch's commits are left out of its pick. The script commits with git hooks off, because upstream's pre-commit hook reformats files mid-cherry-pick and stops the sequence,
   3. typechecks the server and web apps and runs the tests above, asking the agent to fix failures (up to two rounds),
   4. builds the Linux AppImage and the server archive,
   5. publishes release `v<version>` with the Linux assets and keeps the newest five,
