@@ -57,6 +57,7 @@ Based on `patch/edit-fork-v2`, since "Send all" needs its `queued-messages.send-
 - Custom Now Bar cards delivered through private host push, expanded cards with live agent updates, layout and text fixes, and a Now Bar state lab.
 - Signed fork updates: the app updates from this repository's releases instead of upstream's.
 - **DPoP proofs tolerate a fast phone clock.** The app backdates each proof's `iat` by 60 s (`apps/mobile/src/features/cloud/dpop.ts`). The relay and environment servers allow a proof to be 300 s old but only 5 s in the future, and a phone clock set from the carrier can run several seconds fast, which failed every environment at once with "Relay rejected the DPoP proof" (`time_window`).
+- **T3 Connect sessions get the pairing's full permissions.** The app no longer names the permissions it wants when it trades a T3 Connect or pairing credential for a session; the host grants what the pairing link carries (client half of upstream #9785, `packages/client-runtime/src/authorization/service.ts`). `nowbar` forked before that change, so the app asked for a list without `filesystem:read`, and every markdown image of a host file showed "Image unavailable" on the phone. Drop this entry once `nowbar` merges upstream past #9785.
 - Workflow `nowbar-release.yml` syncs upstream and builds the signed APK. It passes `-R "$GITHUB_REPOSITORY"` to `gh`, because the checkout has an `upstream` remote that `gh` would otherwise pick.
 
 ## Fork CI
@@ -70,4 +71,5 @@ Based on `patch/edit-fork-v2`, since "Send all" needs its `queued-messages.send-
   6. then applies the same patched tree on a Windows runner, builds the unsigned x64 NSIS installer (embedding the Linux server archive as the WSL runtime) and adds it to that release about 12 minutes later. If the Windows build fails, the notes say so, and the Windows app sees no update until a later release has one.
 
   When the agent changed anything, the release notes say so and the release carries `ai-reconciliation.patch`. Fold that diff into the patch branch so later builds apply cleanly. The agent needs the repository secret `CURSOR_API_KEY`; without it, a conflict or failed check stops the build as before.
+
 - The release tags the `nowbar` commit the workflow ran from, not the patched tree. The workflow token may not push a commit that edits upstream's `.github/workflows` files.
