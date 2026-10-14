@@ -10,6 +10,12 @@
 # put into the release notes.
 set -euo pipefail
 
+# `vp install` sets core.hooksPath to upstream's hooks, whose pre-commit hook formats and
+# re-stages files. Inside `git cherry-pick --continue` that leaves the sequencer holding a
+# stale index, and it stops with "your local changes would be overwritten by cherry-pick".
+# The script's own commits skip the hooks; resolved files are formatted before staging.
+git() { command git -c core.hooksPath=/dev/null "$@"; }
+
 notes="$RUNNER_TEMP/ai-notes.md"
 fork_changes="$RUNNER_TEMP/FORK_CHANGES.md"
 
@@ -31,7 +37,15 @@ run_agent() {
 
 unmerged() { git diff --name-only --diff-filter=U; }
 
-cherry_pick_in_progress() { [ -e .git/CHERRY_PICK_HEAD ] || [ -d .git/sequencer ]; }
+picking() { [ -e "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ]; }
+
+cherry_pick_in_progress() { picking || [ -d "$(git rev-parse --git-path sequencer)" ]; }
+
+# Formats files the way upstream's pre-commit hook would. Best effort: a formatter failure
+# must not stop the build.
+format_files() {
+  vp fmt --no-error-on-unmatched-pattern "$@" >/dev/null 2>&1 || true
+}
 
 resolve_conflicts() {
   local branch="$1" steps=0
@@ -45,9 +59,12 @@ resolve_conflicts() {
     local files
     files=$(unmerged)
     if [ -z "$files" ]; then
-      # A commit that became empty after resolution: upstream already has it.
-      if [ -z "$(git diff --cached --name-only)" ]; then
-        git cherry-pick --skip
+      if ! picking; then
+        # The sequencer stopped between picks (the last one is committed): resume it.
+        GIT_EDITOR=true git cherry-pick --continue || true
+      elif [ -z "$(git diff --cached --name-only)" ]; then
+        # A commit that became empty after resolution: upstream already has it.
+        git cherry-pick --skip || true
       else
         GIT_EDITOR=true git cherry-pick --continue || true
       fi
@@ -85,7 +102,12 @@ EOF
       exit 1
     fi
     # shellcheck disable=SC2086
+    format_files $files
+    # shellcheck disable=SC2086
     git add -- $files
+    # Tracked files the agent had to touch outside the conflict belong to this commit too;
+    # left unstaged, they would block the next pick.
+    git add -u
     {
       echo "- Resolved conflicts applying \`$branch\` commit $commit ($(git log -1 --format=%s "$commit")) in:"
       sed 's/^/  - `/; s/$/`/' <<<"$files"
@@ -95,6 +117,7 @@ EOF
 }
 
 apply() {
+  local applied=()
   for branch in $PATCH_BRANCHES; do
     if ! git fetch -q --filter=blob:none origin "refs/heads/$branch:refs/remotes/origin/$branch"; then
       summary "Skipped \`$branch\`: not on the fork."
@@ -102,9 +125,12 @@ apply() {
     fi
     local base
     base=$(git merge-base "origin/$branch" HEAD)
-    if ! git cherry-pick --empty=drop "$base..origin/$branch"; then
+    # A branch based on an earlier patch branch shares its commits. Those are applied
+    # already, and replaying them can conflict with their own later edits, so leave them out.
+    if ! git cherry-pick --empty=drop "^$base" "${applied[@]/#/^}" "origin/$branch"; then
       resolve_conflicts "$branch"
     fi
+    applied+=("origin/$branch")
   done
   summary '```'
   summary "$(git log --oneline "upstream-v$VERSION..HEAD")"
