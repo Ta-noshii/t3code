@@ -292,6 +292,8 @@ export interface ThreadDetailScreenProps {
       hasAttachmentsOrContext: boolean,
     ) => Promise<boolean | "responded">,
   ) => Promise<MessageId | null>;
+  /** Absent on the new task draft, which has no thread to reply in yet. */
+  readonly onSendSuggestedReply?: (text: string) => Promise<MessageId | null>;
   readonly onReconnectEnvironment: () => void;
   readonly canSwitchThreadProvider: boolean;
   readonly onUpdateThreadInteractionMode?: (interactionMode: ProviderInteractionMode) => void;
@@ -1216,6 +1218,18 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     });
   };
 
+  const handleInsertSuggestedReply = (reply: string) => {
+    const currentDraft =
+      props.composerDraftKey === null ? "" : getComposerDraftSnapshot(props.composerDraftKey).text;
+    const nextDraft =
+      currentDraft.trim().length === 0 ? reply : `${currentDraft.trimEnd()} ${reply}`;
+    props.onChangeDraftMessage(nextDraft);
+    requestAnimationFrame(() => {
+      composerEditorRef.current?.focus();
+      composerEditorRef.current?.setSelection({ start: nextDraft.length, end: nextDraft.length });
+    });
+  };
+
   const handleScrollToEnd = () => {
     void Haptics.selectionAsync();
     void scrollMessageToEnd({ animated: !reduceMotion, closeKeyboard: false }).catch(() => {
@@ -1342,6 +1356,8 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
               onEndFollowEnabledChange={handleEndFollowEnabledChange}
               skills={selectedProviderSkills}
               onUseArtifactTemplate={handleUseArtifactTemplate}
+              onSendSuggestedReply={props.onSendSuggestedReply}
+              onInsertSuggestedReply={handleInsertSuggestedReply}
             />
           </RenderErrorBoundary>
         </View>
