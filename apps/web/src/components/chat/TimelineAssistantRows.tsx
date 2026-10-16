@@ -14,6 +14,8 @@ import { ChangedFilesCard } from "./ChangedFilesTree";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useAssistantMessageText, useProject, useThreadShell } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { SuggestedReplies } from "./SuggestedReplies";
+import { parseSuggestedReplies } from "@t3tools/shared/suggestedReplies";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -26,13 +28,19 @@ import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts"
 
 export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
+  const { suggestedRepliesMessageId } = use(TimelineRowActivityCtx);
   // The timeline holds a streaming message's row while only its text grows.
   const liveText = useAssistantMessageText(
     row.message.streaming ? ctx.threadRef : null,
     row.projectedItem?.item.id,
   );
-  const text = liveText ?? row.message.text;
-  const messageText = text || (row.message.streaming ? "" : "(empty response)");
+  const suggested = parseSuggestedReplies(liveText ?? row.message.text);
+  const messageText = suggested.text || (row.message.streaming ? "" : "(empty response)");
+  const showSuggestedReplies =
+    suggested.replies.length > 0 &&
+    suggestedRepliesMessageId === row.message.id &&
+    ctx.onSendSuggestedReply !== undefined &&
+    ctx.onInsertSuggestedReply !== undefined;
 
   return (
     <>
@@ -75,6 +83,13 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             message={row.message}
             showCopyButton={row.showAssistantCopyButton}
             copyStreaming={row.assistantCopyStreaming}
+          />
+        ) : null}
+        {showSuggestedReplies ? (
+          <SuggestedReplies
+            replies={suggested.replies}
+            onSend={ctx.onSendSuggestedReply!}
+            onInsert={ctx.onInsertSuggestedReply!}
           />
         ) : null}
       </div>

@@ -282,6 +282,8 @@ interface MessagesTimelineProps {
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   onSendAppMessage?: (text: string) => Promise<void>;
+  onSendSuggestedReply?: (text: string) => Promise<void>;
+  onInsertSuggestedReply?: (text: string) => void;
   onRunShellCommand?: (command: string) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -382,6 +384,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onRevertToTurnCount,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   onSendAppMessage,
+  onSendSuggestedReply,
+  onInsertSuggestedReply,
   onRunShellCommand,
   isRevertingCheckpoint,
   onImageExpand,
@@ -1032,6 +1036,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onFileOpen,
     onUseArtifactTemplate,
     onSendAppMessage,
+    onSendSuggestedReply,
+    onInsertSuggestedReply,
     onAppFullscreenChange,
     onFileDownload,
     openPullRequest,
@@ -1068,6 +1074,15 @@ const ConversationTimeline = memo(function ConversationTimeline({
     latestRun?.startedAt != null
       ? worktreeSetup
       : null;
+  const suggestedRepliesMessageId = (() => {
+    if (isWorking || awaitingUser !== null) return null;
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index]!;
+      if (row.kind !== "message") continue;
+      return row.message.role === "assistant" && !row.message.streaming ? row.message.id : null;
+    }
+    return null;
+  })();
   const activityState: TimelineRowActivityState = {
     isWorking,
     isCompacting: compactionAwaitingRow,
@@ -1076,6 +1091,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     awaitingUser: awaitingUser !== null,
     isPreparingWorktree,
     latestRunId: latestRun?.runId ?? null,
+    suggestedRepliesMessageId,
   };
   // Mounted in both the empty and filled timeline so a thread's first turn
   // starts from a baseline instead of a fresh, silent region.

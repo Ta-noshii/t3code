@@ -1159,6 +1159,7 @@ function ThreadRouteContent(
             composer.queueHeld || composer.resumableRunId !== null ? handleResumeQueue : null
           }
           onSendMessage={composer.onSendMessage}
+          onSendSuggestedReply={composer.onSendSuggestedReply}
           onReconnectEnvironment={handleReconnectEnvironment}
           canSwitchThreadProvider={composer.canSwitchThreadProvider}
           onUpdateThreadInteractionMode={composer.onUpdateInteractionMode}
