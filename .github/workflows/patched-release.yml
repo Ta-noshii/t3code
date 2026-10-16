@@ -41,6 +41,7 @@ env:
     fix/hyprland-snapshot-flight-sizing
     fix/preview-viewport-main-zoom
     patch/bar-bridge
+    patch/suggested-replies
 
 jobs:
   plan:

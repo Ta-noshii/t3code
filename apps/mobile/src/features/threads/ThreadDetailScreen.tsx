@@ -235,6 +235,7 @@ export interface ThreadDetailScreenProps {
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
   readonly onSendMessage: (followUp?: ActiveTurnComposerAction) => Promise<MessageId | null>;
+  readonly onSendSuggestedReply: (text: string) => Promise<MessageId | null>;
   readonly onReconnectEnvironment: () => void;
   /** Whether the model picker may offer providers other than this thread's. */
   readonly canSwitchThreadProvider: boolean;
@@ -1092,6 +1093,21 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     [props.onChangeDraftMessage],
   );
 
+  const handleInsertSuggestedReply = useCallback(
+    (reply: string) => {
+      const currentDraft = draftMessageRef.current;
+      const nextDraft =
+        currentDraft.trim().length === 0 ? reply : `${currentDraft.trimEnd()} ${reply}`;
+      draftMessageRef.current = nextDraft;
+      props.onChangeDraftMessage(nextDraft);
+      requestAnimationFrame(() => {
+        composerEditorRef.current?.focus();
+        composerEditorRef.current?.setSelection({ start: nextDraft.length, end: nextDraft.length });
+      });
+    },
+    [props.onChangeDraftMessage],
+  );
+
   const handleScrollToEnd = useCallback(() => {
     void Haptics.selectionAsync();
     void scrollMessageToEnd({ animated: true, closeKeyboard: false }).catch(() => {
@@ -1201,6 +1217,8 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               onEndFollowEnabledChange={setEndFollowEnabled}
               skills={selectedProviderSkills}
               onUseArtifactTemplate={handleUseArtifactTemplate}
+              onSendSuggestedReply={props.onSendSuggestedReply}
+              onInsertSuggestedReply={handleInsertSuggestedReply}
             />
           </RenderErrorBoundary>
         </View>

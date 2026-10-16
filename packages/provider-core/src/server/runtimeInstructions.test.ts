@@ -10,6 +10,12 @@ describe("buildRuntimeInstructions", () => {
     expect(instructions).toContain("call list_thread_pull_requests and link any PR");
   });
 
+  it("tells agents how to offer suggested replies", () => {
+    expect(buildRuntimeInstructions({ harness: "Claude Code" })).toContain(
+      "info string is t3-replies, one reply per line",
+    );
+  });
+
   it("keeps known model and effort metadata on one line", () => {
     expect(
       buildRuntimeInstructions({

@@ -5,6 +5,7 @@ import { enrichedContextLinkPresentation } from "../../lib/enrichedLinkPresentat
 import { ThreadContextDivider } from "./thread-context-divider";
 import { ThreadHandoffRow } from "./thread-handoff-row";
 import { SecretRequestCard } from "./SecretRequestCard";
+import { SuggestedReplies } from "./SuggestedReplies";
 import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import {
   WorktreeWorkingHeader,
@@ -31,6 +32,7 @@ import {
   type RunId,
 } from "@t3tools/contracts";
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
+import { parseSuggestedReplies } from "@t3tools/shared/suggestedReplies";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@t3tools/shared/promptLinks";
@@ -316,6 +318,8 @@ export interface ThreadFeedProps {
   readonly onEndFollowEnabledChange?: (enabled: boolean) => void;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
+  readonly onSendSuggestedReply?: (text: string) => Promise<unknown>;
+  readonly onInsertSuggestedReply?: (text: string) => void;
 }
 
 const USER_MESSAGE_COPY_MENU_ACTIONS = [
@@ -1030,6 +1034,8 @@ function renderFeedEntry(
     ThreadFeedProps,
     | "environmentId"
     | "onUseArtifactTemplate"
+    | "onSendSuggestedReply"
+    | "onInsertSuggestedReply"
     | "skills"
     | "dispatchingMessageId"
     | "onEditPendingMessage"
@@ -1043,6 +1049,7 @@ function renderFeedEntry(
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: RunId | null;
+    readonly suggestedRepliesMessageId: string | null;
     readonly failedRunIds: ReadonlySet<RunId>;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
@@ -1195,7 +1202,17 @@ function renderFeedEntry(
     const { message } = entry;
     const isUser = message.role === "user";
     const presentation = resolveUserMessagePresentation(message);
-    const renderedText = renderAssistantCitationsAsText(presentation.text);
+    const citedText = renderAssistantCitationsAsText(presentation.text);
+    const suggested = isUser ? null : parseSuggestedReplies(citedText);
+    const renderedText = suggested?.text ?? citedText;
+    const suggestedReplies =
+      suggested !== null &&
+      suggested.replies.length > 0 &&
+      props.suggestedRepliesMessageId === message.id &&
+      props.onSendSuggestedReply !== undefined &&
+      props.onInsertSuggestedReply !== undefined
+        ? suggested.replies
+        : null;
     const styles = isUser ? markdownStyles.user : markdownStyles.assistant;
     const timestampLabel = formatMessageTime(isUser ? message.createdAt : message.updatedAt);
     const attachments = message.attachments ?? [];
@@ -1432,7 +1449,7 @@ function renderFeedEntry(
 
     // Skip empty assistant messages (no text, no attachments) — they would
     // render as an orphaned timestamp and break adjacent activity-group merging.
-    if (renderedText.trim().length === 0 && attachments.length === 0) {
+    if (renderedText.trim().length === 0 && attachments.length === 0 && suggestedReplies === null) {
       return null;
     }
 
@@ -1487,6 +1504,13 @@ function renderFeedEntry(
             <MessageAttachmentUnknown key={attachment.id} name={attachment.name} />
           );
         })}
+        {suggestedReplies !== null ? (
+          <SuggestedReplies
+            replies={suggestedReplies}
+            onSend={props.onSendSuggestedReply!}
+            onInsert={props.onInsertSuggestedReply!}
+          />
+        ) : null}
         {showAssistantMeta ? (
           <View className="mt-1 flex-row items-center gap-1">
             <CopyTextButton
@@ -2085,6 +2109,18 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   );
   const reviewCommentColors = useReviewCommentColors();
   const unsettledTurnId = threadFeedRunIsUnsettled(props.latestRun) ? props.latestRun.runId : null;
+  const suggestedRepliesMessageId = useMemo(() => {
+    // A queued send not yet in the feed is already the user's answer.
+    if (unsettledTurnId !== null || props.queuedMessages.length > 0) return null;
+    for (let index = props.feed.length - 1; index >= 0; index -= 1) {
+      const entry = props.feed[index]!;
+      if (entry.type !== "message") continue;
+      return entry.message.role === "assistant" && !entry.message.streaming
+        ? entry.message.id
+        : null;
+    }
+    return null;
+  }, [props.feed, props.queuedMessages.length, unsettledTurnId]);
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Include turn completion so unchanged message rows reveal their footer and spacing
   // even when the final message update arrives before the turn settles.
@@ -2094,6 +2130,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       setupWorkingStartedAt: props.setupWorkingStartedAt,
       dispatchingMessageId: props.dispatchingMessageId,
       unsettledTurnId,
+      suggestedRepliesMessageId,
       copiedRowId,
       expandedWorkGroups,
       expandedWorkRows,
@@ -2110,6 +2147,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.setupWorkingStartedAt,
       props.dispatchingMessageId,
       unsettledTurnId,
+      suggestedRepliesMessageId,
       copiedRowId,
       expandedWorkGroups,
       expandedWorkRows,
@@ -2572,6 +2610,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               onEditPendingMessage: props.onEditPendingMessage,
               onEditInNewThread: props.onEditInNewThread,
               onUseArtifactTemplate: props.onUseArtifactTemplate,
+              onSendSuggestedReply: props.onSendSuggestedReply,
+              onInsertSuggestedReply: props.onInsertSuggestedReply,
               threadId: props.threadId,
               copiedRowId,
               expandedWorkRows,
@@ -2579,6 +2619,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               workGroupScrollPositions,
               terminalAssistantMessageIds,
               unsettledTurnId,
+              suggestedRepliesMessageId,
               failedRunIds,
               onCopyWorkRow,
               onToggleWorkGroup,
@@ -2629,6 +2670,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       workGroupScrollPositions,
       terminalAssistantMessageIds,
       unsettledTurnId,
+      suggestedRepliesMessageId,
       failedRunIds,
       iconSubtleColor,
       screenColor,
@@ -2650,6 +2692,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleWorkRow,
       props.environmentId,
       props.onUseArtifactTemplate,
+      props.onSendSuggestedReply,
+      props.onInsertSuggestedReply,
       props.threadId,
       props.threadTitle,
       props.skills,
