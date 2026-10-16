@@ -119,6 +119,7 @@ import {
 } from "../../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
+import { parseSuggestedReplies } from "@t3tools/shared/suggestedReplies";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Root, RootContent } from "mdast";
@@ -189,6 +190,7 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { SuggestedReplies } from "./SuggestedReplies";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { WorkspaceEntryIcon, WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
@@ -338,6 +340,9 @@ interface TimelineRowSharedState {
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   /** Sends text an MCP App asked to post, after the user approved it. */
   onSendAppMessage: ((text: string) => Promise<void>) | undefined;
+  /** Sends one of the agent's suggested replies as the next user message. */
+  onSendSuggestedReply: ((text: string) => Promise<void>) | undefined;
+  onInsertSuggestedReply: ((text: string) => void) | undefined;
   /**
    * An MCP App row entering or leaving full screen. The row stays rendered
    * and the list stops following new output meanwhile, so the app is not
@@ -384,6 +389,8 @@ interface TimelineRowActivityState {
   awaitingUser: boolean;
   isPreparingWorktree: boolean;
   latestRunId: RunId | null;
+  /** The settled last message, when it is the agent's, can offer suggested replies. */
+  suggestedRepliesMessageId: string | null;
   /**
    * A worktree setup whose script is still running after the agent took
    * over. The working header shows it as a chip with a popover; the stage
@@ -513,6 +520,8 @@ interface MessagesTimelineProps {
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   onSendAppMessage?: (text: string) => Promise<void>;
+  onSendSuggestedReply?: (text: string) => Promise<void>;
+  onInsertSuggestedReply?: (text: string) => void;
   onRunShellCommand?: (command: string) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -620,6 +629,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onRevertToTurnCount,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   onSendAppMessage,
+  onSendSuggestedReply,
+  onInsertSuggestedReply,
   onRunShellCommand,
   isRevertingCheckpoint,
   onImageExpand,
@@ -1381,6 +1392,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onFileOpen,
       onUseArtifactTemplate,
       onSendAppMessage,
+      onSendSuggestedReply,
+      onInsertSuggestedReply,
       onAppFullscreenChange,
       onFileDownload,
       openPullRequest,
@@ -1420,6 +1433,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onFileOpen,
       onUseArtifactTemplate,
       onSendAppMessage,
+      onSendSuggestedReply,
+      onInsertSuggestedReply,
       onAppFullscreenChange,
       onFileDownload,
       openPullRequest,
@@ -1449,6 +1464,15 @@ const ConversationTimeline = memo(function ConversationTimeline({
     latestRun?.startedAt != null
       ? worktreeSetup
       : null;
+  const suggestedRepliesMessageId = useMemo(() => {
+    if (isWorking || awaitingUser) return null;
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index]!;
+      if (row.kind !== "message") continue;
+      return row.message.role === "assistant" && !row.message.streaming ? row.message.id : null;
+    }
+    return null;
+  }, [awaitingUser, isWorking, rows]);
   const activityState = useMemo<TimelineRowActivityState>(
     () => ({
       isWorking,
@@ -1459,9 +1483,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
       awaitingUser,
       isPreparingWorktree,
       latestRunId: latestRun?.runId ?? null,
+      suggestedRepliesMessageId,
     }),
     [
       awaitingUser,
+      suggestedRepliesMessageId,
       compactionAwaitingRow,
       backgroundWorktreeSetup,
       activeTurnInProgress,
@@ -2899,7 +2925,14 @@ function AttemptFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "at
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const { suggestedRepliesMessageId } = use(TimelineRowActivityCtx);
+  const suggested = useMemo(() => parseSuggestedReplies(row.message.text), [row.message.text]);
+  const messageText = suggested.text || (row.message.streaming ? "" : "(empty response)");
+  const showSuggestedReplies =
+    suggested.replies.length > 0 &&
+    suggestedRepliesMessageId === row.message.id &&
+    ctx.onSendSuggestedReply !== undefined &&
+    ctx.onInsertSuggestedReply !== undefined;
 
   return (
     <>
@@ -2940,6 +2973,13 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             message={row.message}
             showCopyButton={row.showAssistantCopyButton}
             copyStreaming={row.assistantCopyStreaming}
+          />
+        ) : null}
+        {showSuggestedReplies ? (
+          <SuggestedReplies
+            replies={suggested.replies}
+            onSend={ctx.onSendSuggestedReply!}
+            onInsert={ctx.onInsertSuggestedReply!}
           />
         ) : null}
       </div>

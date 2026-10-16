@@ -259,6 +259,10 @@
       "types": "./src/composerInlineTokens.ts",
       "import": "./src/composerInlineTokens.ts"
     },
+    "./suggestedReplies": {
+      "types": "./src/suggestedReplies.ts",
+      "import": "./src/suggestedReplies.ts"
+    },
     "./assistantCitations": {
       "types": "./src/assistantCitations.ts",
       "import": "./src/assistantCitations.ts"
