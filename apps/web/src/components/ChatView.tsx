@@ -1890,6 +1890,39 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
   const sendAppMessageStable = useStableCallback(sendAppMessage);
+  // A suggested reply the user picked: queued like a typed message.
+  const sendSuggestedReply = async (text: string) => {
+    if (!isServerThread || activeThreadId === null) {
+      throw new Error("This thread has not started yet.");
+    }
+    const result = await startThreadTurn({
+      environmentId,
+      input: {
+        threadId: activeThreadId,
+        message: { messageId: newMessageId(), role: "user", text, attachments: [] },
+        runtimeMode,
+        interactionMode,
+        dispatchMode: "queue",
+      },
+    });
+    if (result._tag === "Failure") {
+      const error = squashAtomCommandFailure(result);
+      throw error instanceof Error ? error : new Error("Could not send the reply.");
+    }
+  };
+  const sendSuggestedReplyStable = useStableCallback(sendSuggestedReply);
+  const insertSuggestedReply = (text: string) => {
+    if (!composerRef.current?.insertTextAtEnd(text, { ensureLeadingBoundary: true })) {
+      toastManager.add({
+        type: "error",
+        title: "Unable to add to chat",
+        description: "The composer is busy; try again once it is ready.",
+      });
+      return;
+    }
+    scheduleComposerFocus();
+  };
+  const insertSuggestedReplyStable = useStableCallback(insertSuggestedReply);
   const queuedRunsControlRef = useRef<QueuedRunsControlHandle>(null);
 
   const {
@@ -3641,6 +3674,8 @@ export default function ChatView(props: ChatViewProps) {
                   ? {
                       onUseArtifactTemplate: insertArtifactTemplateStable,
                       onSendAppMessage: sendAppMessageStable,
+                      onSendSuggestedReply: sendSuggestedReplyStable,
+                      onInsertSuggestedReply: insertSuggestedReplyStable,
                     }
                   : {})}
                 isRevertingCheckpoint={isRevertingCheckpoint}

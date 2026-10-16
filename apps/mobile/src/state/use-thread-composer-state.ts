@@ -526,6 +526,49 @@ export function useThreadComposerState() {
     scheduleUnusedComposerAttachmentCleanup(draft.attachments);
   };
 
+  // A tapped suggested reply goes out on its own: the draft and its
+  // attachments stay in the composer, and the reply queues behind any run.
+  const onSendSuggestedReply = async (text: string) => {
+    if (!selectedThreadShell || selectedThreadCreation !== null) return null;
+    if (!readEnvironmentScope(selectedThreadShell.environmentId, AuthOrchestrationOperateScope))
+      return null;
+    const thread = selectedThreadShell;
+    const threadKey = scopedThreadKey(thread.environmentId, thread.id);
+    const draft = getComposerDraftSnapshot(threadKey);
+    const modelSelection = draft.modelSelection ?? thread.modelSelection;
+    const provider = selectedEnvironmentRuntime?.serverConfig?.providers.find(
+      (entry) => entry.instanceId === modelSelection.instanceId,
+    );
+    const metadata = makeQueuedMessageMetadata();
+    const messageId = MessageId.make(metadata.messageId);
+    clearThreadComposerError(threadKey);
+    try {
+      await enqueueThreadOutboxMessage({
+        environmentId: thread.environmentId,
+        threadId: thread.id,
+        messageId,
+        commandId: CommandId.make(metadata.commandId),
+        text,
+        attachments: [],
+        modelSelection,
+        runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
+        interactionMode: resolveProviderInteractionMode(
+          provider,
+          draft.interactionMode ?? thread.interactionMode,
+        ),
+        dispatchMode: "queue",
+        createdAt: metadata.createdAt,
+      });
+    } catch (error) {
+      setThreadComposerError(
+        threadKey,
+        error instanceof Error ? error.message : "Failed to send the reply.",
+      );
+      return null;
+    }
+    return messageId;
+  };
+
   const onSendMessage = async (
     followUpOverride?: ActiveTurnComposerAction,
     beforeDispatch?: (
@@ -929,6 +972,7 @@ export function useThreadComposerState() {
     onNativePasteText,
     onRemoveDraftImage,
     onSendMessage,
+    onSendSuggestedReply,
     onUpdateModelSelection,
     onUpdateRuntimeMode,
     onUpdateInteractionMode,

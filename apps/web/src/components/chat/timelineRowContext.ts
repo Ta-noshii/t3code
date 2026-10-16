@@ -35,6 +35,9 @@ export interface TimelineRowSharedState {
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onSendAppMessage: ((text: string) => Promise<void>) | undefined;
+  /** Sends one of the agent's suggested replies as the next user message. */
+  onSendSuggestedReply: ((text: string) => Promise<void>) | undefined;
+  onInsertSuggestedReply: ((text: string) => void) | undefined;
   onAppFullscreenChange: (rowId: string, fullscreen: boolean) => void;
   onRunShellCommand: ((command: string) => void) | undefined;
   findActive: boolean;
@@ -76,6 +79,8 @@ export interface TimelineRowActivityState {
   awaitingUser: boolean;
   isPreparingWorktree: boolean;
   latestRunId: RunId | null;
+  /** The settled last message, when it is the agent's, can offer suggested replies. */
+  suggestedRepliesMessageId: string | null;
   backgroundWorktreeSetup: WorktreeSetupSnapshot | null;
 }
 

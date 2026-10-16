@@ -1,3 +1,4 @@
+import { parseSuggestedReplies } from "@t3tools/shared/suggestedReplies";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 export { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { isLiveSubagentTurnItem } from "@t3tools/client-runtime/state/subagentRuntime";
@@ -809,7 +810,11 @@ export function resolveAssistantMessageCopyState({
   const hasText = text !== null && text.trim().length > 0;
   const visible = showCopyButton && hasText && !streaming;
   return {
-    text: hasText ? (visible ? renderCodexDirectivesForCopy(text) : text) : null,
+    text: hasText
+      ? visible
+        ? renderCodexDirectivesForCopy(parseSuggestedReplies(text).text)
+        : text
+      : null,
     visible,
   };
 }
