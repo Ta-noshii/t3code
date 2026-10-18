@@ -7,6 +7,7 @@ export interface NowBarPreferences {
   readonly private: boolean;
   readonly results: boolean;
   readonly updates: boolean;
+  readonly backgroundUpdates: boolean;
   readonly push: boolean;
   readonly pushLive: boolean;
   readonly custom: boolean;
@@ -43,6 +44,8 @@ interface NowBarNativeModule {
   };
   openSettings(): void;
   canInstallUpdates(): boolean;
+  scheduleBackgroundUpdates(): void;
+  runBackgroundUpdate(): void;
   installUpdate(
     url: string,
     sha256: string,
@@ -57,6 +60,7 @@ let preferences = nowBarNative?.preferences() ?? {
   private: false,
   results: true,
   updates: true,
+  backgroundUpdates: true,
   push: false,
   pushLive: true,
   custom: true,

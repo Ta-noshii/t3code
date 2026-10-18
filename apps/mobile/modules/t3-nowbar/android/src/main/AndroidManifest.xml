@@ -5,12 +5,20 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+  <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <application>
     <meta-data android:name="com.samsung.android.support.ongoing_activity" android:value="true" />
     <service android:name=".NowBarService" android:exported="false" android:foregroundServiceType="specialUse">
       <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-enabled live monitoring of running coding agent tasks and requests for user input over the existing authenticated connection" />
     </service>
     <receiver android:name=".NowBarActionReceiver" android:exported="false" />
+    <receiver android:name=".NowBarUpdateReceiver" android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+      </intent-filter>
+    </receiver>
+    <service android:name=".NowBarUpdateJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
     <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.nowbarupdates" android:exported="false" android:grantUriPermissions="true">
       <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/nowbar_update_paths" />
     </provider>

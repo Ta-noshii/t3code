@@ -129,6 +129,14 @@ export function NowBarSettings() {
           value={preferences.updates}
           onValueChange={(updates) => saveNowBarPreferences({ updates })}
         />
+        <SettingsSwitchRow
+          icon="arrow.down.circle"
+          label="Install in the background"
+          subtitle="Download on Wi-Fi and install while T3 Code is closed"
+          value={preferences.backgroundUpdates}
+          disabled={!preferences.updates}
+          onValueChange={(backgroundUpdates) => saveNowBarPreferences({ backgroundUpdates })}
+        />
         <SettingsRow
           icon="arrow.down.circle"
           label="Check for updates"

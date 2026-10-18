@@ -71,7 +71,9 @@ export function NowBarCoordinator() {
   }, [payload, preferences.enabled, rows.length]);
 
   useEffect(() => {
-    if (!nowBarNative || !preferences.updates) return;
+    if (!nowBarNative) return;
+    nowBarNative.scheduleBackgroundUpdates();
+    if (!preferences.updates) return;
     void checkNowBarUpdate(false);
     const listener = AppState.addEventListener("change", (state) => {
       if (state === "active") void checkNowBarUpdate(false);

@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import { useSyncExternalStore } from "react";
 import { Alert, AppState } from "react-native";
-import { nowBarNative } from "./native";
+import { getNowBarPreferences, nowBarNative } from "./native";
 import { parseNowBarRelease, RELEASE_ROOT, type NowBarRelease } from "./update-manifest";
 
 export type NowBarUpdateState =
@@ -24,6 +24,8 @@ let state = { phase: "idle" } as NowBarUpdateState;
 let dialogOpen = false;
 let lastCheck = 0;
 let offered = 0;
+// A release the background job is fetching; leaving the app lets it install.
+let backgroundRelease = 0;
 const listeners = new Set<() => void>();
 let snapshot: { state: NowBarUpdateState; dialogOpen: boolean } = { state, dialogOpen };
 
@@ -61,6 +63,16 @@ nowBarNative?.addListener("updateProgress", (event) => {
 AppState.addEventListener("change", (appState) => {
   if (appState === "active" && state.phase === "permission" && nowBarNative?.canInstallUpdates())
     void installNowBarUpdate();
+});
+
+// Install as soon as the user leaves instead of at the job's next retry.
+AppState.addEventListener("change", (appState) => {
+  if (
+    appState === "background" &&
+    backgroundRelease > 0 &&
+    getNowBarPreferences().backgroundUpdates
+  )
+    nowBarNative?.runBackgroundUpdate();
 });
 
 export async function installNowBarUpdate(): Promise<void> {
@@ -127,6 +139,14 @@ export async function checkNowBarUpdate(manual: boolean): Promise<void> {
       return;
     }
     offered = release.versionCode;
+    // With background updates on, the native job downloads it now and installs
+    // it once the app is off screen, so there is nothing to ask.
+    if (!manual && getNowBarPreferences().backgroundUpdates && nowBarNative.canInstallUpdates()) {
+      backgroundRelease = release.versionCode;
+      nowBarNative.runBackgroundUpdate();
+      set({ phase: "idle" });
+      return;
+    }
     set({ phase: "available", release }, true);
   } catch (error) {
     set({ phase: "idle" });
