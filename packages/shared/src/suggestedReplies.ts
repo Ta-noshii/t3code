@@ -84,3 +84,92 @@ export function parseSuggestedReplies(markdown: string): SuggestedRepliesParse {
   }
   return { text: lines.slice(0, openIndex).join("\n").trimEnd(), replies };
 }
+
+/**
+ * Inline replies: a markdown link with the `t3-reply:` scheme turns a phrase
+ * in the message into a reply the user can send with one click.
+ *
+ *   Want more on [the tracklist](t3-reply:) or [who directed the video](t3-reply: "Who directed the Thriller video?")?
+ *
+ * An empty link sends its own label; a link title sends the title instead.
+ * `normalizeInlineReplyLinks` moves the reply into the destination
+ * (`t3-reply:<percent-encoded text>`) so a renderer that only reports the
+ * href, like the mobile one, still knows what to send.
+ */
+
+export const INLINE_REPLY_SCHEME = "t3-reply:";
+
+const INLINE_REPLY_LINK =
+  /(`+)[^\n]*?\1|\[((?:[^[\]\n\\]|\\.)+)\]\(\s*t3-reply:([^\s)]*)(?:\s+(?:"([^"\n]*)"|'([^'\n]*)'))?\s*\)/g;
+
+function plainLabel(label: string): string {
+  return label
+    .replace(/\\(.)/g, "$1")
+    .replace(/[*_`~]/g, "")
+    .trim();
+}
+
+function decodeReply(encoded: string): string {
+  try {
+    return decodeURIComponent(encoded).trim();
+  } catch {
+    return encoded.trim();
+  }
+}
+
+/** Rewrites inline reply links outside code; `code` spans and fences are left as written. */
+function rewriteInlineReplyLinks(
+  markdown: string,
+  rewrite: (label: string, reply: string) => string,
+): string {
+  if (!markdown.includes(INLINE_REPLY_SCHEME)) return markdown;
+  let fence: string | null = null;
+  return markdown
+    .split("\n")
+    .map((line) => {
+      const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+      if (fenceMatch !== null) {
+        if (fence === null) fence = fenceMatch[1]!;
+        else if (isClosingFence(line, fence)) fence = null;
+        return line;
+      }
+      if (fence !== null || !line.includes(INLINE_REPLY_SCHEME)) return line;
+      return line.replace(
+        INLINE_REPLY_LINK,
+        (
+          match,
+          code: string | undefined,
+          label: string,
+          path: string,
+          double?: string,
+          single?: string,
+        ) => {
+          if (code !== undefined) return match;
+          const reply = (double ?? single)?.trim() || decodeReply(path) || plainLabel(label);
+          return reply.length === 0
+            ? match
+            : rewrite(label, reply.slice(0, MAX_SUGGESTED_REPLY_LENGTH));
+        },
+      );
+    })
+    .join("\n");
+}
+
+export function normalizeInlineReplyLinks(markdown: string): string {
+  return rewriteInlineReplyLinks(
+    markdown,
+    (label, reply) => `[${label}](${INLINE_REPLY_SCHEME}${encodeURIComponent(reply)})`,
+  );
+}
+
+/** Copy and plain-text views keep the label and drop the link. */
+export function stripInlineReplyLinks(markdown: string): string {
+  return rewriteInlineReplyLinks(markdown, (label) => label);
+}
+
+/** The reply a normalized `t3-reply:` href sends, or null for any other href. */
+export function parseInlineReplyHref(href: string | null | undefined): string | null {
+  if (!href?.startsWith(INLINE_REPLY_SCHEME)) return null;
+  const reply = decodeReply(href.slice(INLINE_REPLY_SCHEME.length));
+  return reply.length === 0 ? null : reply;
+}
