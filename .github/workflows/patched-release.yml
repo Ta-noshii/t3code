@@ -40,6 +40,7 @@ env:
     patch/edit-fork-v2
     fix/hyprland-snapshot-flight-sizing
     fix/preview-viewport-main-zoom
+    fix/timeline-scroll-listeners
     patch/bar-bridge
     patch/suggested-replies
 
