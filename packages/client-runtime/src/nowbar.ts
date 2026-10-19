@@ -81,7 +81,11 @@ export function threadKey(thread: EnvironmentThreadShell): string {
   return JSON.stringify([thread.environmentId, thread.id, thread.latestRun?.runId ?? "background"]);
 }
 
-/** Threads without activity for this long leave the Now Bar, even if still open. */
+/**
+ * A thread that is not working (waiting for the user, plan ready, finished,
+ * failed or stopped) leaves the Now Bar after this long without activity.
+ * Working threads stay however quiet they are.
+ */
 export const NOW_BAR_RECENT_MS = 30 * 60 * 1000;
 
 /** The latest moment the thread changed: a run event, a message or a shell update. */
@@ -99,8 +103,20 @@ export function lastActivityAt(thread: EnvironmentThreadShell): number {
   return times.length === 0 ? 0 : Math.max(...times);
 }
 
+/** The agent itself is busy: a running turn or background work, and not waiting on the user. */
+function isWorking(thread: EnvironmentThreadShell): boolean {
+  return (
+    (runState(thread) === "running" || backgroundLiveness(thread) !== null) &&
+    !thread.hasPendingApprovals &&
+    !thread.hasPendingUserInput &&
+    !thread.hasActionableProposedPlan
+  );
+}
+
 function isRecent(thread: EnvironmentThreadShell, now: number | undefined): boolean {
-  return now === undefined || now - lastActivityAt(thread) <= NOW_BAR_RECENT_MS;
+  return (
+    now === undefined || isWorking(thread) || now - lastActivityAt(thread) <= NOW_BAR_RECENT_MS
+  );
 }
 
 /** Subagents belong to their parent's card; forks are the user's own threads. */

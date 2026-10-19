@@ -350,33 +350,35 @@ describe("Now Bar agent projection", () => {
     });
     expect(projectNowBarRows([done], [], connected, { since: 0, readTurns: {} })).toEqual([]);
   });
-  it("drops threads with no activity in the last 30 minutes", () => {
+  it("drops idle states after 30 minutes but keeps working agents", () => {
     const recent = Date.parse("2026-09-09T10:25:00Z");
     const stale = Date.parse("2026-09-09T10:31:00Z");
-    expect(
-      projectNowBarRows([thread()], [], connected, undefined, undefined, undefined, recent),
-    ).toHaveLength(1);
-    expect(
-      projectNowBarRows([thread()], [], connected, undefined, undefined, undefined, stale),
-    ).toEqual([]);
-    expect(
+    const rows = (item: EnvironmentThreadShell, now: number) =>
       projectNowBarRows(
-        [thread({ hasPendingUserInput: true, updatedAt: "2026-09-09T09:00:00Z" })],
+        [item],
         [],
         connected,
+        { since: 0, readTurns: {} },
         undefined,
         undefined,
-        undefined,
-        stale,
-      ),
-    ).toEqual([]);
-    const streaming = withMessage(thread(), {
-      role: "assistant",
-      text: "Still building",
-      updatedAt: "2026-09-09T10:20:00Z",
-    });
+        now,
+      );
+    const finished = run({ status: "completed", completedAt: "2026-09-09T10:00:01Z" });
+    // A quiet running turn or background task stays.
+    expect(rows(thread(), stale)).toHaveLength(1);
     expect(
-      projectNowBarRows([streaming], [], connected, undefined, undefined, undefined, stale),
+      rows(thread({ latestRun: finished, pendingBackgroundTasks: background("monitor") }), stale),
     ).toHaveLength(1);
+    // Waiting on the user, a plan or an unread result leave after 30 minutes.
+    for (const idle of [
+      thread({ hasPendingApprovals: true }),
+      thread({ hasPendingUserInput: true }),
+      thread({ hasActionableProposedPlan: true }),
+      thread({ latestRun: finished }),
+      thread({ latestRun: run({ status: "failed", completedAt: "2026-09-09T10:00:01Z" }) }),
+    ]) {
+      expect(rows(idle, recent)).toHaveLength(1);
+      expect(rows(idle, stale)).toEqual([]);
+    }
   });
 });
