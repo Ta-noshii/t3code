@@ -81,9 +81,15 @@ export function threadKey(thread: EnvironmentThreadShell): string {
   return JSON.stringify([thread.environmentId, thread.id, thread.latestRun?.runId ?? "background"]);
 }
 
+/** Subagents belong to their parent's card; forks are the user's own threads. */
+export function isSubagent(thread: EnvironmentThreadShell): boolean {
+  return thread.lineage?.relationshipToParent === "subagent";
+}
+
 export function isActiveThread(thread: EnvironmentThreadShell): boolean {
   return (
     thread.archivedAt === null &&
+    !isSubagent(thread) &&
     (runState(thread) === "running" ||
       thread.hasPendingApprovals ||
       thread.hasPendingUserInput ||
@@ -103,9 +109,37 @@ export function projectNowBarRows(
   const projectsByKey = new Map(
     projects.map((p) => [JSON.stringify([p.environmentId, p.id]), p.title]),
   );
+  // A subagent waiting on the user shows on its parent's card.
+  const waitingChildren = new Map<string, { approval: boolean; input: boolean }>();
+  for (const child of threads) {
+    const parentId = child.lineage?.parentThreadId;
+    if (!isSubagent(child) || !parentId || child.archivedAt !== null) continue;
+    if (!child.hasPendingApprovals && !child.hasPendingUserInput) continue;
+    const key = JSON.stringify([child.environmentId, parentId]);
+    const entry = waitingChildren.get(key) ?? { approval: false, input: false };
+    waitingChildren.set(key, {
+      approval: entry.approval || child.hasPendingApprovals,
+      input: entry.input || child.hasPendingUserInput,
+    });
+  }
   return threads
-    .filter((thread) => isActiveThread(thread) || isUnreadCompletion(thread, unread))
-    .map((thread): NowBarRow => {
+    .filter(
+      (thread) =>
+        !isSubagent(thread) &&
+        thread.archivedAt === null &&
+        (isActiveThread(thread) ||
+          isUnreadCompletion(thread, unread) ||
+          waitingChildren.has(readIdentity(thread))),
+    )
+    .map((own): NowBarRow => {
+      const child = waitingChildren.get(readIdentity(own));
+      const thread = child
+        ? {
+            ...own,
+            hasPendingApprovals: own.hasPendingApprovals || child.approval,
+            hasPendingUserInput: own.hasPendingUserInput || child.input,
+          }
+        : own;
       const online = connected.has(thread.environmentId);
       const finished = !isActiveThread(thread) && isUnreadCompletion(thread, unread);
       const attention =
@@ -215,7 +249,14 @@ export function isUnreadCompletion(
 ): boolean {
   const run = thread.latestRun;
   const state = runState(thread);
-  if (!unread || thread.archivedAt !== null || !run || state === null || state === "running")
+  if (
+    !unread ||
+    thread.archivedAt !== null ||
+    isSubagent(thread) ||
+    !run ||
+    state === null ||
+    state === "running"
+  )
     return false;
   const completedAt = Date.parse(run.completedAt ?? "");
   return (

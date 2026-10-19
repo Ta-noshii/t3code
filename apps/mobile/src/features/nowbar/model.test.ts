@@ -316,4 +316,38 @@ describe("Now Bar agent projection", () => {
       projectNowBarRows([thread({ archivedAt: "2026-09-09T12:00:00Z" })], [], connected),
     ).toEqual([]);
   });
+  it("folds subagents into the parent's card", () => {
+    const child = (patch: Partial<EnvironmentThreadShell> = {}) =>
+      thread({
+        id: ThreadId.make("child"),
+        title: "Subagent: search",
+        lineage: {
+          parentThreadId: ThreadId.make("task"),
+          rootThreadId: ThreadId.make("task"),
+          relationshipToParent: "subagent",
+        },
+        ...patch,
+      } as Partial<EnvironmentThreadShell>);
+    const working = projectNowBarRows([thread(), child()], [], connected);
+    expect(working.map((row) => row.title)).toEqual(["Build a feature"]);
+    expect(working[0]?.phase).toBe("working");
+
+    const waiting = projectNowBarRows(
+      [
+        thread({ latestRun: run({ status: "completed", completedAt: "2026-09-09T10:05:00Z" }) }),
+        child({ hasPendingApprovals: true }),
+      ],
+      [],
+      connected,
+    );
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0]?.title).toBe("Build a feature");
+    expect(waiting[0]?.phase).toBe("attention");
+    expect(waiting[0]?.kind).toBe("approval");
+
+    const done = child({
+      latestRun: run({ status: "completed", completedAt: "2026-09-09T10:05:00Z" }),
+    });
+    expect(projectNowBarRows([done], [], connected, { since: 0, readTurns: {} })).toEqual([]);
+  });
 });
