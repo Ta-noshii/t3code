@@ -16,6 +16,12 @@ describe("buildRuntimeInstructions", () => {
     );
   });
 
+  it("tells agents how to link inline replies", () => {
+    expect(buildRuntimeInstructions({ harness: "Claude Code" })).toContain(
+      "[the tracklist](t3-reply:)",
+    );
+  });
+
   it("keeps known model and effort metadata on one line", () => {
     expect(
       buildRuntimeInstructions({

@@ -119,7 +119,7 @@ import {
 } from "../../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
-import { parseSuggestedReplies } from "@t3tools/shared/suggestedReplies";
+import { normalizeInlineReplyLinks, parseSuggestedReplies } from "@t3tools/shared/suggestedReplies";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Root, RootContent } from "mdast";
@@ -2926,7 +2926,10 @@ function AttemptFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "at
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const { suggestedRepliesMessageId } = use(TimelineRowActivityCtx);
-  const suggested = useMemo(() => parseSuggestedReplies(row.message.text), [row.message.text]);
+  const suggested = useMemo(() => {
+    const parsed = parseSuggestedReplies(row.message.text);
+    return { ...parsed, text: normalizeInlineReplyLinks(parsed.text) };
+  }, [row.message.text]);
   const messageText = suggested.text || (row.message.streaming ? "" : "(empty response)");
   const showSuggestedReplies =
     suggested.replies.length > 0 &&
@@ -2956,6 +2959,8 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
               headingLevelOffset={MESSAGE_HEADING_LEVEL}
               onUseArtifactTemplate={ctx.onUseArtifactTemplate}
               onRunShellCommand={ctx.onRunShellCommand}
+              onSendInlineReply={ctx.onSendSuggestedReply}
+              onInsertInlineReply={ctx.onInsertSuggestedReply}
               onImageExpand={ctx.onImageExpand}
             />
           </AssistantCitationSource>

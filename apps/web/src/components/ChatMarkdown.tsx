@@ -37,6 +37,7 @@ import {
   MessageSquareIcon,
   MessageSquareWarningIcon,
   OctagonAlertIcon,
+  CornerDownRightIcon,
   PlayIcon,
   PresentationIcon,
   SparklesIcon,
@@ -104,6 +105,7 @@ import { defaultUrlTransform } from "react-markdown";
 import { parseAssistantCitationHref } from "@t3tools/shared/assistantCitations";
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
+import { parseInlineReplyHref } from "@t3tools/shared/suggestedReplies";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import { isWindowsAbsolutePath } from "@t3tools/shared/path";
@@ -232,6 +234,10 @@ interface ChatMarkdownProps {
   /** Append a prompt that invokes a newly created artifact-template skill. */
   onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
   onRunShellCommand?: ((command: string) => void) | undefined;
+  /** Sends the reply behind a `t3-reply:` link; without it the link shows its label as text. */
+  onSendInlineReply?: ((text: string) => Promise<void>) | undefined;
+  /** Puts the reply behind a `t3-reply:` link in the composer (Shift+click). */
+  onInsertInlineReply?: ((text: string) => void) | undefined;
   /** Directory that anchors relative links and images; defaults to `cwd`. Set
       to the file's own directory when rendering a markdown file. */
   imageBaseDir?: string | undefined;
@@ -2315,6 +2321,8 @@ function useChatMarkdownState({
   skills = EMPTY_MARKDOWN_SKILLS,
   onUseArtifactTemplate,
   onRunShellCommand,
+  onSendInlineReply,
+  onInsertInlineReply,
   imageBaseDir,
   onImageExpand,
   renderContextReference,
@@ -2472,6 +2480,7 @@ function useChatMarkdownState({
     if (parseAssistantCitationHref(href)) return href;
     if (parseComposerContextHref(href)) return href;
     if (parseThreadLinkHref(href)) return href;
+    if (parseInlineReplyHref(href)) return href;
     if (isWindowsDrivePathHref(href)) return href;
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   }, []);
@@ -2737,6 +2746,8 @@ function useChatMarkdownState({
       onTaskListChange,
       onUseArtifactTemplate,
       onRunShellCommand,
+      onSendInlineReply,
+      onInsertInlineReply,
       openChangeRequestLink,
       openDeferredMarkdownLink,
       openExternalLinkInPreview,
@@ -2770,6 +2781,8 @@ function useChatMarkdownState({
       onTaskListChange,
       onUseArtifactTemplate,
       onRunShellCommand,
+      onSendInlineReply,
+      onInsertInlineReply,
       openChangeRequestLink,
       openDeferredMarkdownLink,
       openExternalLinkInPreview,
@@ -2793,6 +2806,67 @@ function useChatMarkdownState({
     localMediaPreview,
     setLocalMediaPreview,
   };
+}
+
+/**
+ * A phrase the agent linked with `t3-reply:`. A click sends the reply as the
+ * next message; Shift+click puts it in the composer to edit first.
+ */
+function InlineReplyLink({
+  reply,
+  onSend,
+  onInsert,
+  children,
+}: {
+  reply: string;
+  onSend: (text: string) => Promise<void>;
+  onInsert: (text: string) => void;
+  children: ReactNode;
+}) {
+  const [sending, setSending] = useState(false);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            className="inline cursor-pointer rounded-sm text-left font-medium text-foreground underline decoration-muted-foreground/50 decoration-dotted underline-offset-4 hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-60"
+            disabled={sending}
+            aria-description="Sends this as your next message"
+            onClick={(event) => {
+              if (event.shiftKey) {
+                onInsert(reply);
+                return;
+              }
+              setSending(true);
+              onSend(reply).then(
+                () => setSending(false),
+                (error: unknown) => {
+                  setSending(false);
+                  toastManager.add({
+                    type: "error",
+                    title: "Reply not sent",
+                    description:
+                      error instanceof Error ? error.message : "Try again from the composer.",
+                  });
+                },
+              );
+            }}
+          />
+        }
+      >
+        <CornerDownRightIcon
+          aria-hidden
+          className="mr-0.5 inline size-3.5 -translate-y-px text-muted-foreground"
+        />
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup side="top" className="max-w-80">
+        <span className="block">{`Send "${reply}"`}</span>
+        <span className="block text-muted-foreground">Shift+click to edit it first</span>
+      </TooltipPopup>
+    </Tooltip>
+  );
 }
 
 const ChatMarkdownRendererContext = React.createContext<
@@ -2930,10 +3004,26 @@ const CHAT_MARKDOWN_COMPONENTS = {
       updateThreadPullRequestLink,
       fileLinkChip,
       renderContextReference,
+      onSendInlineReply,
+      onInsertInlineReply,
       text,
     } = use(ChatMarkdownRendererContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
     if (citation) return <AssistantCitationChip citation={citation} />;
+    const inlineReply = parseInlineReplyHref(href);
+    if (inlineReply) {
+      return onSendInlineReply && onInsertInlineReply ? (
+        <InlineReplyLink
+          reply={inlineReply}
+          onSend={onSendInlineReply}
+          onInsert={onInsertInlineReply}
+        >
+          {children}
+        </InlineReplyLink>
+      ) : (
+        <span>{children}</span>
+      );
+    }
     // A thread link names a thread in this message's environment and opens it in the app.
     const linkedThreadId = href ? parseThreadLinkHref(href) : null;
     if (linkedThreadId) {

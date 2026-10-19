@@ -33,7 +33,12 @@ import {
   type RunId,
 } from "@t3tools/contracts";
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
-import { parseSuggestedReplies } from "@t3tools/shared/suggestedReplies";
+import {
+  normalizeInlineReplyLinks,
+  parseInlineReplyHref,
+  parseSuggestedReplies,
+  stripInlineReplyLinks,
+} from "@t3tools/shared/suggestedReplies";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@t3tools/shared/promptLinks";
@@ -1206,7 +1211,7 @@ function renderFeedEntry(
     const presentation = resolveUserMessagePresentation(message);
     const citedText = renderAssistantCitationsAsText(presentation.text);
     const suggested = isUser ? null : parseSuggestedReplies(citedText);
-    const renderedText = suggested?.text ?? citedText;
+    const renderedText = suggested === null ? citedText : normalizeInlineReplyLinks(suggested.text);
     const suggestedReplies =
       suggested !== null &&
       suggested.replies.length > 0 &&
@@ -1517,7 +1522,7 @@ function renderFeedEntry(
           <View className="mt-1 flex-row items-center gap-1">
             <CopyTextButton
               accessibilityLabel="Copy message"
-              text={renderedText}
+              text={stripInlineReplyLinks(renderedText)}
               tintColor={iconSubtleColor}
               buttonSize={28}
               iconSize={13}
@@ -1897,8 +1902,21 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const iconSubtleColor = theme["--color-icon-subtle"];
   const screenColor = theme["--color-screen"];
   const userBubbleColor = theme["--color-user-bubble"];
+  const lastInlineReply = useRef<{ reply: string; at: number } | null>(null);
   const onMarkdownLinkPress = useCallback(
     (href: string, imageEmbed = false) => {
+      // A `t3-reply:` link sends its reply; a second tap right after is ignored.
+      const inlineReply = parseInlineReplyHref(href);
+      if (inlineReply) {
+        const now = Date.now();
+        const last = lastInlineReply.current;
+        if (props.onSendSuggestedReply === undefined) return;
+        if (last !== null && last.reply === inlineReply && now - last.at < 2000) return;
+        lastInlineReply.current = { reply: inlineReply, at: now };
+        void Haptics.selectionAsync();
+        void props.onSendSuggestedReply(inlineReply);
+        return;
+      }
       // A thread link names a thread in this feed's environment.
       const linkedThreadId = parseThreadLinkHref(href);
       if (linkedThreadId) {
@@ -1965,7 +1983,14 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         void openPullRequest(presentation.href);
       }
     },
-    [props.environmentId, props.threadId, props.workspaceRoot, navigation, openPullRequest],
+    [
+      props.environmentId,
+      props.onSendSuggestedReply,
+      props.threadId,
+      props.workspaceRoot,
+      navigation,
+      openPullRequest,
+    ],
   );
   const resolveImageSource = useMarkdownImageSource({
     environmentId: props.environmentId,

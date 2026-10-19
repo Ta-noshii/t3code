@@ -16,6 +16,7 @@ import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
 import { GitHubIcon } from "./Icons";
 import { Button } from "./ui/button";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
+import { normalizeInlineReplyLinks } from "@t3tools/shared/suggestedReplies";
 
 vi.mock("../hooks/useFileMetadata", () => ({ useFileMetadata: () => null }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
@@ -1346,4 +1347,54 @@ describe("ChatMarkdown in-page links", () => {
       }
     },
   );
+});
+
+describe("ChatMarkdown inline reply links", () => {
+  it("sends the reply on click and puts it in the composer on Shift+click", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const { createRoot } = await import("react-dom/client");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const onSend = vi.fn(() => Promise.resolve());
+    const onInsert = vi.fn();
+    try {
+      await act(async () => {
+        root.render(
+          <ChatMarkdown
+            cwd="/tmp/project"
+            text={normalizeInlineReplyLinks(
+              'Want more on [the tracklist](t3-reply:) or [the director](t3-reply: "Who directed it?")?',
+            )}
+            onSendInlineReply={onSend}
+            onInsertInlineReply={onInsert}
+          />,
+        );
+      });
+      expect(container.querySelector("a")).toBeNull();
+      const [tracklist, director] = [...container.querySelectorAll("button")];
+      expect(tracklist!.textContent).toBe("the tracklist");
+      await act(async () => tracklist!.click());
+      expect(onSend).toHaveBeenCalledWith("the tracklist");
+      await act(async () => {
+        director!.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+      });
+      expect(onInsert).toHaveBeenCalledWith("Who directed it?");
+      expect(onSend).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it("shows the label as text where replies can't be sent", () => {
+    const markup = renderToStaticMarkup(
+      <ChatMarkdown
+        cwd="/tmp/project"
+        text={normalizeInlineReplyLinks("More on [the tracklist](t3-reply:)?")}
+      />,
+    );
+    expect(markup).toContain("<span>the tracklist</span>");
+    expect(markup).not.toContain("t3-reply:");
+  });
 });
