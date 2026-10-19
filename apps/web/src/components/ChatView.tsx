@@ -8888,7 +8888,10 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
       setThreadError(activeThread.id, null);
-      try {
+      // The body runs in its own function, with errors handled by .catch(): React
+      // Compiler can't compile a throw inside try/catch, and if it skips ChatView,
+      // hooks that rely on its memoization re-render forever (React error #301).
+      const editInNewThread = async () => {
         const connection = readPreparedConnection(environmentId);
         if (!connection) throw new Error("The environment is not connected.");
         const files = await prepareRevertedMessageAttachments({
@@ -8970,12 +8973,13 @@ export default function ChatView(props: ChatViewProps) {
             params: buildThreadRouteParams(targetThreadRef),
           });
         }
-      } catch (error) {
+      };
+      await editInNewThread().catch((error: unknown) => {
         setThreadError(
           activeThread.id,
           error instanceof Error ? error.message : "Failed to edit in a new thread.",
         );
-      }
+      });
     },
     [
       activeEnvironmentUnavailable,
@@ -9027,7 +9031,9 @@ export default function ChatView(props: ChatViewProps) {
 
       setIsCopyingThread(true);
       setThreadError(activeThread.id, null);
-      try {
+      // Runs in its own function with .catch()/.finally() so React Compiler can
+      // compile ChatView (it rejects throw inside try/catch and try/finally).
+      const copyToEnvironment = async () => {
         // Instance ids are per machine; the copy needs the same kind of provider there.
         const modelSelection = resolveCopyModelSelection({
           source: activeThread.modelSelection,
@@ -9154,14 +9160,17 @@ export default function ChatView(props: ChatViewProps) {
             params: buildThreadRouteParams(targetThreadRef),
           });
         }
-      } catch (error) {
-        setThreadError(
-          activeThread.id,
-          error instanceof Error ? error.message : "Failed to copy this chat.",
-        );
-      } finally {
-        setIsCopyingThread(false);
-      }
+      };
+      await copyToEnvironment()
+        .catch((error: unknown) => {
+          setThreadError(
+            activeThread.id,
+            error instanceof Error ? error.message : "Failed to copy this chat.",
+          );
+        })
+        .finally(() => {
+          setIsCopyingThread(false);
+        });
     },
     [
       activeThread,
