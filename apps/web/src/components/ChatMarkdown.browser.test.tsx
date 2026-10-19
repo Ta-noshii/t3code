@@ -9,6 +9,7 @@ import "../index.css";
 import { filesystemEnvironment } from "../state/filesystem";
 import { useRightPanelStore } from "../rightPanelStore";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
+import { normalizeInlineReplyLinks } from "@t3tools/shared/suggestedReplies";
 
 const { workspaceSearch, filesystemMetadata } = vi.hoisted(() => ({
   workspaceSearch: vi.fn(),
@@ -275,5 +276,40 @@ describe("ChatMarkdown Windows file links", () => {
       expect(container.innerHTML).not.toContain("d:alert");
       expect(fileHrefs(container)).toEqual([]);
     }
+  });
+});
+
+describe("ChatMarkdown inline reply links", () => {
+  it("sends the reply on click and puts it in the composer on Shift+click", async () => {
+    setup();
+    const onSend = vi.fn(() => Promise.resolve());
+    const onInsert = vi.fn();
+    await using screen = await renderText(
+      normalizeInlineReplyLinks(
+        'Want more on [the tracklist](t3-reply:) or [the director](t3-reply: "Who directed it?")?',
+      ),
+      { onSendInlineReply: onSend, onInsertInlineReply: onInsert },
+    );
+    const { container } = screen;
+    expect(container.querySelector("a")).toBeNull();
+    const [tracklist, director] = [...container.querySelectorAll("button")];
+    expect(tracklist!.textContent).toBe("the tracklist");
+    await act(async () => tracklist!.click());
+    expect(onSend).toHaveBeenCalledWith("the tracklist");
+    await act(async () => {
+      director!.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+    });
+    expect(onInsert).toHaveBeenCalledWith("Who directed it?");
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the label as text where replies can't be sent", async () => {
+    setup();
+    await using screen = await renderText(
+      normalizeInlineReplyLinks("More on [the tracklist](t3-reply:)?"),
+    );
+    const { container } = screen;
+    expect(container.innerHTML).toContain("<span>the tracklist</span>");
+    expect(container.innerHTML).not.toContain("t3-reply:");
   });
 });

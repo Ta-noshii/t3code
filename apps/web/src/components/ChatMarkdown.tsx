@@ -87,8 +87,10 @@ import { defaultUrlTransform } from "react-markdown";
 import { parseAssistantCitationHref } from "@t3tools/shared/assistantCitations";
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
+import { parseInlineReplyHref } from "@t3tools/shared/suggestedReplies";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
+import { MarkdownInlineReplyLink } from "./chat/MarkdownInlineReplyLink";
 import { mathKind } from "@t3tools/shared/markdownMath";
 import remarkMath from "remark-math";
 import {
@@ -232,6 +234,10 @@ interface ChatMarkdownProps {
   parseRawHtml?: boolean;
   onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
   onRunShellCommand?: ((command: string) => void) | undefined;
+  /** Sends the reply behind a `t3-reply:` link; without it the link shows its label as text. */
+  onSendInlineReply?: ((text: string) => Promise<void>) | undefined;
+  /** Puts the reply behind a `t3-reply:` link in the composer (Shift+click). */
+  onInsertInlineReply?: ((text: string) => void) | undefined;
   imageBaseDir?: string | undefined;
   workspaceMutationId?: string | null | undefined;
   onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
@@ -446,6 +452,8 @@ function useChatMarkdownState({
   skills = EMPTY_MARKDOWN_SKILLS,
   onUseArtifactTemplate,
   onRunShellCommand,
+  onSendInlineReply,
+  onInsertInlineReply,
   imageBaseDir,
   workspaceMutationId,
   onImageExpand,
@@ -645,6 +653,7 @@ function useChatMarkdownState({
     if (parseAssistantCitationHref(href)) return href;
     if (parseComposerContextHref(href)) return href;
     if (parseThreadLinkHref(href)) return href;
+    if (parseInlineReplyHref(href)) return href;
     if (isWindowsDrivePathHref(href)) return href;
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   };
@@ -902,6 +911,8 @@ function useChatMarkdownState({
     onTaskListChange,
     onUseArtifactTemplate,
     onRunShellCommand,
+    onSendInlineReply,
+    onInsertInlineReply,
     openChangeRequestLink,
     openDeferredMarkdownLink,
     openExternalLinkInPreview,
@@ -1067,10 +1078,26 @@ const CHAT_MARKDOWN_COMPONENTS = {
       updateThreadPullRequestLink,
       fileLinkChip,
       renderContextReference,
+      onSendInlineReply,
+      onInsertInlineReply,
     } = use(ChatMarkdownRendererContext);
     const text = use(ChatMarkdownTextContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
     if (citation) return <AssistantCitationChip citation={citation} />;
+    const inlineReply = parseInlineReplyHref(href);
+    if (inlineReply) {
+      return onSendInlineReply && onInsertInlineReply ? (
+        <MarkdownInlineReplyLink
+          reply={inlineReply}
+          onSend={onSendInlineReply}
+          onInsert={onInsertInlineReply}
+        >
+          {children}
+        </MarkdownInlineReplyLink>
+      ) : (
+        <span>{children}</span>
+      );
+    }
     const linkedThreadId = href ? parseThreadLinkHref(href) : null;
     if (linkedThreadId) {
       const label = hastPlainTextDeep(node) || linkedThreadId;

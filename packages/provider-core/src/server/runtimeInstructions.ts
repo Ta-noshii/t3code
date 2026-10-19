@@ -4,6 +4,8 @@ When the t3-code MCP server exposes link_pull_request, you must use it to regist
 
 const SUGGESTED_REPLIES_INSTRUCTIONS = `<suggested_replies>
 When you hand the turn back and the user's next message is likely one of a few short answers (yes or no, a pick between options you laid out, the obvious next step), you may end your message with a fenced code block whose info string is t3-replies, one reply per line, at most four, each under 80 characters and worded as the user would type it. T3 Code hides the block and shows each line as a button that sends that reply. Put nothing after the block, and leave it out when no short answer fits.
+
+When an answer leaves natural follow-up topics (an explanation, a summary, research findings), close it with a short question that offers two or three of them as reply links. [the tracklist](t3-reply:) sends "the tracklist" when clicked, and [who directed it](t3-reply: "Who directed the video?") sends the quoted text instead. Example closing: "Want more on [the tracklist](t3-reply:), [its sales records](t3-reply:) or [the video's director](t3-reply: "Who directed the Thriller video?")?" Write them like ordinary links in the sentence, without bold or arrows, and skip them when the user only needs to approve or pick something, since the t3-replies block covers that.
 </suggested_replies>`;
 
 /**

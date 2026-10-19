@@ -14,7 +14,7 @@ import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThreadShell } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { SuggestedReplies } from "./SuggestedReplies";
-import { parseSuggestedReplies } from "@t3tools/shared/suggestedReplies";
+import { normalizeInlineReplyLinks, parseSuggestedReplies } from "@t3tools/shared/suggestedReplies";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -28,7 +28,8 @@ import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts"
 export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const { suggestedRepliesMessageId } = use(TimelineRowActivityCtx);
-  const suggested = parseSuggestedReplies(row.message.text);
+  const parsed = parseSuggestedReplies(row.message.text);
+  const suggested = { ...parsed, text: normalizeInlineReplyLinks(parsed.text) };
   const messageText = suggested.text || (row.message.streaming ? "" : "(empty response)");
   const showSuggestedReplies =
     suggested.replies.length > 0 &&
@@ -58,6 +59,8 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
               headingLevelOffset={MESSAGE_HEADING_LEVEL}
               onUseArtifactTemplate={ctx.onUseArtifactTemplate}
               onRunShellCommand={ctx.onRunShellCommand}
+              onSendInlineReply={ctx.onSendSuggestedReply}
+              onInsertInlineReply={ctx.onInsertSuggestedReply}
               onImageExpand={ctx.onImageExpand}
             />
           </AssistantCitationSource>
