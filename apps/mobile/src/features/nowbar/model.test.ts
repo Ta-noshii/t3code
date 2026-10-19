@@ -350,4 +350,33 @@ describe("Now Bar agent projection", () => {
     });
     expect(projectNowBarRows([done], [], connected, { since: 0, readTurns: {} })).toEqual([]);
   });
+  it("drops threads with no activity in the last 30 minutes", () => {
+    const recent = Date.parse("2026-09-09T10:25:00Z");
+    const stale = Date.parse("2026-09-09T10:31:00Z");
+    expect(
+      projectNowBarRows([thread()], [], connected, undefined, undefined, undefined, recent),
+    ).toHaveLength(1);
+    expect(
+      projectNowBarRows([thread()], [], connected, undefined, undefined, undefined, stale),
+    ).toEqual([]);
+    expect(
+      projectNowBarRows(
+        [thread({ hasPendingUserInput: true, updatedAt: "2026-09-09T09:00:00Z" })],
+        [],
+        connected,
+        undefined,
+        undefined,
+        undefined,
+        stale,
+      ),
+    ).toEqual([]);
+    const streaming = withMessage(thread(), {
+      role: "assistant",
+      text: "Still building",
+      updatedAt: "2026-09-09T10:20:00Z",
+    });
+    expect(
+      projectNowBarRows([streaming], [], connected, undefined, undefined, undefined, stale),
+    ).toHaveLength(1);
+  });
 });

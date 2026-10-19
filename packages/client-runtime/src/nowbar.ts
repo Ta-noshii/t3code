@@ -81,6 +81,28 @@ export function threadKey(thread: EnvironmentThreadShell): string {
   return JSON.stringify([thread.environmentId, thread.id, thread.latestRun?.runId ?? "background"]);
 }
 
+/** Threads without activity for this long leave the Now Bar, even if still open. */
+export const NOW_BAR_RECENT_MS = 30 * 60 * 1000;
+
+/** The latest moment the thread changed: a run event, a message or a shell update. */
+export function lastActivityAt(thread: EnvironmentThreadShell): number {
+  const run = thread.latestRun;
+  const message = thread.source.latestVisibleMessage;
+  const times = [
+    Date.parse(thread.updatedAt),
+    Date.parse(run?.completedAt ?? ""),
+    Date.parse(run?.startedAt ?? ""),
+    Date.parse(run?.requestedAt ?? ""),
+    Date.parse(thread.latestUserMessageAt ?? ""),
+    message ? DateTime.toEpochMillis(message.updatedAt) : Number.NaN,
+  ].filter(Number.isFinite);
+  return times.length === 0 ? 0 : Math.max(...times);
+}
+
+function isRecent(thread: EnvironmentThreadShell, now: number | undefined): boolean {
+  return now === undefined || now - lastActivityAt(thread) <= NOW_BAR_RECENT_MS;
+}
+
 /** Subagents belong to their parent's card; forks are the user's own threads. */
 export function isSubagent(thread: EnvironmentThreadShell): boolean {
   return thread.lineage?.relationshipToParent === "subagent";
@@ -105,6 +127,8 @@ export function projectNowBarRows(
   unread?: { readonly since: number; readonly readTurns: Readonly<Record<string, string>> },
   catalogs?: ReadonlyMap<string, NowBarCatalog>,
   statuses?: ReadonlyMap<string, string>,
+  /** Leave out to skip the recency window. */
+  now?: number,
 ): NowBarRow[] {
   const projectsByKey = new Map(
     projects.map((p) => [JSON.stringify([p.environmentId, p.id]), p.title]),
@@ -113,7 +137,8 @@ export function projectNowBarRows(
   const waitingChildren = new Map<string, { approval: boolean; input: boolean }>();
   for (const child of threads) {
     const parentId = child.lineage?.parentThreadId;
-    if (!isSubagent(child) || !parentId || child.archivedAt !== null) continue;
+    if (!isSubagent(child) || !parentId || child.archivedAt !== null || !isRecent(child, now))
+      continue;
     if (!child.hasPendingApprovals && !child.hasPendingUserInput) continue;
     const key = JSON.stringify([child.environmentId, parentId]);
     const entry = waitingChildren.get(key) ?? { approval: false, input: false };
@@ -127,9 +152,9 @@ export function projectNowBarRows(
       (thread) =>
         !isSubagent(thread) &&
         thread.archivedAt === null &&
-        (isActiveThread(thread) ||
-          isUnreadCompletion(thread, unread) ||
-          waitingChildren.has(readIdentity(thread))),
+        (waitingChildren.has(readIdentity(thread)) ||
+          (isRecent(thread, now) &&
+            (isActiveThread(thread) || isUnreadCompletion(thread, unread)))),
     )
     .map((own): NowBarRow => {
       const child = waitingChildren.get(readIdentity(own));

@@ -217,6 +217,7 @@ const main = Effect.gen(function* () {
             { since: unreadSince, readTurns: {} },
             new Map([[config.environment.environmentId, config]]),
             statuses,
+            now,
           )
             .slice(0, 3)
             .map((row) => ({

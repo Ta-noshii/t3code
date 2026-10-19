@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
 import { useProjects, useServerConfigs, useThreadShells } from "../../state/entities";
 import { useWorkspaceState } from "../../state/workspace";
@@ -21,10 +21,27 @@ export function NowBarCoordinator() {
       ),
     [environments],
   );
+  // Re-project each minute so quiet threads age out of the Now Bar.
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!preferences.enabled) return;
+    const tick = () => setNow(Date.now());
+    // JS timers pause in the background; the native heartbeat still arrives.
+    const timer = setInterval(tick, 60_000);
+    const heartbeat = nowBarNative?.addListener("heartbeat", tick);
+    const listener = AppState.addEventListener("change", (state) => {
+      if (state === "active") tick();
+    });
+    return () => {
+      clearInterval(timer);
+      heartbeat?.remove();
+      listener.remove();
+    };
+  }, [preferences.enabled]);
   const showAgentText =
     preferences.enabled && preferences.custom && preferences.expanded && !preferences.private;
   const rows = useMemo(() => {
-    const base = projectNowBarRows(threads, projects, connected, unread, catalogs);
+    const base = projectNowBarRows(threads, projects, connected, unread, catalogs, undefined, now);
     if (!showAgentText) return base;
     // Agent text goes only to the top three working rows of the expanded, non-private view.
     const visible = new Set(
@@ -42,8 +59,8 @@ export function NowBarCoordinator() {
     }
     return statuses.size === 0
       ? base
-      : projectNowBarRows(threads, projects, connected, unread, catalogs, statuses);
-  }, [threads, projects, connected, unread, catalogs, showAgentText]);
+      : projectNowBarRows(threads, projects, connected, unread, catalogs, statuses, now);
+  }, [threads, projects, connected, unread, catalogs, showAgentText, now]);
   const payload = JSON.stringify(rows);
 
   useEffect(() => {
