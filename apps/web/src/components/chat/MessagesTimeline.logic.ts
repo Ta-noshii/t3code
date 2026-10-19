@@ -1,4 +1,4 @@
-import { parseSuggestedReplies } from "@t3tools/shared/suggestedReplies";
+import { parseSuggestedReplies, stripInlineReplyLinks } from "@t3tools/shared/suggestedReplies";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import { isLiveSubagentTurnItem } from "@t3tools/client-runtime/state/subagentRuntime";
@@ -792,7 +792,7 @@ export function resolveAssistantMessageCopyState({
   return {
     text: hasText
       ? visible
-        ? renderCodexDirectivesForCopy(parseSuggestedReplies(text).text)
+        ? renderCodexDirectivesForCopy(stripInlineReplyLinks(parseSuggestedReplies(text).text))
         : text
       : null,
     visible,

@@ -194,6 +194,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
       "file",
       "t3-citation",
       "t3-context",
+      "t3-reply",
       THREAD_LINK_PROTOCOL,
     ],
     src: IMAGE_SRC_PROTOCOLS,
