@@ -41,6 +41,7 @@ env:
     fix/hyprland-snapshot-flight-sizing
     fix/preview-viewport-main-zoom
     fix/timeline-scroll-listeners
+    fix/draft-render-loop
     patch/bar-bridge
     patch/suggested-replies
 

@@ -11,6 +11,10 @@ This repository is a fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3c
 
 ## Patch branches (desktop and server)
 
+### `fix/draft-render-loop`
+
+Stops React error #301 when opening or updating a draft in patched desktop/web builds. `useWorktreeSetup` compares the environment and thread IDs rather than a newly allocated scoped-reference object. `useIncrementalTimelineEntries` compares collection contents, including recreated feedback messages, so its render-time cache update settles even when the chat screen recreates arrays and attachment maps. Regression tests cover draft and environment switches, streaming updates, row identity, and feedback updates. The patched-release workflow applies this branch to upstream nightlies; mobile uses a separate chat UI.
+
 ### `patch/edit-fork-v2`
 
 Features upstream lacks, rebuilt on upstream's v2 orchestrator (upstream PR #2829, 2026-10-02, which deleted the v1 orchestration the old `patch/edit-fork` and `patch/subagents` branches were written against). Both old branches are retired. Upstream's own `delegate_task` orchestrator tools replace `patch/subagents`: they start a subagent on any provider and model and are on by default. Upstream's "Fork from this response" and its follow-up queue replace the old fork-from-a-reply and the hourglass "wait for the turn" button.
