@@ -1,19 +1,35 @@
 import { useState } from "react";
+import { shallow } from "zustand/vanilla/shallow";
 import {
   deriveTimelineEntriesFromVisibleTurnItemsWithState,
   type TimelineEntriesInput,
   type TimelineEntriesProjection,
 } from "../session-logic";
 
-function sameInput(left: TimelineEntriesInput, right: TimelineEntriesInput): boolean {
+function sameAnchoredMessages(
+  left: TimelineEntriesInput["anchoredMessages"],
+  right: TimelineEntriesInput["anchoredMessages"],
+): boolean {
   return (
-    left.visibleTurnItems === right.visibleTurnItems &&
-    left.optimisticMessages === right.optimisticMessages &&
-    left.anchoredMessages === right.anchoredMessages &&
-    left.attachmentUrlById === right.attachmentUrlById &&
-    left.attempts === right.attempts &&
-    left.nodes === right.nodes &&
-    left.plans === right.plans
+    left === right ||
+    (left !== undefined &&
+      right !== undefined &&
+      left.length === right.length &&
+      left.every((message, index) => shallow(message, right[index])))
+  );
+}
+
+function sameInput(left: TimelineEntriesInput, right: TimelineEntriesInput): boolean {
+  // ChatView can rebuild collections without changing their contents. A
+  // reference-only comparison would schedule the same render update forever.
+  return (
+    shallow(left.visibleTurnItems, right.visibleTurnItems) &&
+    shallow(left.optimisticMessages, right.optimisticMessages) &&
+    sameAnchoredMessages(left.anchoredMessages, right.anchoredMessages) &&
+    shallow(left.attachmentUrlById, right.attachmentUrlById) &&
+    shallow(left.attempts, right.attempts) &&
+    shallow(left.nodes, right.nodes) &&
+    shallow(left.plans, right.plans)
   );
 }
 
