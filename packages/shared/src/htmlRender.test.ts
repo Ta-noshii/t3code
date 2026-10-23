@@ -1,9 +1,12 @@
+import * as NodeVM from "node:vm";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   injectHtmlRenderBootstrap,
   readHtmlRenderImageRequest,
   readHtmlRenderLinkRequest,
+  readHtmlRenderMessageRequest,
 } from "./htmlRender.ts";
 import { htmlRenderFromToolItem } from "./toolOutput.ts";
 
@@ -92,6 +95,92 @@ describe("readHtmlRenderLinkRequest", () => {
     expect(
       readHtmlRenderLinkRequest({ type: "t3-html-render-link", url: "https://example.com" }),
     ).toBeUndefined();
+  });
+});
+
+describe("readHtmlRenderMessageRequest", () => {
+  const request = (params: unknown, id: unknown = "t3-message-1") => ({
+    jsonrpc: "2.0",
+    id,
+    method: "ui/message",
+    params,
+  });
+  const text = (value: unknown) => ({ type: "text", text: value });
+
+  it("joins the text parts of a user message", () => {
+    expect(
+      readHtmlRenderMessageRequest(
+        request({ role: "user", content: [text(" Fix "), { type: "image" }, text("it ")] }),
+      ),
+    ).toEqual({ id: "t3-message-1", text: "Fix it" });
+  });
+
+  it("rejects other roles, empty or oversized text, and malformed requests", () => {
+    expect(
+      readHtmlRenderMessageRequest(request({ role: "assistant", content: [text("x")] })),
+    ).toBeUndefined();
+    expect(
+      readHtmlRenderMessageRequest(request({ role: "user", content: [text("  ")] })),
+    ).toBeUndefined();
+    expect(
+      readHtmlRenderMessageRequest(request({ role: "user", content: [text("x".repeat(20_001))] })),
+    ).toBeUndefined();
+    expect(
+      readHtmlRenderMessageRequest(request({ role: "user", content: [text("x")] }, null)),
+    ).toBeUndefined();
+    expect(readHtmlRenderMessageRequest(request({ role: "user", content: "x" }))).toBeUndefined();
+  });
+});
+
+describe("window.t3.sendMessage", () => {
+  // Runs the injected bootstrap against a minimal framed window.
+  const framedPage = () => {
+    const script = /<script>([\s\S]*?)<\/script>/.exec(injectHtmlRenderBootstrap("<p>x</p>"))![1]!;
+    const listeners: Array<(event: { data: unknown; source: unknown }) => void> = [];
+    const posted: unknown[] = [];
+    const parent = { postMessage: (message: unknown) => posted.push(message) };
+    const window: Record<string, unknown> = {
+      parent,
+      addEventListener: (type: string, listener: (typeof listeners)[number]) => {
+        if (type === "message") listeners.push(listener);
+      },
+    };
+    NodeVM.runInNewContext(script, {
+      window,
+      document: {
+        getElementById: () => ({ textContent: "" }),
+        addEventListener: () => undefined,
+        documentElement: {},
+      },
+      location: { hash: "", pathname: "/", search: "" },
+      history: { replaceState: () => undefined },
+    });
+    const t3 = window.t3 as { sendMessage: (text: unknown) => Promise<void> };
+    const deliver = (data: unknown, source: unknown = parent) =>
+      listeners.forEach((listener) => listener({ data, source }));
+    return { t3, posted, deliver };
+  };
+
+  it("posts a ui/message request and settles on the client's reply", async () => {
+    const page = framedPage();
+    const sent = page.t3.sendMessage("Fix it");
+    const [message] = page.posted as Array<{ id: string }>;
+    expect(readHtmlRenderMessageRequest(message)).toEqual({ id: message!.id, text: "Fix it" });
+    // A reply from anything but the parent is ignored.
+    page.deliver({ jsonrpc: "2.0", id: message!.id, error: { message: "nope" } }, {});
+    page.deliver({ jsonrpc: "2.0", id: message!.id, result: {} });
+    await expect(sent).resolves.toBeUndefined();
+
+    const declined = page.t3.sendMessage("Again");
+    const second = page.posted[1] as { id: string };
+    page.deliver({ jsonrpc: "2.0", id: second.id, error: { message: "Declined by the reader." } });
+    await expect(declined).rejects.toThrow("Declined by the reader.");
+  });
+
+  it("rejects empty text without asking the client", async () => {
+    const page = framedPage();
+    await expect(page.t3.sendMessage("  ")).rejects.toThrow("The message is empty.");
+    expect(page.posted).toEqual([]);
   });
 });
 
