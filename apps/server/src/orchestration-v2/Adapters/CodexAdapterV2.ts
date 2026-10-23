@@ -43,7 +43,11 @@ import {
   dynamicToolSurface,
   dynamicToolTitle,
 } from "@t3tools/shared/toolActivity";
-import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@t3tools/shared/model";
+import {
+  getModelSelectionStringOptionValue,
+  getProviderOptionStringSelectionValue,
+  modelSelectionsEqual,
+} from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import type {
   ChatAttachment,
@@ -1361,7 +1365,7 @@ const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 
 export function codexThreadRuntimeParams(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
-  readonly modelSelection?: { readonly model: string };
+  readonly modelSelection?: Pick<ModelSelection, "model" | "options">;
   readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
 }): {
   readonly cwd?: string;
@@ -1369,11 +1373,18 @@ export function codexThreadRuntimeParams(input: {
   readonly config: Readonly<Record<string, Schema.Json>>;
 } {
   const { mcpSession } = input;
+  // turn/start carries the effort for ordinary turns, but review/start takes
+  // none and runs at the thread's, so a thread starts at the selected one.
+  const effort = getProviderOptionStringSelectionValue(
+    input.modelSelection?.options,
+    "reasoningEffort",
+  );
   return {
     ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
     config: {
       ...CODEX_THREAD_CONFIG,
+      ...(effort === undefined ? {} : { model_reasoning_effort: effort }),
       ...(mcpSession === undefined
         ? {}
         : {

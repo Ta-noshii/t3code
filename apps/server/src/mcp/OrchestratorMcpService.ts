@@ -834,6 +834,10 @@ function threadTitle(input: {
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 
+// A review at medium effort is thorough enough for most diffs and much faster
+// than the high effort many users set as their Codex default.
+const CODEX_REVIEW_DEFAULT_EFFORT = "medium";
+
 function codexReviewTarget(target: OrchestratorMcpCodexReviewInput["target"]): CodexReviewTarget {
   switch (target?.type) {
     case undefined:
@@ -2998,6 +3002,9 @@ const make = Effect.gen(function* () {
           target: {
             providerInstanceId: provider.instanceId,
             ...(input.model === undefined ? {} : { model: input.model }),
+            options: [
+              { id: "reasoningEffort", value: input.effort ?? CODEX_REVIEW_DEFAULT_EFFORT },
+            ],
           },
           title: input.title ?? `Review ${codexReviewTargetLabel(target)}`,
           // The reviewer reads; plan mode would only get in its way.

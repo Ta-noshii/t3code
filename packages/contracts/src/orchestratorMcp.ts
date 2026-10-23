@@ -265,6 +265,12 @@ export const OrchestratorMcpCodexReviewInput = Schema.Struct({
       description: "Model for the reviewer. Defaults to the instance's default model.",
     }),
   ),
+  effort: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "Reasoning effort for the reviewer, one the model offers (typically low, medium, high or xhigh). Defaults to medium.",
+    }),
+  ),
   title: Schema.optional(OrchestratorMcpTitle),
   mode: Schema.optional(
     Schema.Literals(["async", "wait"]).annotate({

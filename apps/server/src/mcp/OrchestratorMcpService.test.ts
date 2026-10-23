@@ -1409,11 +1409,19 @@ describe("OrchestratorMcpService provider resolution", () => {
         const [request] = (yield* Ref.get(dispatched)) as ReadonlyArray<{
           task: string;
           title: string;
-          modelSelection: { instanceId: string };
+          modelSelection: {
+            instanceId: string;
+            options?: ReadonlyArray<{ id: string; value: unknown }>;
+          };
         }>;
         assert.equal(request?.task, "/review --commit abc1234");
         assert.equal(request?.title, "Review commit abc1234");
         assert.equal(request?.modelSelection.instanceId, codexInstanceId);
+        // Medium unless the caller asks for another effort.
+        assert.deepInclude(request?.modelSelection.options ?? [], {
+          id: "reasoningEffort",
+          value: "medium",
+        });
 
         const wrongDriver = yield* service
           .codexReview(scope, { providerInstanceId: antigravityInstanceId })

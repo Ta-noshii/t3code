@@ -1230,6 +1230,20 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     }).pipe(Effect.scoped),
   );
 
+  it("starts a thread at the selected reasoning effort, which review/start uses", () => {
+    const params = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: undefined,
+      modelSelection: { model: "gpt-5.4", options: [{ id: "reasoningEffort", value: "medium" }] },
+    });
+    assert.equal(params.config.model_reasoning_effort, "medium");
+    assert.isUndefined(
+      CodexAdapterV2.codexThreadRuntimeParams({
+        mcpSession: undefined,
+        modelSelection: { model: "gpt-5.4" },
+      }).config.model_reasoning_effort,
+    );
+  });
+
   it("gives each thread's shell commands that thread's agent shell credential", () => {
     const params = CodexAdapterV2.codexThreadRuntimeParams({
       mcpSession: {
