@@ -231,6 +231,21 @@ Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it
 finishes; the call's own result shows its status.
 
+## Follow progress on a list of work
+
+When an agent works through a list, such as 50 bugs or 12 files to migrate, it
+can show a progress bar above the composer with how many items are finished and
+how many failed. The agent controls the bar: it declares the items and marks
+each one as it starts and ends it. Agents tend to start one for longer lists on
+their own, and you can ask for one, for example "fix these failing tests and
+track progress".
+
+Subagents the agent delegates to update the same bar on the parent thread, so
+the thread you started shows the whole job. On web and desktop, click the bar to
+list the items. The sidebar and the mobile thread list show the count, such as
+`23/50`, while work remains. Dismissing the bar removes it; the agent can start
+a new one later.
+
 ## Snooze until later
 
 Choose **Snooze → Custom…** from a thread's menu to pick a date and time in your

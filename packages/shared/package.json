@@ -411,6 +411,10 @@
       "types": "./src/orchestrationV2Timeline.ts",
       "import": "./src/orchestrationV2Timeline.ts"
     },
+    "./agentProgress": {
+      "types": "./src/agentProgress.ts",
+      "import": "./src/agentProgress.ts"
+    },
     "./t3McpToolPresentation": {
       "types": "./src/t3McpToolPresentation.ts",
       "import": "./src/t3McpToolPresentation.ts"

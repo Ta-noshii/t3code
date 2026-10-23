@@ -87,6 +87,7 @@ import IconLetterSpacing from "@tabler/icons-react-native/IconLetterSpacing";
 import IconMicrophone from "@tabler/icons-react-native/IconMicrophone";
 import IconLink from "@tabler/icons-react-native/IconLink";
 import IconListNumbers from "@tabler/icons-react-native/IconListNumbers";
+import IconListCheck from "@tabler/icons-react-native/IconListCheck";
 import IconMenu2 from "@tabler/icons-react-native/IconMenu2";
 import IconMessageCircleQuestion from "@tabler/icons-react-native/IconMessageCircleQuestion";
 import IconMessage from "@tabler/icons-react-native/IconMessage";
@@ -175,6 +176,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   camera: IconCamera,
   car: IconCar,
   "chart.bar.xaxis": IconChartBar,
+  checklist: IconListCheck,
   checkmark: IconCheck,
   "checkmark.circle": IconCircleCheck,
   "checkmark.circle.fill": IconCircleCheck,

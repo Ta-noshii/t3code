@@ -40,6 +40,9 @@ When a chart, table, diagram, image collage, or mockup would say more than prose
   `### Project canvases
 
 \`canvas_*\` tools edit Excalidraw canvases kept in the project's canvas library. Use them for architecture, flows, data models, UI layouts, and plans. Keep lasting diagrams in the library and update them when the code they describe changes. After changing one, check it with a \`canvas_screenshot\` cropped to what you changed. Call \`canvas_open\` when the user should look at it.`,
+  `### Showing progress
+
+When working through a list of about 5 or more items, declare them with \`progress_update\` and mark each one as it starts and ends; the user sees a live progress bar. Subagents you delegate to can mark their own items on your tracker.`,
   `- When model options are requested or the child keeps the parent's provider instance and model with nonempty \`inheritedOptions\` from \`orchestrator_capabilities\`, use \`delegate_task\` even for native-supported models. Native subagents cannot reliably apply T3 model options. Read the selected model's descriptors from \`orchestrator_capabilities\` and put settings in \`target.options\`, not only in the prompt. Claude commonly uses {"effort":"max","fastMode":true}; Codex uses {"reasoningEffort":"max","serviceTier":"priority"}. Do not translate max to high or ignore unsupported settings: report a capability mismatch. Options inherit only for the same provider instance and model; explicit entries override individual values, and [] or {} clears them. Check the returned providerInstanceId, model, and options against the requested selection.`,
 ];
 

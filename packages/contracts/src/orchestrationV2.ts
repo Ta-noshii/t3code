@@ -34,6 +34,7 @@ import {
   ScheduledTaskId,
   ThreadId,
   TrimmedNonEmptyString,
+  TrimmedString,
   TurnItemId,
 } from "./baseSchemas.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
@@ -370,6 +371,76 @@ export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
 );
 export type OrchestrationV2LimitRecoveryUpdate = typeof OrchestrationV2LimitRecoveryUpdate.Type;
 
+export const AGENT_PROGRESS_MAX_ITEMS = 200;
+export const AGENT_PROGRESS_MAX_TITLE_LENGTH = 80;
+export const AGENT_PROGRESS_MAX_ID_LENGTH = 64;
+export const AGENT_PROGRESS_MAX_LABEL_LENGTH = 120;
+
+export const OrchestrationV2AgentProgressItemStatus = Schema.Literals([
+  "pending",
+  "running",
+  "done",
+  "failed",
+  "skipped",
+]);
+export type OrchestrationV2AgentProgressItemStatus =
+  typeof OrchestrationV2AgentProgressItemStatus.Type;
+
+// Stored state stays unchecked so tightening the caps never breaks replay of older events.
+export const OrchestrationV2AgentProgress = Schema.Struct({
+  title: Schema.String,
+  items: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      label: Schema.optional(Schema.String),
+      status: OrchestrationV2AgentProgressItemStatus,
+    }),
+  ),
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationV2AgentProgress = typeof OrchestrationV2AgentProgress.Type;
+
+/** The ops of one agent call, applied in field order: clear, title, items, remove. */
+export const OrchestrationV2AgentProgressUpdate = Schema.Struct({
+  clear: Schema.optional(Schema.Boolean),
+  title: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_PROGRESS_MAX_TITLE_LENGTH)),
+  ),
+  items: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_PROGRESS_MAX_ID_LENGTH)),
+        label: Schema.optional(
+          TrimmedString.check(Schema.isMaxLength(AGENT_PROGRESS_MAX_LABEL_LENGTH)),
+        ),
+        status: Schema.optional(OrchestrationV2AgentProgressItemStatus),
+      }),
+    ).check(Schema.isMaxLength(AGENT_PROGRESS_MAX_ITEMS)),
+  ),
+  remove: Schema.optional(
+    Schema.Array(
+      TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_PROGRESS_MAX_ID_LENGTH)),
+    ).check(Schema.isMaxLength(AGENT_PROGRESS_MAX_ITEMS)),
+  ),
+});
+export type OrchestrationV2AgentProgressUpdate = typeof OrchestrationV2AgentProgressUpdate.Type;
+
+/**
+ * What the shell carries for every thread. `segments` has one character per
+ * item in item order: p pending, r running, d done, f failed, s skipped.
+ */
+export const OrchestrationV2AgentProgressSummary = Schema.Struct({
+  title: Schema.String,
+  total: NonNegativeInt,
+  done: NonNegativeInt,
+  failed: NonNegativeInt,
+  skipped: NonNegativeInt,
+  running: NonNegativeInt,
+  segments: Schema.String,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationV2AgentProgressSummary = typeof OrchestrationV2AgentProgressSummary.Type;
+
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -416,6 +487,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** The agent's progress tracker; subagents report to their topmost parent's. */
+  progress: Schema.optional(Schema.NullOr(OrchestrationV2AgentProgress)),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -1643,6 +1716,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.unpinned",
       "thread.pin-reordered",
       "thread.active-reordered",
+      "thread.progress-updated",
       "thread.visited",
       "thread.marked-unread",
       "thread.metadata-updated",
@@ -1878,6 +1952,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   goal: Schema.optional(Schema.NullOr(OrchestrationV2ProviderGoal)),
+  // Not `progress`: shells and AppThreads are spread into each other, and the shapes differ.
+  progressSummary: Schema.optional(Schema.NullOr(OrchestrationV2AgentProgressSummary)),
   itemCount: NonNegativeInt,
   visibleItemCount: NonNegativeInt,
   createdAt: Schema.DateTimeUtc,
@@ -2457,6 +2533,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.unpinned",
       "thread.pin-reordered",
       "thread.active-reordered",
+      "thread.progress-updated",
       "thread.visited",
       "thread.marked-unread",
       "thread.pull-request-synced",
@@ -2702,6 +2779,11 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     orderKey: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.progress.clear"),
+    commandId: CommandId,
+    threadId: ThreadId,
   }),
   Schema.Struct({
     type: Schema.Literal("thread.visit"),
@@ -3058,6 +3140,13 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
  * send them.
  */
 const OrchestrationV2InternalCommand = Schema.Union([
+  /** Internal so the tracker owner is resolved server side from the calling agent's lineage. */
+  Schema.Struct({
+    type: Schema.Literal("thread.progress.update"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    update: OrchestrationV2AgentProgressUpdate,
+  }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request-watch.sync"),
     commandId: CommandId,

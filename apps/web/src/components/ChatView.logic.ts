@@ -3,6 +3,7 @@ import {
   deriveLatestThreadRun,
   deriveThreadRuntime,
 } from "@t3tools/client-runtime/state/thread-execution";
+import { summarizeAgentProgress } from "@t3tools/shared/agentProgress";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import {
   latestUnheldRun,
@@ -1719,6 +1720,7 @@ export function presentThreadShellFromProjection(
         projection.providerThreads.find(
           (thread) => thread.id === projection.thread.activeProviderThreadId,
         )?.goal ?? null,
+      progressSummary: summarizeAgentProgress(projection.thread.progress),
       itemCount: projection.turnItems.length,
       visibleItemCount: projection.visibleTurnItems.length,
       updatedAt,

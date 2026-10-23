@@ -5,6 +5,7 @@ import type {
   EnvironmentId,
   MessageId,
   OrchestrationProjectShell,
+  OrchestrationV2AgentProgressSummary,
   OrchestrationV2ProviderGoal,
   OrchestrationV2RunStatus,
   OrchestrationV2ProviderFailureClass,
@@ -162,6 +163,8 @@ export interface EnvironmentThreadShell {
   >;
   readonly providerInstanceHistory: ReadonlyArray<ProviderInstanceId>;
   readonly goal: OrchestrationV2ProviderGoal | null;
+  /** The agent-controlled progress tracker, or null when there is none. */
+  readonly progressSummary: OrchestrationV2AgentProgressSummary | null;
   readonly itemCount: number;
   readonly visibleItemCount: number;
   readonly createdAt: string;
@@ -314,6 +317,7 @@ export function presentThreadShell(
     pendingBackgroundTasks: thread.pendingBackgroundTasks ?? [],
     providerInstanceHistory: thread.providerInstanceHistory ?? [],
     goal: thread.goal ?? null,
+    progressSummary: thread.progressSummary ?? null,
     itemCount: thread.itemCount,
     visibleItemCount: thread.visibleItemCount,
     createdAt: iso(thread.createdAt),

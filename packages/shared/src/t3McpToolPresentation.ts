@@ -65,7 +65,8 @@ export type T3McpToolSummaryAction =
   | "device"
   | "html-preview"
   | "html-render"
-  | "canvas";
+  | "canvas"
+  | "progress-update";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -353,6 +354,7 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     ["Take a screenshot of", "Taking a screenshot of", "Took a screenshot of", "a canvas"],
     "canvas",
   ),
+  progress_update: tool(["Update", "Updating", "Updated", "progress"], "progress-update"),
 };
 
 export const T3_MCP_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(T3_MCP_TOOLS));

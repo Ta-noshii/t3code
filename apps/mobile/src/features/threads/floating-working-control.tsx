@@ -1,4 +1,5 @@
 import type { SubagentPillSegment } from "@t3tools/client-runtime/state/thread-subagents";
+import type { OrchestrationV2AgentProgressSummary } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -86,7 +87,9 @@ export function FloatingWorkingControl(props: {
   const [queueWidth, setQueueWidth] = useState(0);
   const [actionWidth, setActionWidth] = useState(0);
   const action =
-    props.status?.kind === "background" || props.status?.kind === "lifecycle"
+    props.status?.kind === "background" ||
+    props.status?.kind === "lifecycle" ||
+    props.status?.kind === "progress"
       ? props.status.action
       : null;
   const [agentsWidth, setAgentsWidth] = useState(0);
@@ -471,6 +474,30 @@ function FloatingStatusLabel(props: {
       </StatusLabelRow>
     );
   }
+  if (props.status.kind === "progress") {
+    return (
+      <StatusLabelRow
+        key="progress"
+        accessibilityLabel={props.status.accessibilityLabel}
+        className="gap-2"
+        onLayout={props.onLayout}
+      >
+        <SymbolView
+          name={props.status.complete ? "checkmark.circle" : "checklist"}
+          size={13}
+          tintColorClassName="foreground"
+          type="monochrome"
+        />
+        <Text className="shrink font-t3-medium text-xs text-foreground" numberOfLines={1}>
+          {props.status.label}
+        </Text>
+        <Text className="font-t3-medium text-xs text-foreground-muted tabular-nums">
+          {props.status.count}
+        </Text>
+        {props.status.complete ? null : <ProgressMeter summary={props.status.summary} />}
+      </StatusLabelRow>
+    );
+  }
   if (props.status.kind === "goal") {
     return (
       <StatusLabelRow
@@ -514,6 +541,31 @@ function FloatingStatusLabel(props: {
   }
   return (
     <WorkingDuration key="working" startedAt={props.status.startedAt} onLayout={props.onLayout} />
+  );
+}
+
+// One stacked bar: the capsule is too short for a segment per item.
+function ProgressMeter(props: { readonly summary: OrchestrationV2AgentProgressSummary }) {
+  const { summary } = props;
+  if (summary.total === 0) return null;
+  const parts = [
+    ["done", summary.done, "bg-adaptive-emerald-500"],
+    ["failed", summary.failed, "bg-danger"],
+    ["skipped", summary.skipped, "bg-foreground-muted"],
+    ["running", summary.running, "bg-primary"],
+  ] as const;
+  return (
+    <View className="h-1 w-10 flex-row overflow-hidden rounded-full bg-subtle-strong">
+      {parts.map(([status, count, className]) =>
+        count === 0 ? null : (
+          <View
+            key={status}
+            className={`h-full ${className}`}
+            style={{ width: `${(count / summary.total) * 100}%` }}
+          />
+        ),
+      )}
+    </View>
   );
 }
 
