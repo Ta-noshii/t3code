@@ -1,23 +1,29 @@
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { useNavigation } from "@react-navigation/native";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { CommandId, MessageId } from "@t3tools/contracts";
 import {
+  htmlRenderError,
   htmlRenderFileName,
   htmlRenderFrameHeight,
   htmlRenderThemeFragment,
   htmlRenderThemeMessage,
+  htmlRenderResult,
+  readHtmlRenderMessageRequest,
   type HtmlRenderReference,
   type HtmlRenderTheme,
 } from "@t3tools/shared/htmlRender";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Platform, Pressable, View, type ColorValue } from "react-native";
+import { Alert, Platform, Pressable, View, type ColorValue } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { mobileHtmlRenderTheme } from "../../lib/htmlRenderTheme";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { uuidv4 } from "../../lib/uuid";
 import { useAssetUrlState, useRefreshAssetUrl } from "../../state/assets";
+import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 
 const ROW_BOTTOM_MARGIN = 8;
@@ -57,23 +63,41 @@ type Overflow = { readonly x: boolean; readonly y: boolean };
 
 const NO_OVERFLOW: Overflow = { x: false, y: false };
 
-function readOverflowMessage(data: string): Overflow | null {
+function parseMessage(data: string): unknown {
   try {
-    const message: unknown = JSON.parse(data);
-    return typeof message === "object" &&
-      message !== null &&
-      "type" in message &&
-      message.type === OVERFLOW_MESSAGE_TYPE &&
-      "x" in message &&
-      typeof message.x === "boolean" &&
-      "y" in message &&
-      typeof message.y === "boolean"
-      ? { x: message.x, y: message.y }
-      : null;
+    return JSON.parse(data);
   } catch {
     return null;
   }
 }
+
+function readOverflowMessage(message: unknown): Overflow | null {
+  return typeof message === "object" &&
+    message !== null &&
+    "type" in message &&
+    message.type === OVERFLOW_MESSAGE_TYPE &&
+    "x" in message &&
+    typeof message.x === "boolean" &&
+    "y" in message &&
+    typeof message.y === "boolean"
+    ? { x: message.x, y: message.y }
+    : null;
+}
+
+// A WebView cannot tell whether the reader just tapped the page, so a page's
+// message is sent only once the reader confirms it.
+const confirmSend = (text: string) =>
+  new Promise<boolean>((resolve) => {
+    Alert.alert(
+      "Send this message from the page?",
+      text,
+      [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        { text: "Send", onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
 
 const withoutFragment = (url: string) => url.split("#", 1)[0];
 
@@ -82,6 +106,8 @@ export function HtmlRenderWebView(props: {
   readonly title: string;
   readonly nested: boolean;
   readonly onLoadError?: () => void;
+  /** Sends the page's `window.t3.sendMessage` text as the reader's next message. */
+  readonly onSendMessage?: (text: string) => Promise<void>;
 }) {
   const theme = useHtmlRenderTheme();
   const [initialTheme] = useState(theme);
@@ -110,6 +136,38 @@ export function HtmlRenderWebView(props: {
     setLoaded(false);
     setOverflow(NO_OVERFLOW);
     setGeneration((value) => value + 1);
+  };
+  const reply = (message: object) =>
+    webView.current?.injectJavaScript(`window.postMessage(${JSON.stringify(message)}, "*"); true;`);
+  const receive = (event: WebViewMessageEvent) => {
+    const message = parseMessage(event.nativeEvent.data);
+    const next = readOverflowMessage(message);
+    if (next !== null) {
+      setOverflow(next);
+      return;
+    }
+    const request = readHtmlRenderMessageRequest(message);
+    if (request === undefined) return;
+    const send = props.onSendMessage;
+    if (send === undefined) {
+      reply(htmlRenderError(request.id, "Messages can't be sent from here."));
+      return;
+    }
+    void confirmSend(request.text)
+      .then(async (approved) => {
+        if (!approved) throw new Error("Declined by the reader.");
+        await send(request.text);
+      })
+      .then(
+        () => reply(htmlRenderResult(request.id)),
+        (cause: unknown) =>
+          reply(
+            htmlRenderError(
+              request.id,
+              cause instanceof Error ? cause.message : "The message was not sent.",
+            ),
+          ),
+      );
   };
   const scrollable = !props.nested || overflow.x || overflow.y;
   return (
@@ -158,15 +216,8 @@ export function HtmlRenderWebView(props: {
         onHttpError={props.onLoadError}
         onContentProcessDidTerminate={restart}
         onRenderProcessGone={restart}
-        {...(props.nested
-          ? {
-              injectedJavaScript: OVERFLOW_SCRIPT,
-              onMessage: (event: WebViewMessageEvent) => {
-                const next = readOverflowMessage(event.nativeEvent.data);
-                if (next !== null) setOverflow(next);
-              },
-            }
-          : {})}
+        onMessage={receive}
+        {...(props.nested ? { injectedJavaScript: OVERFLOW_SCRIPT } : {})}
       />
       {loaded ? null : (
         <View pointerEvents="none" className="absolute inset-0 items-center justify-center">
@@ -219,6 +270,20 @@ export function ThreadHtmlRender(props: {
     });
   };
 
+  // Through the outbox like a typed message, so it survives a dropped
+  // connection; the thread's own settings fill in when it sends.
+  const sendMessage = (text: string) =>
+    enqueueThreadOutboxMessage({
+      environmentId: props.environmentId,
+      threadId: props.threadId,
+      messageId: MessageId.make(uuidv4()),
+      commandId: CommandId.make(uuidv4()),
+      text,
+      attachments: [],
+      dispatchMode: "queue",
+      createdAt: new Date().toISOString(),
+    });
+
   return (
     <View style={{ marginBottom: ROW_BOTTOM_MARGIN }}>
       <View style={{ height }}>
@@ -229,6 +294,7 @@ export function ThreadHtmlRender(props: {
             title={title}
             nested
             onLoadError={handleLoadError}
+            onSendMessage={sendMessage}
           />
         ) : failed || asset._tag === "Failure" ? (
           <Pressable
