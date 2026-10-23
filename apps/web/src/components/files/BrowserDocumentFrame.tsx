@@ -11,11 +11,13 @@ import {
   htmlRenderShortcutsMessage,
   htmlRenderThemeFragment,
   htmlRenderThemeMessage,
+  htmlRenderError,
   htmlRenderResult,
   readHtmlRenderContentHeight,
   readHtmlRenderImageRequest,
   readHtmlRenderKeyDown,
   readHtmlRenderLinkRequest,
+  readHtmlRenderMessageRequest,
 } from "@t3tools/shared/htmlRender";
 import {
   isMacPlatform,
@@ -147,6 +149,8 @@ export function HtmlRenderDocument(props: {
   readonly onContentHeight?: (height: number) => void;
   /** Reports fullscreen changes so virtualized rows can stay mounted. */
   readonly onFullscreenChange?: ((fullscreen: boolean) => void) | undefined;
+  /** Sends text as the reader's message in the thread, for the page's `window.t3.sendMessage`. */
+  readonly onSendMessage?: ((text: string) => Promise<void>) | undefined;
 }) {
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -245,6 +249,31 @@ export function HtmlRenderDocument(props: {
     const height = readHtmlRenderContentHeight(event.data);
     if (height !== undefined) {
       props.onContentHeight?.(height);
+      return;
+    }
+    // The page sends as the reader, so only right after the reader used it, as with links.
+    const messageRequest = readHtmlRenderMessageRequest(event.data);
+    if (messageRequest !== undefined) {
+      const reply = (message: object) => frame.contentWindow?.postMessage(message, "*");
+      const { onSendMessage } = props;
+      if (onSendMessage === undefined) {
+        reply(htmlRenderError(messageRequest.id, "Messages can't be sent from here."));
+        return;
+      }
+      if (document.activeElement !== frame || navigator.userActivation?.isActive === false) {
+        reply(htmlRenderError(messageRequest.id, "Messages send only from a click in the page."));
+        return;
+      }
+      void Promise.resolve(onSendMessage(messageRequest.text)).then(
+        () => reply(htmlRenderResult(messageRequest.id)),
+        (cause: unknown) =>
+          reply(
+            htmlRenderError(
+              messageRequest.id,
+              cause instanceof Error ? cause.message : "The message was not sent.",
+            ),
+          ),
+      );
       return;
     }
     if (document.activeElement !== frame || navigator.userActivation?.isActive === false) return;
