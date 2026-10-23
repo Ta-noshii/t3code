@@ -43,6 +43,7 @@ import {
   type ReorderActiveThreadInput,
   type SetThreadAutoSettleInput,
   type SettleThreadInput,
+  type ClearThreadProgressInput,
   type SnoozeThreadInput,
   type StartThreadTurnInput,
   type StopThreadSessionInput,
@@ -79,6 +80,7 @@ import {
   reorderActiveThread,
   setThreadAutoSettle,
   settleThread,
+  clearThreadProgress,
   snoozeThread,
   startThreadTurn,
   stopThreadSession,
@@ -125,6 +127,7 @@ export type {
   ReorderActiveThreadInput,
   SetThreadAutoSettleInput,
   SettleThreadInput,
+  ClearThreadProgressInput,
   SnoozeThreadInput,
   StartThreadTurnInput,
   StopThreadSessionInput,
@@ -200,6 +203,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     unsettle: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:unsettle",
       execute: (input: UnsettleThreadInput) => unsettleThread(input),
+      scheduler,
+      concurrency,
+    }),
+    clearProgress: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:clear-progress",
+      execute: (input: ClearThreadProgressInput) => clearThreadProgress(input),
       scheduler,
       concurrency,
     }),
@@ -447,6 +456,10 @@ export function createThreadEnvironmentAtoms<R, E>(
             snoozedAt: now,
           },
     ),
+    clearProgress: optimistic.wrap(commands.clearProgress, (thread) => ({
+      ...thread,
+      progressSummary: null,
+    })),
     unsnooze: optimistic.wrap(commands.unsnooze, (thread) => ({
       ...thread,
       snoozedUntil: null,

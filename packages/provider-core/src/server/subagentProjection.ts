@@ -82,6 +82,8 @@ export function makeSubagentChildThread(input: {
     settledAt: null,
     snoozedUntil: null,
     snoozedAt: null,
+    // The tracker stays with the parent; a child's updates go there.
+    progress: null,
     lastVisitedAt: null,
     deletedAt: null,
   };

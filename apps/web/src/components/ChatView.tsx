@@ -299,7 +299,11 @@ import { useProactivePanels } from "../hooks/useProactivePanels";
 import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEntries";
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { useAgentOpenedPreviews } from "./preview/useAgentOpenedPreviews";
-import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import type {
+  ComposerBannerStackContent,
+  ComposerBannerStackItem,
+} from "./chat/ComposerBannerStack";
+import { AgentProgressStrip } from "./chat/AgentProgressStrip";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
 import {
@@ -423,6 +427,7 @@ export default function ChatView(props: ChatViewProps) {
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const clearThreadProgress = useOrchestrationCommand(threadEnvironment.clearProgress);
   const canWriteSourceControl = useEnvironmentScope(environmentId, AuthSourceControlWriteScope);
   const setThreadRuntimeMode = useOrchestrationCommand(threadEnvironment.setRuntimeMode, {
     reportFailure: false,
@@ -2601,11 +2606,37 @@ export default function ChatView(props: ChatViewProps) {
           },
         })
       : null;
+  // Subagents report to the topmost parent, so a child thread has no tracker of its own.
+  const progressSummary = activeThreadShell?.progressSummary ?? null;
+  const progressBanner: ComposerBannerStackContent | null =
+    activeThreadShell && progressSummary !== null
+      ? {
+          id: `progress:${activeThreadShell.id}`,
+          variant: "default",
+          priority: "activity",
+          content: (
+            <AgentProgressStrip
+              summary={progressSummary}
+              items={serverProjection?.thread.progress?.items ?? null}
+              dismissDisabled={!canOperateThread}
+              onDismiss={() =>
+                void clearThreadProgress({
+                  environmentId,
+                  input: { threadId: activeThreadShell.id },
+                })
+              }
+            />
+          ),
+        }
+      : null;
   const composerBannerItems = (() => {
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
-    const backgroundWorkItems = [childInputBanner, goalBanner, backgroundWorkBanner].filter(
-      (item) => item !== null,
-    );
+    const backgroundWorkItems = [
+      childInputBanner,
+      progressBanner,
+      goalBanner,
+      backgroundWorkBanner,
+    ].filter((item) => item !== null);
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
     const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
@@ -2637,7 +2668,7 @@ export default function ChatView(props: ChatViewProps) {
         },
       }),
     ];
-  })() as ComposerBannerStackItem[];
+  })() as Array<ComposerBannerStackItem | ComposerBannerStackContent>;
 
   // A launch context only overrides the drawer's cwd until the thread's own
   // location catches up, the drawer closes, or the thread changes.

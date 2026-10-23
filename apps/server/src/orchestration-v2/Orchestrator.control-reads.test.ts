@@ -1367,3 +1367,128 @@ it.effect("explicit settle clears snooze atomically and stays idempotent after r
     assert.deepInclude((yield* projections.getThreadProjection(threadId)).thread, active);
   }).pipe(Effect.provide(layerTest)),
 );
+
+it.effect.each([
+  { firstCall: "first", secondCall: "second" },
+  { firstCall: "second", secondCall: "first" },
+] as const)(
+  "merges progress from two delegated children on the parent tracker ($firstCall then $secondCall)",
+  ({ firstCall, secondCall }) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const key = `${firstCall}-${secondCall}`;
+      const parentThreadId = ThreadId.make(`thread:progress-parent:${key}`);
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`create-progress-parent:${key}`),
+        threadId: parentThreadId,
+        projectId: ProjectId.make("project:progress"),
+        title: "Fix the bug list",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`start-progress-parent:${key}`),
+        threadId: parentThreadId,
+        messageId: MessageId.make(`message:progress-parent:${key}`),
+        text: "Fix these bugs with subagents",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.progress.update",
+        commandId: CommandId.make(`declare-progress:${key}`),
+        threadId: parentThreadId,
+        update: {
+          title: "Bugs",
+          items: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }],
+        },
+      });
+      const parentRun = (yield* projections.getThreadProjection(parentThreadId)).runs[0]!;
+      for (const ordinal of [1, 2]) {
+        yield* orchestrator.dispatch({
+          type: "delegated_task.request",
+          commandId: CommandId.make(`delegate-progress-${ordinal}:${key}`),
+          parentThreadId,
+          parentRunId: parentRun.id,
+          parentNodeId: parentRun.rootNodeId!,
+          task: `Fix bug group ${ordinal}`,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdBy: "agent",
+          creationSource: "mcp",
+        });
+      }
+      const children = (yield* projections.getThreadProjection(parentThreadId)).subagents;
+      assert.lengthOf(children, 2);
+      for (const child of children) {
+        assert.isNull((yield* projections.getThread(child.childThreadId!)).progress);
+      }
+
+      // Each child owns its own ids; the MCP tool resolves both to the parent.
+      const updates = {
+        first: [
+          { id: "c", status: "done" },
+          { id: "a", status: "running" },
+        ],
+        second: [
+          { id: "b", status: "failed" },
+          { id: "d", status: "done", label: "Bug D" },
+        ],
+      } as const;
+      for (const call of [firstCall, secondCall]) {
+        yield* orchestrator.dispatch({
+          type: "thread.progress.update",
+          commandId: CommandId.make(`progress-${call}:${key}`),
+          threadId: parentThreadId,
+          update: { items: updates[call] },
+        });
+      }
+
+      const parent = yield* projections.getThread(parentThreadId);
+      assert.deepEqual(parent.progress?.items, [
+        { id: "a", status: "running" },
+        { id: "b", status: "failed" },
+        { id: "c", status: "done" },
+        { id: "d", label: "Bug D", status: "done" },
+      ]);
+      assert.deepInclude((yield* projections.getThreadShell(parentThreadId))?.progressSummary, {
+        title: "Bugs",
+        total: 4,
+        done: 2,
+        failed: 1,
+        running: 1,
+        segments: "rfdd",
+      });
+
+      const overCap = yield* orchestrator
+        .dispatch({
+          type: "thread.progress.update",
+          commandId: CommandId.make(`progress-over-cap:${key}`),
+          threadId: parentThreadId,
+          update: { items: Array.from({ length: 200 }, (_, index) => ({ id: `extra-${index}` })) },
+        })
+        .pipe(Effect.flip);
+      assert.ok(overCap._tag === "OrchestratorDispatchError");
+      assert.include(String(overCap.cause), "at most 200 items");
+      assert.deepEqual((yield* projections.getThread(parentThreadId)).progress, parent.progress);
+
+      yield* orchestrator.dispatch({
+        type: "thread.progress.clear",
+        commandId: CommandId.make(`progress-clear:${key}`),
+        threadId: parentThreadId,
+      });
+      assert.isNull((yield* projections.getThread(parentThreadId)).progress);
+      assert.isNull((yield* projections.getThreadShell(parentThreadId))?.progressSummary);
+    }).pipe(Effect.provide(layerTest)),
+);

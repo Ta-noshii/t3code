@@ -26,6 +26,7 @@ import {
   resolveThreadWorkingStartedAt,
 } from "@t3tools/client-runtime/state/models";
 import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@t3tools/contracts";
+import { agentProgressFinished, isAgentProgressComplete } from "@t3tools/shared/agentProgress";
 import { canSnooze, resolveSnoozePresets } from "@t3tools/client-runtime/state/thread-settled";
 import type { MenuAction } from "@react-native-menu/menu";
 import { memo, useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
@@ -636,6 +637,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
   const recede = shouldRecedeThreadRow({ status, selected });
   const timeLabel = props.timeLabel;
+  // An unfinished agent tracker reads better than a duration or a timestamp.
+  const progressCount =
+    thread.progressSummary != null && !isAgentProgressComplete(thread.progressSummary)
+      ? `${agentProgressFinished(thread.progressSummary)}/${thread.progressSummary.total}`
+      : null;
 
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   const handleAcknowledgeWoke = useCallback(() => {
@@ -1058,7 +1064,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               )}
             >
               {statusLabel.label}
-              {status === "working" ? (
+              {(status === "working" || status === "waiting") && progressCount !== null ? (
+                ` ${progressCount}`
+              ) : status === "working" ? (
                 <ThreadListV2Duration startedAt={resolveThreadWorkingStartedAt(thread)} />
               ) : status === "waiting" ? (
                 <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
@@ -1074,7 +1082,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 : rowAppearance.tertiaryForegroundClassName,
             )}
           >
-            {timeLabel}
+            {progressCount ?? timeLabel}
           </Text>
         )}
       </View>
