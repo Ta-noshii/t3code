@@ -73,6 +73,7 @@ import {
   type ProviderSubagentStatus,
 } from "@t3tools/client-runtime/state/thread-execution";
 import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
+import { agentProgressFinished, isAgentProgressComplete } from "@t3tools/shared/agentProgress";
 import { isProviderNativeSubagentThread } from "@t3tools/contracts";
 import type { QueuedRunEdit } from "../../state/queued-run-edit";
 import type { FollowUpBehavior } from "../../lib/followUpBehavior";
@@ -581,6 +582,7 @@ function ThreadDetailBody(
   const unsettleThread = useAtomCommand(threadEnvironment.unsettle, { reportFailure: false });
   const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
+  const clearProgress = useAtomCommand(threadEnvironment.clearProgress, { reportFailure: false });
   const anyRunStop = useAtomValue(
     props.selectedThreadDetailRef === null
       ? NO_RUN_STOP_ATOM
@@ -661,7 +663,9 @@ function ThreadDetailBody(
     lastVisitedAt: props.selectedThread.lastVisitedAt,
     latestRunCompletedAt: props.selectedThread.latestRun?.completedAt ?? null,
   });
-  const runStatusAction = async (action: "stop" | "wake" | "unsettle" | "dismiss") => {
+  const runStatusAction = async (
+    action: "stop" | "wake" | "unsettle" | "dismiss" | "clear-progress",
+  ) => {
     if (statusPending || !props.canOperateThread) return;
     const request: BackgroundWorkStopRequest = {
       threadKey: selectedThreadKey,
@@ -701,10 +705,12 @@ function ThreadDetailBody(
             : await unsnoozeThread({ ...target, input: { ...target.input, reason: "user" } })
           : action === "unsettle"
             ? await unsettleThread({ ...target, input: { ...target.input, reason: "user" } })
-            : await visitThread({
-                ...target,
-                input: { ...target.input, visitedAt: wokeAt ?? lifecycleNow },
-              });
+            : action === "clear-progress"
+              ? await clearProgress(target)
+              : await visitThread({
+                  ...target,
+                  input: { ...target.input, visitedAt: wokeAt ?? lifecycleNow },
+                });
     props.setStatusRequests((current) =>
       current[request.threadKey] !== request
         ? current
@@ -727,6 +733,26 @@ function ThreadDetailBody(
   const pendingBackgroundWork = presentPendingBackgroundWork(
     props.selectedThread.pendingBackgroundTasks,
   );
+  const progressSummary = props.selectedThread.progressSummary;
+  const progressStatus: FloatingWorkingStatus | null =
+    progressSummary === null
+      ? null
+      : {
+          kind: "progress",
+          label: progressSummary.title,
+          count: isAgentProgressComplete(progressSummary)
+            ? `${progressSummary.total}/${progressSummary.total} done`
+            : `${agentProgressFinished(progressSummary)}/${progressSummary.total}`,
+          complete: isAgentProgressComplete(progressSummary),
+          summary: progressSummary,
+          accessibilityLabel: `${progressSummary.title}: ${agentProgressFinished(progressSummary)} of ${progressSummary.total} finished${progressSummary.failed > 0 ? `, ${progressSummary.failed} failed` : ""}`,
+          action: {
+            label: "Dismiss",
+            accessibilityLabel: "Dismiss progress",
+            disabled: !props.canOperateThread || statusPending,
+            onPress: () => void runStatusAction("clear-progress"),
+          },
+        };
   const floatingStatus = ((): FloatingWorkingStatus | null => {
     const connectionStatus = connectionFloatingStatus({
       connectionError: connectionRetrying ? retryConnectionError : props.connectionError,
@@ -794,6 +820,15 @@ function ThreadDetailBody(
     if (props.isCompacting && contentPresentationKind === "ready") {
       return { kind: "compacting" };
     }
+    // An unfinished tracker says more than the working timer; a finished one
+    // waits until the thread is idle.
+    if (
+      progressStatus?.kind === "progress" &&
+      !progressStatus.complete &&
+      contentPresentationKind === "ready"
+    ) {
+      return progressStatus;
+    }
     if (props.activeWorkStartedAt !== null && contentPresentationKind === "ready") {
       return { kind: "working", startedAt: props.activeWorkStartedAt };
     }
@@ -846,6 +881,9 @@ function ThreadDetailBody(
           onPress: () => void runStatusAction(snoozed ? "wake" : settled ? "unsettle" : "dismiss"),
         },
       };
+    }
+    if (progressStatus !== null && contentPresentationKind === "ready") {
+      return progressStatus;
     }
     if (props.selectedThread.goal !== null && contentPresentationKind === "ready") {
       const goal = presentProviderGoal(props.selectedThread.goal, false);

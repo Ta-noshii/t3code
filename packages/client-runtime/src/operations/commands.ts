@@ -91,6 +91,7 @@ export interface DeleteThreadInput extends ThreadCommandInput {
 export type ArchiveThreadInput = ThreadCommandInput;
 export type UnarchiveThreadInput = ThreadCommandInput;
 export type SettleThreadInput = ThreadCommandInput;
+export type ClearThreadProgressInput = ThreadCommandInput;
 
 export interface UnsettleThreadInput extends ThreadCommandInput {
   readonly reason: "user";
@@ -424,6 +425,7 @@ function simpleThreadCommand(
     | "thread.pin"
     | "thread.unpin"
     | "thread.guest-share.close",
+    | "thread.progress.clear",
   input: ThreadCommandInput,
 ) {
   return allocateCommandId(input).pipe(
@@ -497,6 +499,13 @@ export const settleThread = Effect.fn("EnvironmentCommands.settleThread")(functi
   input: SettleThreadInput,
 ) {
   return yield* simpleThreadCommand("thread.settle", input);
+});
+
+/** Dismisses the agent progress tracker. An agent can start a new one later. */
+export const clearThreadProgress = Effect.fn("EnvironmentCommands.clearThreadProgress")(function* (
+  input: ClearThreadProgressInput,
+) {
+  return yield* simpleThreadCommand("thread.progress.clear", input);
 });
 
 export const pinThread = Effect.fn("EnvironmentCommands.pinThread")(function* (

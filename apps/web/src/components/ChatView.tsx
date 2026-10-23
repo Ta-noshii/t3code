@@ -322,6 +322,7 @@ import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEn
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { modelFallbackBannerItem } from "./chat/ComposerUsageLimits";
+import { AgentProgressStrip } from "./chat/AgentProgressStrip";
 import { useThreadRecap } from "./chat/useThreadRecap";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
@@ -461,6 +462,7 @@ export default function ChatView(props: ChatViewProps) {
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const clearThreadProgress = useOrchestrationCommand(threadEnvironment.clearProgress);
   const canWriteSourceControl = useEnvironmentScope(environmentId, AuthSourceControlWriteScope);
   const setThreadRuntimeMode = useOrchestrationCommand(threadEnvironment.setRuntimeMode, {
     reportFailure: false,
@@ -2680,6 +2682,23 @@ export default function ChatView(props: ChatViewProps) {
           dismissLabel: "Dismiss recap",
           onDismiss: threadRecap.dismiss,
         };
+  // Subagents report to the topmost parent, so a child thread has no tracker of its own.
+  const progressSummary = activeThreadShell?.progressSummary ?? null;
+  const progressStrip =
+    activeThreadShell && progressSummary !== null ? (
+      <AgentProgressStrip
+        key={activeThreadShell.id}
+        summary={progressSummary}
+        items={serverProjection?.thread.progress?.items ?? null}
+        dismissDisabled={!canOperateThread}
+        onDismiss={() =>
+          void clearThreadProgress({
+            environmentId,
+            input: { threadId: activeThreadShell.id },
+          })
+        }
+      />
+    ) : null;
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =
@@ -2761,7 +2780,7 @@ export default function ChatView(props: ChatViewProps) {
         },
       }),
     ];
-  })() as ComposerBannerStackItem[];
+  })();
 
   if (
     terminalUiLaunchContext !== null &&
@@ -3947,6 +3966,7 @@ export default function ChatView(props: ChatViewProps) {
                                   ? EMPTY_COMPOSER_BANNER_ITEMS
                                   : composerBannerItems
                               }
+                              progressStrip={isDraftHeroState ? null : progressStrip}
                               resumeCompactionTokens={resumeCompactionTokens}
                               keepFullHistory={keepFullHistory}
                               onToggleKeepFullHistory={toggleKeepFullHistoryStable}
