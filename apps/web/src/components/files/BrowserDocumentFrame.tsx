@@ -11,11 +11,13 @@ import {
   htmlRenderShortcutsMessage,
   htmlRenderThemeFragment,
   htmlRenderThemeMessage,
+  htmlRenderError,
   htmlRenderResult,
   readHtmlRenderContentHeight,
   readHtmlRenderImageRequest,
   readHtmlRenderKeyDown,
   readHtmlRenderLinkRequest,
+  readHtmlRenderMessageRequest,
 } from "@t3tools/shared/htmlRender";
 import {
   isMacPlatform,
@@ -121,6 +123,8 @@ export function HtmlRenderDocument(props: {
   readonly onContentHeight?: (height: number) => void;
   /** Reports the image viewer opening and closing, so a virtualized row can stay mounted. */
   readonly onFullscreenChange?: ((fullscreen: boolean) => void) | undefined;
+  /** Sends text as the reader's message in the thread, for the page's `window.t3.sendMessage`. */
+  readonly onSendMessage?: ((text: string) => Promise<void>) | undefined;
 }) {
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -230,6 +234,38 @@ export function HtmlRenderDocument(props: {
     window.addEventListener("message", openLink);
     return () => window.removeEventListener("message", openLink);
   }, []);
+  const sendMessage = useEffectEvent((text: string) => props.onSendMessage?.(text));
+  const canSendMessage = props.onSendMessage !== undefined;
+  // The page sends as the reader, so only right after the reader used it, as
+  // with links: a page cannot send on load or on a timer.
+  useEffect(() => {
+    const receive = (event: MessageEvent) => {
+      const frame = frameRef.current;
+      const request = readHtmlRenderMessageRequest(event.data);
+      if (request === undefined || frame === null || event.source !== frame.contentWindow) return;
+      const reply = (message: object) => frame.contentWindow?.postMessage(message, "*");
+      if (!canSendMessage) {
+        reply(htmlRenderError(request.id, "Messages can't be sent from here."));
+        return;
+      }
+      if (document.activeElement !== frame || navigator.userActivation?.isActive === false) {
+        reply(htmlRenderError(request.id, "Messages send only from a click in the page."));
+        return;
+      }
+      void Promise.resolve(sendMessage(request.text)).then(
+        () => reply(htmlRenderResult(request.id)),
+        (cause: unknown) =>
+          reply(
+            htmlRenderError(
+              request.id,
+              cause instanceof Error ? cause.message : "The message was not sent.",
+            ),
+          ),
+      );
+    };
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, [canSendMessage]);
   useEffect(() => {
     const replayKey = (event: MessageEvent) => {
       const frame = frameRef.current;
