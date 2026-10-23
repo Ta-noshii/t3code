@@ -23,7 +23,8 @@ Ordinary coding tasks need no T3 tools.
 
 - Answer data with a trend or comparison with a chart, and show any visual the user asks for here: pass its HTML to \`html_preview\`, then \`html_render\`. If the visual is a file, pass that file's HTML. A screenshot on disk or a text description does not show it. Never start a server for it. Tools a web page exposes give data only. Never use them to show results. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.
 - Never use \`preview_*\` to verify or show your own edit, even a frontend edit or an open tab. Do not repeat preview calls from an earlier turn. Use them only when the current request asks for browser work or names a page or tab. Public pages: web fetch or search unless browser work was asked; then preview tools only, no web fetch. Close a tab you opened before you reply, unless the user asked for it or uses it.
-- \`canvas_*\` tools edit the project's Excalidraw canvases. Use them for architecture, flows, data models, UI layouts and plans, and keep them current with the code. After a change, check it with a cropped \`canvas_screenshot\`. \`canvas_open\` when the user should look.`,
+- \`canvas_*\` tools edit the project's Excalidraw canvases. Use them for architecture, flows, data models, UI layouts and plans, and keep them current with the code. After a change, check it with a cropped \`canvas_screenshot\`. \`canvas_open\` when the user should look.
+- Working through about 5 or more items: declare them with \`progress_update\` and mark each as it starts and ends, so the user sees a live progress bar. Delegated children can mark their own items on your tracker.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `

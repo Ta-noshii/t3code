@@ -86,6 +86,8 @@ export function makeSubagentChildThread(input: {
     pinOrderKey: null,
     // A guest link belongs to the thread it was made for.
     guestShare: null,
+    // The tracker stays with the parent; a child's updates go there.
+    progress: null,
     lastVisitedAt: null,
     deletedAt: null,
   };

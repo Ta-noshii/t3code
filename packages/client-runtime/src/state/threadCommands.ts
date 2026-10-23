@@ -46,6 +46,7 @@ import {
   reorderActiveThread,
   setThreadAutoSettle,
   settleThread,
+  clearThreadProgress,
   snoozeThread,
   startThreadTurn,
   stopThreadSession,
@@ -164,6 +165,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     unsettle: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:unsettle",
       execute: unsettleThread,
+      scheduler,
+      concurrency,
+    }),
+    clearProgress: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:clear-progress",
+      execute: clearThreadProgress,
       scheduler,
       concurrency,
     }),
@@ -412,6 +419,10 @@ export function createThreadEnvironmentAtoms<R, E>(
             snoozedAt: now,
           },
     ),
+    clearProgress: optimistic.wrap(commands.clearProgress, (thread) => ({
+      ...thread,
+      progressSummary: null,
+    })),
     unsnooze: optimistic.wrap(commands.unsnooze, (thread) => ({
       ...thread,
       snoozedUntil: null,

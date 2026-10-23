@@ -5,6 +5,7 @@ import { requestCustomSnooze } from "../CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { useDeadlinePassed } from "~/hooks/useDeadline";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/client-runtime/thread-pull-requests";
+import { agentProgressFinished, isAgentProgressComplete } from "@t3tools/shared/agentProgress";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -777,6 +778,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         }
                       : null;
   const isWokeStatus = topStatus?.icon === "woke";
+  // An unfinished agent tracker reads better than a duration or a timestamp.
+  const progressCount =
+    thread.progressSummary != null && !isAgentProgressComplete(thread.progressSummary)
+      ? `${agentProgressFinished(thread.progressSummary)}/${thread.progressSummary.total}`
+      : null;
+  const progressCountLabel =
+    progressCount === null ? null : (
+      <span
+        aria-label={`Progress ${progressCount}`}
+        data-sidebar-progress-count="true"
+        className={cn(
+          "tabular-nums",
+          (thread.progressSummary?.failed ?? 0) > 0 && "text-destructive",
+        )}
+      >
+        {progressCount}
+      </span>
+    );
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
     effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
@@ -1487,7 +1506,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             BackgroundThreadAnnouncer and the open thread's
                             timeline speak status changes instead. */}
                           {topStatus.label}
-                          {status === "working" ? (
+                          {(status === "working" || status === "waiting") &&
+                          progressCountLabel !== null ? (
+                            progressCountLabel
+                          ) : status === "working" ? (
                             <span aria-hidden>
                               <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
                             </span>
@@ -1498,6 +1520,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           ) : null}
                         </span>
                       )
+                    ) : progressCountLabel !== null ? (
+                      progressCountLabel
                     ) : (
                       <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
                     )}

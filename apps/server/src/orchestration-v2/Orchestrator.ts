@@ -12,6 +12,7 @@ import {
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import { canonicalizeGitCafePullRequestUrl } from "@t3tools/source-control-definitions/registry";
 import { threadPullRequestsOf } from "../sourceControl/threadPullRequests.ts";
+import { applyAgentProgressUpdate } from "@t3tools/shared/agentProgress";
 import {
   normalizeThreadPullRequestKey,
   visibleThreadPullRequests,
@@ -497,6 +498,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.unpin":
     case "thread.pin.reorder":
     case "thread.active.reorder":
+    case "thread.progress.clear":
+    case "thread.progress.update":
     case "thread.visit":
     case "thread.mark-unread":
     case "thread.metadata.update":
@@ -11702,6 +11705,52 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  // Runs under the owner thread's dispatch lock, so concurrent subagent calls apply one at a
+  // time to the latest tracker instead of overwriting each other's precomputed state.
+  const dispatchThreadProgress = Effect.fn("Orchestrator.dispatchThreadProgress")(function* (
+    command: Extract<
+      OrchestrationV2ServerCommand,
+      { readonly type: "thread.progress.clear" | "thread.progress.update" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const thread = yield* projectionStore
+      .getThread(command.threadId)
+      .pipe(mapDispatchError(command));
+    if (thread.deletedAt !== null) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Thread ${command.threadId} is deleted.`,
+      });
+    }
+    const now = yield* DateTime.now;
+    const result = applyAgentProgressUpdate(
+      thread.progress,
+      command.type === "thread.progress.clear" ? { clear: true } : command.update,
+      DateTime.formatIso(now),
+    );
+    if (result._tag === "rejected") {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: result.message,
+      });
+    }
+    if (!result.changed) return;
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "thread.progress-updated",
+      threadId: command.threadId,
+      providerInstanceId: thread.providerInstanceId,
+      occurredAt: now,
+      // Progress is not thread activity: keeping updatedAt leaves sidebar order alone.
+      payload: { ...thread, progress: result.progress },
+    });
+  });
+
   /**
    * Thread lineage and fork origin are immutable, so this
    * is safe to read without holding either thread's dispatch lock.
@@ -12697,6 +12746,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.guest-message.dismiss":
         yield* dispatchGuestShare(command, events, effects);
         break;
+      case "thread.progress.clear":
+      case "thread.progress.update":
+        yield* dispatchThreadProgress(command, events);
+        break;
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);
         break;
@@ -13033,7 +13086,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command.type === "thread.stop" ||
           command.type === "subagent.stop" ||
           // Closing a share again, or after it ended, is not an error.
-          command.type === "thread.guest-share.close",
+          command.type === "thread.guest-share.close" ||
+          // An agent resending the tracker it already has, or a second dismiss, is not an error.
+          command.type === "thread.progress.update" ||
+          command.type === "thread.progress.clear",
         (_planned) =>
           new OrchestratorDispatchError({
             commandId: command.commandId,
