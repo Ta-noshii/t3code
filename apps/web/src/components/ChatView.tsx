@@ -2981,7 +2981,9 @@ export default function ChatView(props: ChatViewProps) {
 
     setIsCopyingThread(true);
     setThreadError(activeThread.id, null);
-    try {
+    // No try/catch here: the React Compiler can't lower a throw inside one, and a component
+    // it skips loses the memoizing that the render-time guards below rely on.
+    await (async () => {
       // Instance ids are per machine; the copy needs the same kind of provider there.
       const modelSelection = resolveCopyModelSelection({
         source: activeThread.modelSelection,
@@ -3108,14 +3110,13 @@ export default function ChatView(props: ChatViewProps) {
           params: buildThreadRouteParams(targetThreadRef),
         });
       }
-    } catch (error) {
+    })().catch((error: unknown) => {
       setThreadError(
         activeThread.id,
         error instanceof Error ? error.message : "Failed to copy this chat.",
       );
-    } finally {
-      setIsCopyingThread(false);
-    }
+    });
+    setIsCopyingThread(false);
   };
 
   const onCopyTargetSelected = (target: CopyTargetOption) => void onCopyToEnvironment(target);
