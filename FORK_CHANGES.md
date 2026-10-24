@@ -36,17 +36,9 @@ Features upstream lacks, rebuilt on upstream's v2 orchestrator (upstream PR #282
 - Not carried over: the Agents panel detail (upstream deleted the panel; subagent steps and results now show in the subagent's own thread), and the older-Claude-thread fork fix (threads imported from v1 keep no Claude session to cut).
 - Tests dropped in the 2026-10-24 upstream merge: upstream deleted about 11,000 tests (#22557), and the fork's additions to those test files went with them (canvas props in `RightPanelTabs.test.tsx`, the path grouping case in `environmentGrouping.test.ts`, and fork cases in `OrchestratorMcpService.test.ts`, `ClaudeAdapterV2.test.ts`, `CodexAdapterV2.test.ts`, `ProviderSessionManager.test.ts`, `WireProjection.test.ts` and `OrchestratorMcpToolkit.integration.test.ts`). The fork's tests in files upstream kept still run.
 
-### `fix/hyprland-snapshot-flight-sizing`
+### `fix/hyprland-snapshot-flight-sizing` and `fix/preview-viewport-main-zoom` (retired)
 
-Upstream PR [pingdotgg/t3code#11591](https://github.com/pingdotgg/t3code/pull/11591), carried until it merges. With capture animations on, the SnapShots flight from the window to the draft drew an oversized, stretched rectangle on Hyprland, because Hyprland 0.56.2 updates a surface's size only when a buffer is attached. The fix reattaches the capture buffer on every visible flight frame, while full damage stays gated on a texture change. CI test: `native/hyprland-snap-shot` `cargo test`.
-
-When the PR merges, delete the branch. The workflow skips branches that no longer exist, and commits upstream already has drop out as empty cherry-picks.
-
-### `fix/preview-viewport-main-zoom`
-
-Upstream PR [pingdotgg/t3code#14039](https://github.com/pingdotgg/t3code/pull/14039), carried until it merges. With the main window zoomed (View → Zoom In), the Browser panel's freeform and preset viewports rendered at the zoomed size (1280 measured as 1403), so every freeform `preview_resize` timed out and `preview_overflow_check` could not run. The fix sizes the webview by the main window's zoom factor so the page measures the requested CSS size.
-
-When the PR merges, delete the branch, as with the SnapShots fix above.
+Both are in upstream now, so the fork no longer applies them. Upstream closed [#11591](https://github.com/pingdotgg/t3code/pull/11591) and merged a different fix for the oversized SnapShots flight on Hyprland. [#14039](https://github.com/pingdotgg/t3code/pull/14039), the Browser panel viewport under main-window zoom, merged on 2026-10-19.
 
 ### `fix/timeline-scroll-listeners`
 
@@ -63,6 +55,22 @@ Based on `patch/edit-fork-v2`, since "Send all" needs its `queued-messages.send-
 Based on `patch/edit-fork-v2`, which changes the same timeline and composer code. Agents can end a message with a fenced block tagged `t3-replies`, one reply per line (at most four). Web and mobile hide the block and show the lines as buttons under the last assistant message once the turn has settled; they disappear when the next message is sent. On web a click queues the reply as the next message and Shift+click puts it in the composer. On mobile a tap queues it through the outbox, leaving the draft alone, and a long press puts it in the composer. The copy button leaves the block out. Every provider learns the syntax from the shared runtime instructions (`packages/provider-core/src/server/runtimeInstructions.ts`); the parser is `packages/shared/src/suggestedReplies.ts`. `nowbar` carries the same commit for the app.
 
 Agents can also turn a phrase in their prose into a reply link, `[the tracklist](t3-reply:)`, which sends its label when clicked; a link title (`[the director](t3-reply: "Who directed it?")`) sends the title instead. The instructions ask for two or three of these as follow-up topics at the end of explanatory answers. Web shows them as underlined buttons with a reply arrow (Shift+click edits first); mobile sends on tap. `normalizeInlineReplyLinks` moves the reply into the href before rendering, since the mobile renderer only reports hrefs, and the sanitizer in `markdownPipeline.ts` allows the `t3-reply` scheme.
+
+### `feat/codex-review-effort`
+
+`codex_review` takes an `effort`, medium by default. Codex's `review/start` carries no effort of its own, so the adapter starts the review thread with `model_reasoning_effort` set. It reads the option off the model selection itself, because upstream made its helper for this module-private.
+
+### `patch/agent-progress`
+
+A `progress_update` MCP tool lets an agent declare a list of items and mark each one pending, running, done, failed or skipped. The thread shows it as a progress bar. Updates merge per item id, so subagents started with `delegate_task` can report on their parent's tracker out of order; their calls go to the topmost thread in the subagent lineage. Forks keep their own tracker. The tracker is event-sourced as `thread.progress-updated`.
+
+### `patch/html-render-messages`
+
+Pages shown with `html_render` get `window.t3.sendMessage(text)`, which queues the text as the user's next message. Web and desktop accept it only right after the user used the frame; mobile asks first. A widget that asks the user to choose can send the answer back instead of the user copying it.
+
+### `fix/chatview-react-compiler`
+
+Upstream relies on React Compiler to memoize ChatView and has no hand-written `useMemo` there. The compiler skips a whole component when it meets a `throw` inside `try/catch` or a `try/finally`, and the fork's "edit in new thread" and "copy to another machine" handlers had both. Without memoization, `useIncrementalTimelineEntries` and `useWorktreeSetup` set state on every render, and every draft crashed with React error #301. The handlers now run their body in an inner async function and catch errors with `.catch()`. The fix was lost once in a reconcile (0.1.3-nightly.20261023.3592), so check that ChatView still compiles after each reconcile.
 
 ## Android (on `nowbar`)
 
