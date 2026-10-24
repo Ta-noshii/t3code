@@ -6,7 +6,7 @@ import {
   type HtmlRenderReference,
 } from "@t3tools/shared/htmlRender";
 import { Maximize2Icon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAssetUrlRefresh } from "~/assets/assetUrls";
 import { useLongLivedAssetUrl } from "~/assets/longLivedAssetUrls";
@@ -67,12 +67,17 @@ export function HtmlRenderFrame(props: {
     onFullscreenChange?.(true);
     return () => onFullscreenChange?.(false);
   }, [expanded, onFullscreenChange]);
+  const stateKey = `${props.environmentId}:${attachmentId}`;
+  // The inline page reloads after the full-screen one saved, so it shows that state.
+  const [inlineGeneration, setInlineGeneration] = useState(0);
+  const expandedSaved = useRef(false);
 
   return (
     <div ref={observeBox} className="group/html-render relative" style={{ height }}>
       {src !== null ? (
         <>
           <HtmlRenderDocument
+            key={inlineGeneration}
             src={src}
             title={title}
             threadRef={props.threadRef}
@@ -80,6 +85,7 @@ export function HtmlRenderFrame(props: {
             onContentHeight={setContentHeight}
             onFullscreenChange={onFullscreenChange}
             onSendMessage={props.onSendMessage}
+            stateKey={stateKey}
           />
           <div className="absolute end-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100">
             <Tooltip>
@@ -94,8 +100,10 @@ export function HtmlRenderFrame(props: {
                         loaded !== null && loaded.expiresAt - Date.now() > MIN_URL_LIFE_MS
                           ? src
                           : await refresh().catch(() => null);
-                      if (url !== null) setExpandedSrc(url);
-                      else
+                      if (url !== null) {
+                        expandedSaved.current = false;
+                        setExpandedSrc(url);
+                      } else
                         toastManager.add({
                           type: "error",
                           title: "Page unavailable",
@@ -115,7 +123,19 @@ export function HtmlRenderFrame(props: {
               src={expandedSrc}
               title={title}
               threadRef={props.threadRef}
-              onClose={() => setExpandedSrc(null)}
+              stateKey={stateKey}
+              onStateSaved={() => {
+                expandedSaved.current = true;
+              }}
+              onClose={() => {
+                setExpandedSrc(null);
+                // The full-screen URL is the freshest; the inline one may have expired.
+                // Its expiry is unknown here, so the next full screen mints a fresh one.
+                if (expandedSaved.current) {
+                  setLoaded({ src: expandedSrc, expiresAt: 0 });
+                  setInlineGeneration((value) => value + 1);
+                }
+              }}
             />
           ) : null}
         </>
