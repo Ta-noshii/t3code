@@ -242,9 +242,10 @@ track progress".
 
 Subagents the agent delegates to update the same bar on the parent thread, so
 the thread you started shows the whole job. On web and desktop, click the bar to
-list the items. The sidebar and the mobile thread list show the count, such as
-`23/50`, while work remains. Dismissing the bar removes it; the agent can start
-a new one later.
+list the items. While work remains, the sidebar row's status icon becomes a
+ring that fills as items finish, with failed items in red, and the mobile thread
+list shows the count, such as `23/50`, in place of the timestamp. Dismissing
+the bar removes it; the agent can start a new one later.
 
 ## Snooze until later
 

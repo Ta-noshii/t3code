@@ -3,7 +3,8 @@ import { ThreadTerminalStatusButton } from "../ThreadStatusIndicators";
 import { discardComposerDraft } from "../../lib/discardComposerDraft";
 import { requestCustomSnooze } from "../CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
-import { agentProgressFinished, isAgentProgressComplete } from "@t3tools/shared/agentProgress";
+import { isAgentProgressComplete } from "@t3tools/shared/agentProgress";
+import { SidebarProgressRing } from "./SidebarProgressRing";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -700,24 +701,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       }
                     : null;
   const isWokeStatus = topStatus?.icon === "woke";
-  // An unfinished agent tracker reads better than a duration or a timestamp.
-  const progressCount =
+  // An unfinished agent tracker turns the status icon into a progress ring.
+  const activeProgress =
     thread.progressSummary != null && !isAgentProgressComplete(thread.progressSummary)
-      ? `${agentProgressFinished(thread.progressSummary)}/${thread.progressSummary.total}`
+      ? thread.progressSummary
       : null;
-  const progressCountLabel =
-    progressCount === null ? null : (
-      <span
-        aria-label={`Progress ${progressCount}`}
-        data-sidebar-progress-count="true"
-        className={cn(
-          "tabular-nums",
-          (thread.progressSummary?.failed ?? 0) > 0 && "text-destructive",
-        )}
-      >
-        {progressCount}
-      </span>
-    );
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
     effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
@@ -1348,7 +1336,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             topStatus.className,
                           )}
                         >
-                          {topStatus.icon === "working" ? (
+                          {activeProgress !== null &&
+                          (topStatus.icon === "working" || topStatus.icon === "waiting") ? (
+                            <SidebarProgressRing summary={activeProgress} />
+                          ) : topStatus.icon === "working" ? (
                             <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "waiting" ? (
                             <CircleDotDashedIcon aria-hidden className="size-4 shrink-0" />
@@ -1369,10 +1360,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           <span role={props.isRouteThread ? undefined : "status"}>
                             {topStatus.label}
                           </span>
-                          {(status === "working" || status === "waiting") &&
-                          progressCountLabel !== null ? (
-                            progressCountLabel
-                          ) : status === "working" ? (
+                          {status === "working" ? (
                             <span aria-hidden>
                               <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
                             </span>
@@ -1383,8 +1371,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           ) : null}
                         </span>
                       )
-                    ) : progressCountLabel !== null ? (
-                      progressCountLabel
+                    ) : activeProgress !== null ? (
+                      <span className="inline-flex items-center gap-1">
+                        <SidebarProgressRing summary={activeProgress} />
+                        <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
+                      </span>
                     ) : (
                       <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
                     )}
