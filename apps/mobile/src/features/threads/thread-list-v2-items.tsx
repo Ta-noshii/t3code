@@ -748,7 +748,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const rowAccessibilityLabel = `${thread.title}${props.hasQueuedMessages ? ", messages queued to send" : ""}${isRegeneratingTitle ? ", regenerating title" : ""}`;
   const timeLabel = props.timeLabel;
-  // An unfinished agent tracker reads better than a duration or a timestamp.
+  // An unfinished agent tracker's count takes the timestamp's place.
   const progressCount =
     thread.progressSummary != null && !isAgentProgressComplete(thread.progressSummary)
       ? `${agentProgressFinished(thread.progressSummary)}/${thread.progressSummary.total}`
@@ -1207,9 +1207,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 )}
               >
                 {statusLabel.label}
-                {(status === "working" || status === "waiting") && progressCount !== null ? (
-                  ` ${progressCount}`
-                ) : status === "working" ? (
+                {status === "working" ? (
                   <ThreadListV2Duration startedAt={resolveThreadWorkingStartedAt(thread)} />
                 ) : status === "waiting" ? (
                   <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
