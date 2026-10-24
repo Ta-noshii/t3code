@@ -18,7 +18,10 @@ import {
   readHtmlRenderKeyDown,
   readHtmlRenderLinkRequest,
   readHtmlRenderMessageRequest,
+  readHtmlRenderStateRequest,
+  htmlRenderStateResult,
 } from "@t3tools/shared/htmlRender";
+import { applyHtmlRenderStateRequest } from "@t3tools/shared/htmlRenderState";
 import {
   isMacPlatform,
   matchesKeybindingShortcut,
@@ -151,6 +154,10 @@ export function HtmlRenderDocument(props: {
   readonly onFullscreenChange?: ((fullscreen: boolean) => void) | undefined;
   /** Sends text as the reader's message in the thread, for the page's `window.t3.sendMessage`. */
   readonly onSendMessage?: ((text: string) => Promise<void>) | undefined;
+  /** Names the render whose state the page's `window.t3.saveState` keeps; without it, saving fails. */
+  readonly stateKey?: string | undefined;
+  /** Reports that the page saved or cleared its state. */
+  readonly onStateSaved?: (() => void) | undefined;
 }) {
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -249,6 +256,27 @@ export function HtmlRenderDocument(props: {
     const height = readHtmlRenderContentHeight(event.data);
     if (height !== undefined) {
       props.onContentHeight?.(height);
+      return;
+    }
+    // The frame's opaque origin has no storage, so the app keeps the page's state in its own
+    // localStorage, one entry per render. Unlike sending, saving needs no click: a page saves as
+    // the reader types, and only its own entry.
+    const stateRequest = readHtmlRenderStateRequest(event.data);
+    if (stateRequest !== undefined) {
+      const reply = (message: object) => frame.contentWindow?.postMessage(message, "*");
+      if (props.stateKey === undefined) {
+        reply(htmlRenderError(stateRequest.id, "Saving isn't available here."));
+        return;
+      }
+      let value: string | null;
+      try {
+        value = applyHtmlRenderStateRequest(localStorage, props.stateKey, stateRequest);
+      } catch {
+        reply(htmlRenderError(stateRequest.id, "The state could not be saved."));
+        return;
+      }
+      reply(htmlRenderStateResult(stateRequest.id, value));
+      if (stateRequest.op === "set") props.onStateSaved?.();
       return;
     }
     // The page sends as the reader, so only right after the reader used it, as with links.

@@ -294,6 +294,11 @@ export function AttachmentFileScreen(props: AttachmentFileScreenProps) {
         name={params.name}
         environmentId={environmentId}
         htmlRender={params.htmlRender === "1"}
+        stateKey={
+          params.htmlRender === "1" && environmentId
+            ? `${environmentId}:${params.attachmentId}`
+            : undefined
+        }
         nativeViewer={nativeViewer}
         nativeError={nativeError}
         onOpenNative={() => {
