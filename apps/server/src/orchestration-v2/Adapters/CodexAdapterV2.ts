@@ -43,11 +43,7 @@ import {
   dynamicToolSurface,
   dynamicToolTitle,
 } from "@t3tools/shared/toolActivity";
-import {
-  getModelSelectionStringOptionValue,
-  getProviderOptionStringSelectionValue,
-  modelSelectionsEqual,
-} from "@t3tools/shared/model";
+import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import type {
   ChatAttachment,
@@ -1375,16 +1371,15 @@ export function codexThreadRuntimeParams(input: {
   const { mcpSession } = input;
   // turn/start carries the effort for ordinary turns, but review/start takes
   // none and runs at the thread's, so a thread starts at the selected one.
-  const effort = getProviderOptionStringSelectionValue(
-    input.modelSelection?.options,
-    "reasoningEffort",
-  );
+  const effort = input.modelSelection?.options?.find(
+    (option) => option.id === "reasoningEffort",
+  )?.value;
   return {
     ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
     config: {
       ...CODEX_THREAD_CONFIG,
-      ...(effort === undefined ? {} : { model_reasoning_effort: effort }),
+      ...(typeof effort === "string" ? { model_reasoning_effort: effort } : {}),
       ...(mcpSession === undefined
         ? {}
         : {
