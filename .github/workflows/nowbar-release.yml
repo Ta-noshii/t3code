@@ -107,7 +107,9 @@ jobs:
         if: steps.source.outputs.build == 'true'
         run: |
           node --test apps/mobile/plugins/withNowBarFork.test.cjs
-          vp test run apps/mobile/src/features/nowbar/model.test.ts apps/mobile/src/features/nowbar/update-manifest.test.ts apps/mobile/src/features/nowbar/debug.test.ts apps/mobile/src/lib/appLinking.test.ts
+          # From apps/mobile, so only the mobile test config loads: a run from the
+          # root loads every package's config, and this job installs mobile only.
+          (cd apps/mobile && vp test run src/features/nowbar/model.test.ts src/features/nowbar/update-manifest.test.ts src/features/nowbar/debug.test.ts src/lib/appLinking.test.ts)
           (cd apps/mobile && node_modules/.bin/tsc --noEmit)
 
       - name: Configure Firebase for this fork
