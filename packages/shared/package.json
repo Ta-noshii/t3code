@@ -143,6 +143,10 @@
       "types": "./src/htmlRender.ts",
       "import": "./src/htmlRender.ts"
     },
+    "./htmlRenderState": {
+      "types": "./src/htmlRenderState.ts",
+      "import": "./src/htmlRenderState.ts"
+    },
     "./favicon": {
       "types": "./src/favicon.ts",
       "import": "./src/favicon.ts"

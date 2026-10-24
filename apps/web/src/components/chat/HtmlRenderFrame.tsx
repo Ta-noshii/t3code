@@ -63,6 +63,10 @@ export function HtmlRenderFrame(props: {
     return () => onFullscreenChange?.(false);
   }, [expandedSrc, onFullscreenChange]);
   const [failed, setFailed] = useState(false);
+  const stateKey = `${props.environmentId}:${attachmentId}`;
+  // The inline page reloads after the full-screen one saved, so it shows that state.
+  const [inlineGeneration, setInlineGeneration] = useState(0);
+  const expandedSaved = useRef(false);
   const assetUrl = useAssetUrlState(src === null ? props.environmentId : null, resource);
   const cachedUrl = assetUrl._tag === "Success" ? assetUrl.url : null;
   const cachedExpiresAt = assetUrl._tag === "Success" ? assetUrl.expiresAt : 0;
@@ -96,6 +100,7 @@ export function HtmlRenderFrame(props: {
       {src !== null ? (
         <>
           <HtmlRenderDocument
+            key={inlineGeneration}
             src={src}
             title={title}
             threadRef={props.threadRef}
@@ -103,6 +108,7 @@ export function HtmlRenderFrame(props: {
             onContentHeight={setContentHeight}
             onFullscreenChange={onFullscreenChange}
             onSendMessage={props.onSendMessage}
+            stateKey={stateKey}
           />
           <div className="absolute end-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100">
             <Tooltip>
@@ -117,8 +123,10 @@ export function HtmlRenderFrame(props: {
                         srcExpiresAt.current - Date.now() > MIN_URL_LIFE_MS
                           ? src
                           : await refresh().catch(() => null);
-                      if (url !== null) setExpandedSrc(url);
-                      else
+                      if (url !== null) {
+                        expandedSaved.current = false;
+                        setExpandedSrc(url);
+                      } else
                         toastManager.add({
                           type: "error",
                           title: "Page unavailable",
@@ -138,7 +146,18 @@ export function HtmlRenderFrame(props: {
               src={expandedSrc}
               title={title}
               threadRef={props.threadRef}
-              onClose={() => setExpandedSrc(null)}
+              stateKey={stateKey}
+              onStateSaved={() => {
+                expandedSaved.current = true;
+              }}
+              onClose={() => {
+                setExpandedSrc(null);
+                // The full-screen URL is the freshest; the inline one may have expired.
+                if (expandedSaved.current) {
+                  setSrc(expandedSrc);
+                  setInlineGeneration((value) => value + 1);
+                }
+              }}
             />
           ) : null}
         </>
