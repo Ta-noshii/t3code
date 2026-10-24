@@ -7,7 +7,10 @@ import {
   readHtmlRenderImageRequest,
   readHtmlRenderLinkRequest,
   readHtmlRenderMessageRequest,
+  readHtmlRenderStateRequest,
+  htmlRenderStateResult,
 } from "./htmlRender.ts";
+import { applyHtmlRenderStateRequest, HTML_RENDER_STATE_MAX_ENTRIES } from "./htmlRenderState.ts";
 import { htmlRenderFromToolItem } from "./toolOutput.ts";
 
 const reference = { attachmentId: "thread-abc-123.html", title: "Chart", height: 420 };
@@ -132,35 +135,40 @@ describe("readHtmlRenderMessageRequest", () => {
   });
 });
 
-describe("window.t3.sendMessage", () => {
-  // Runs the injected bootstrap against a minimal framed window.
-  const framedPage = () => {
-    const script = /<script>([\s\S]*?)<\/script>/.exec(injectHtmlRenderBootstrap("<p>x</p>"))![1]!;
-    const listeners: Array<(event: { data: unknown; source: unknown }) => void> = [];
-    const posted: unknown[] = [];
-    const parent = { postMessage: (message: unknown) => posted.push(message) };
-    const window: Record<string, unknown> = {
-      parent,
-      addEventListener: (type: string, listener: (typeof listeners)[number]) => {
-        if (type === "message") listeners.push(listener);
-      },
-    };
-    NodeVM.runInNewContext(script, {
-      window,
-      document: {
-        getElementById: () => ({ textContent: "" }),
-        addEventListener: () => undefined,
-        documentElement: {},
-      },
-      location: { hash: "", pathname: "/", search: "" },
-      history: { replaceState: () => undefined },
-    });
-    const t3 = window.t3 as { sendMessage: (text: unknown) => Promise<void> };
-    const deliver = (data: unknown, source: unknown = parent) =>
-      listeners.forEach((listener) => listener({ data, source }));
-    return { t3, posted, deliver };
+// Runs the injected bootstrap against a minimal framed window.
+const framedPage = () => {
+  const script = /<script>([\s\S]*?)<\/script>/.exec(injectHtmlRenderBootstrap("<p>x</p>"))![1]!;
+  const listeners: Array<(event: { data: unknown; source: unknown }) => void> = [];
+  const posted: unknown[] = [];
+  const parent = { postMessage: (message: unknown) => posted.push(message) };
+  const window: Record<string, unknown> = {
+    parent,
+    addEventListener: (type: string, listener: (typeof listeners)[number]) => {
+      if (type === "message") listeners.push(listener);
+    },
   };
+  NodeVM.runInNewContext(script, {
+    window,
+    document: {
+      getElementById: () => ({ textContent: "" }),
+      addEventListener: () => undefined,
+      documentElement: {},
+    },
+    location: { hash: "", pathname: "/", search: "" },
+    history: { replaceState: () => undefined },
+  });
+  const t3 = window.t3 as {
+    sendMessage: (text: unknown) => Promise<void>;
+    loadState: () => Promise<unknown>;
+    saveState: (value: unknown) => Promise<void>;
+    clearState: () => Promise<void>;
+  };
+  const deliver = (data: unknown, source: unknown = parent) =>
+    listeners.forEach((listener) => listener({ data, source }));
+  return { t3, posted, deliver };
+};
 
+describe("window.t3.sendMessage", () => {
   it("posts a ui/message request and settles on the client's reply", async () => {
     const page = framedPage();
     const sent = page.t3.sendMessage("Fix it");
@@ -181,6 +189,75 @@ describe("window.t3.sendMessage", () => {
     const page = framedPage();
     await expect(page.t3.sendMessage("  ")).rejects.toThrow("The message is empty.");
     expect(page.posted).toEqual([]);
+  });
+});
+
+describe("window.t3 state", () => {
+  const memoryStorage = () => {
+    const items = new Map<string, string>();
+    return {
+      items,
+      getItem: (key: string) => items.get(key) ?? null,
+      setItem: (key: string, value: string) => void items.set(key, value),
+      removeItem: (key: string) => void items.delete(key),
+    };
+  };
+  // Answers the page's state requests the way a client does.
+  const serve = (
+    page: ReturnType<typeof framedPage>,
+    storage: ReturnType<typeof memoryStorage>,
+  ) => {
+    const request = readHtmlRenderStateRequest(page.posted.at(-1));
+    if (request === undefined) throw new Error("No state request");
+    page.deliver(
+      htmlRenderStateResult(
+        request.id,
+        applyHtmlRenderStateRequest(storage, "env:render", request),
+      ),
+    );
+  };
+
+  it("saves, loads and clears a JSON value through the client", async () => {
+    const page = framedPage();
+    const storage = memoryStorage();
+    expect(page.t3.loadState).toBeTypeOf("function");
+    const empty = page.t3.loadState();
+    serve(page, storage);
+    await expect(empty).resolves.toBeNull();
+
+    const saved = page.t3.saveState({ notes: "half typed", picked: [2, 5] });
+    serve(page, storage);
+    await expect(saved).resolves.toBeUndefined();
+
+    // A reloaded page reads it back.
+    const reloaded = framedPage();
+    const loaded = reloaded.t3.loadState();
+    serve(reloaded, storage);
+    await expect(loaded).resolves.toEqual({ notes: "half typed", picked: [2, 5] });
+
+    const cleared = reloaded.t3.clearState();
+    serve(reloaded, storage);
+    await cleared;
+    const after = reloaded.t3.loadState();
+    serve(reloaded, storage);
+    await expect(after).resolves.toBeNull();
+  });
+
+  it("rejects a value too large to save without asking the client", async () => {
+    const page = framedPage();
+    await expect(page.t3.saveState("x".repeat(100_001))).rejects.toThrow("too large");
+    expect(page.posted).toEqual([]);
+  });
+
+  it("drops the state saved longest ago past the entry limit", () => {
+    const storage = memoryStorage();
+    for (let index = 0; index <= HTML_RENDER_STATE_MAX_ENTRIES; index += 1) {
+      applyHtmlRenderStateRequest(storage, `render-${index}`, { id: index, op: "set", value: "1" });
+    }
+    const get = (key: string) => applyHtmlRenderStateRequest(storage, key, { id: 0, op: "get" });
+    expect(get("render-0")).toBeNull();
+    expect(get("render-1")).toBe("1");
+    expect(get(`render-${HTML_RENDER_STATE_MAX_ENTRIES}`)).toBe("1");
   });
 });
 

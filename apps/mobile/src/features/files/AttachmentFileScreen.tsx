@@ -56,6 +56,8 @@ function AttachmentDocumentBody(props: {
   readonly name: string;
   readonly environmentId: EnvironmentId | null;
   readonly htmlRender: boolean;
+  /** Names the render whose `window.t3.saveState` state the page keeps. */
+  readonly stateKey: string | undefined;
   readonly nativeViewer: "pending" | "open" | "unavailable" | null;
   readonly nativeError: string | null;
   readonly onOpenNative: () => void;
@@ -144,7 +146,13 @@ function AttachmentDocumentBody(props: {
   }
   if (document.kind === "html") {
     return props.htmlRender ? (
-      <HtmlRenderWebView key={document.uri} uri={document.uri} title={props.name} nested={false} />
+      <HtmlRenderWebView
+        key={document.uri}
+        uri={document.uri}
+        title={props.name}
+        nested={false}
+        stateKey={props.stateKey}
+      />
     ) : (
       <WorkspaceFileWebPreview uri={document.uri} />
     );
@@ -388,6 +396,11 @@ export function AttachmentFileScreen(props: AttachmentFileScreenProps) {
         name={params.name}
         environmentId={environmentId}
         htmlRender={params.htmlRender === "1"}
+        stateKey={
+          params.htmlRender === "1" && environmentId
+            ? `${environmentId}:${params.attachmentId}`
+            : undefined
+        }
         nativeViewer={nativeViewer}
         nativeError={nativeError}
         onOpenNative={() => {

@@ -10,9 +10,13 @@ import {
   htmlRenderThemeMessage,
   htmlRenderResult,
   readHtmlRenderMessageRequest,
+  readHtmlRenderStateRequest,
+  htmlRenderStateResult,
   type HtmlRenderReference,
   type HtmlRenderTheme,
 } from "@t3tools/shared/htmlRender";
+import { applyHtmlRenderStateRequest } from "@t3tools/shared/htmlRenderState";
+import { Storage } from "expo-sqlite/kv-store";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Platform, Pressable, View, type ColorValue } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
@@ -101,6 +105,15 @@ const confirmSend = (text: string) =>
 
 const withoutFragment = (url: string) => url.split("#", 1)[0];
 
+// A page's `window.t3.saveState` state, kept on the device like web's localStorage.
+const htmlRenderStateStorage = {
+  getItem: (key: string) => Storage.getItemSync(key),
+  setItem: (key: string, value: string) => Storage.setItemSync(key, value),
+  removeItem: (key: string) => {
+    Storage.removeItemSync(key);
+  },
+};
+
 export function HtmlRenderWebView(props: {
   readonly uri: string;
   readonly title: string;
@@ -108,6 +121,8 @@ export function HtmlRenderWebView(props: {
   readonly onLoadError?: () => void;
   /** Sends the page's `window.t3.sendMessage` text as the reader's next message. */
   readonly onSendMessage?: (text: string) => Promise<void>;
+  /** Names the render whose `window.t3.saveState` state the page keeps; without it, saving fails. */
+  readonly stateKey?: string | undefined;
 }) {
   const theme = useHtmlRenderTheme();
   const [initialTheme] = useState(theme);
@@ -144,6 +159,24 @@ export function HtmlRenderWebView(props: {
     const next = readOverflowMessage(message);
     if (next !== null) {
       setOverflow(next);
+      return;
+    }
+    const stateRequest = readHtmlRenderStateRequest(message);
+    if (stateRequest !== undefined) {
+      if (props.stateKey === undefined) {
+        reply(htmlRenderError(stateRequest.id, "Saving isn't available here."));
+        return;
+      }
+      try {
+        reply(
+          htmlRenderStateResult(
+            stateRequest.id,
+            applyHtmlRenderStateRequest(htmlRenderStateStorage, props.stateKey, stateRequest),
+          ),
+        );
+      } catch {
+        reply(htmlRenderError(stateRequest.id, "The state could not be saved."));
+      }
       return;
     }
     const request = readHtmlRenderMessageRequest(message);
@@ -295,6 +328,7 @@ export function ThreadHtmlRender(props: {
             nested
             onLoadError={handleLoadError}
             onSendMessage={sendMessage}
+            stateKey={`${props.environmentId}:${attachmentId}`}
           />
         ) : failed || asset._tag === "Failure" ? (
           <Pressable

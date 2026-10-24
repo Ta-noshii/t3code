@@ -18,7 +18,10 @@ import {
   readHtmlRenderKeyDown,
   readHtmlRenderLinkRequest,
   readHtmlRenderMessageRequest,
+  readHtmlRenderStateRequest,
+  htmlRenderStateResult,
 } from "@t3tools/shared/htmlRender";
+import { applyHtmlRenderStateRequest } from "@t3tools/shared/htmlRenderState";
 import {
   isMacPlatform,
   matchesKeybindingShortcut,
@@ -125,6 +128,10 @@ export function HtmlRenderDocument(props: {
   readonly onFullscreenChange?: ((fullscreen: boolean) => void) | undefined;
   /** Sends text as the reader's message in the thread, for the page's `window.t3.sendMessage`. */
   readonly onSendMessage?: ((text: string) => Promise<void>) | undefined;
+  /** Names the render whose state the page's `window.t3.saveState` keeps; without it, saving fails. */
+  readonly stateKey?: string | undefined;
+  /** Reports that the page saved or cleared its state. */
+  readonly onStateSaved?: (() => void) | undefined;
 }) {
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -266,6 +273,37 @@ export function HtmlRenderDocument(props: {
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
   }, [canSendMessage]);
+  // The frame's opaque origin has no storage, so the app keeps the page's
+  // state in its own localStorage, one entry per render. Unlike sending, saving
+  // needs no click: a page saves as the reader types, and only its own entry.
+  const { stateKey } = props;
+  const stateSaved = useEffectEvent(() => props.onStateSaved?.());
+  useEffect(() => {
+    const receive = (event: MessageEvent) => {
+      const frame = frameRef.current;
+      const request = readHtmlRenderStateRequest(event.data);
+      if (request === undefined || frame === null || event.source !== frame.contentWindow) return;
+      const reply = (message: object) => frame.contentWindow?.postMessage(message, "*");
+      if (stateKey === undefined) {
+        reply(htmlRenderError(request.id, "Saving isn't available here."));
+        return;
+      }
+      try {
+        reply(
+          htmlRenderStateResult(
+            request.id,
+            applyHtmlRenderStateRequest(localStorage, stateKey, request),
+          ),
+        );
+      } catch {
+        reply(htmlRenderError(request.id, "The state could not be saved."));
+        return;
+      }
+      if (request.op === "set") stateSaved();
+    };
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, [stateKey]);
   useEffect(() => {
     const replayKey = (event: MessageEvent) => {
       const frame = frameRef.current;
