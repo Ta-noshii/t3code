@@ -6,14 +6,14 @@ import { useCallback, useMemo } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { SymbolView } from "../../components/AppSymbol";
-import { AppText as Text } from "../../components/AppText";
-import { showConfirmDialog, showTextInputDialog } from "../../components/ConfirmDialogHost";
-import { ControlPillMenu } from "../../components/ControlPillMenu";
-import { EmptyState } from "../../components/EmptyState";
-import { MaterialScreenContent } from "../../components/MaterialScreenContent";
-import { ScreenHeader } from "../../components/ScreenHeader";
-import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import * as Dialog from "../../components/ui/Dialog";
+import { Menu } from "../../components/ui/Menu";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { ScreenContent } from "../../components/ui/ScreenContent";
+import { AppBar } from "../../components/ui/AppBar";
+import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/time";
 import { canvasEnvironment, useCanvasEvents } from "../../state/canvas";
@@ -114,14 +114,14 @@ function CanvasRow(props: {
   );
   if (!props.canEdit) return row;
   return (
-    <ControlPillMenu
+    <Menu
       shouldOpenOnLongPress
       title={canvas.title}
       actions={rowActions(canvas, props.groups)}
       onPressAction={({ nativeEvent }) => props.onAction(nativeEvent.event)}
     >
       {row}
-    </ControlPillMenu>
+    </Menu>
   );
 }
 
@@ -166,7 +166,7 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
   const groupNames = groups.map((group) => group.name);
 
   const startNew = (group = "") =>
-    showTextInputDialog({
+    Dialog.prompt({
       title: group === "" ? "New canvas" : `New canvas in ${group}`,
       initialValue: "",
       confirmText: "Create",
@@ -184,7 +184,7 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
 
   /** Asks for a folder name, then hands it to `then`. */
   const askFolder = (then: (group: string) => void) =>
-    showTextInputDialog({
+    Dialog.prompt({
       title: "New folder",
       initialValue: "",
       confirmText: "Next",
@@ -201,7 +201,7 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
 
   const runAction = (canvas: CanvasSummary, action: string) => {
     if (action === "rename") {
-      showTextInputDialog({
+      Dialog.prompt({
         title: "Rename canvas",
         initialValue: canvas.title,
         confirmText: "Rename",
@@ -217,7 +217,7 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
     } else if (action === "move-new") {
       askFolder((group) => move(canvas, group));
     } else if (action === "delete") {
-      showConfirmDialog({
+      Dialog.confirm({
         title: `Delete "${canvas.title}"?`,
         message: `${canvas.displayPath} will be removed from the project.`,
         confirmText: "Delete",
@@ -232,7 +232,7 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
   const folder = list.data?.folder ?? ".canvases";
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      <ScreenHeader
+      <AppBar
         title="Canvases"
         subtitle={project?.title}
         sidebar={false}
@@ -251,7 +251,7 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
             : undefined
         }
       />
-      <MaterialScreenContent>
+      <ScreenContent>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           showsVerticalScrollIndicator={false}
@@ -338,7 +338,7 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
             </>
           )}
         </ScrollView>
-      </MaterialScreenContent>
+      </ScreenContent>
     </View>
   );
 }

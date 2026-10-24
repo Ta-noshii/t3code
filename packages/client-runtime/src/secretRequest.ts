@@ -5,7 +5,6 @@ export type SecretRequestItem = Extract<
   { readonly type: "secret_request" }
 >;
 
-/** Shown under the field: the one promise the card makes about the value. */
 export const SECRET_REQUEST_PRIVACY_NOTE = "Stored securely, never shown to the agent";
 export const SECRET_REQUEST_DEFAULT_PLACEHOLDER = "Paste the secret";
 
@@ -129,13 +128,11 @@ export function secretRequestAnswerInput(
   return { threadId: item.threadId, turnItemId: item.id, answer: { type: "save", secret } };
 }
 
-/** Failures whose message is written for the user and never echoes the request payload. */
 const USER_FACING_FAILURE_TAGS = new Set(["SecretRequestError", "EnvironmentAuthorizationError"]);
 
 /**
- * Inline error copy for a failed answer. Only known server errors pass their
- * message through: anything else (transport or encoding failures) gets the
- * generic copy, so the typed value can never surface in the UI.
+ * Only known server errors pass their message through: anything else (transport or encoding
+ * failures) gets the generic copy, so the typed value can never surface in the UI.
  */
 export function secretRequestFailureMessage(failure: unknown): string {
   if (

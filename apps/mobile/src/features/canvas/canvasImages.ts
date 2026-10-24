@@ -1,4 +1,5 @@
-import { pickComposerImages, renderPhotoAsJpeg } from "../../lib/composerImages";
+import { renderPhoto } from "../../lib/composerImageFit";
+import { pickComposerImages } from "../../lib/composerImages";
 import { beginForegroundHandoff } from "../../lib/foreground-handoff";
 
 export interface CanvasImage {
@@ -49,7 +50,7 @@ export async function takeCanvasPhoto(): Promise<CanvasImagePick> {
   const asset = result.canceled ? undefined : result.assets[0];
   if (!asset) return { images: [], error: null };
   try {
-    const photo = await renderPhotoAsJpeg(asset.uri);
+    const photo = await renderPhoto(asset.uri);
     return {
       images: [{ dataURL: `data:image/jpeg;base64,${photo.base64}`, mimeType: "image/jpeg" }],
       error: null,

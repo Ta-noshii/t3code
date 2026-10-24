@@ -90,7 +90,6 @@ function PendingSecretRequestForm(props: {
       setSubmitting(false);
     });
     if (result._tag === "Success") {
-      // The card switches to its answered row once the item updates.
       setSecret("");
       return;
     }
@@ -132,8 +131,6 @@ function PendingSecretRequestForm(props: {
       className="flex min-w-0 flex-col gap-3 rounded-xl border border-border/60 bg-card p-4"
       onSubmit={onSubmit}
       autoComplete="off"
-      // A click anywhere on the card targets its field, so a paste that
-      // follows lands here rather than with the composer.
       onPointerDown={(event) => {
         if (!(event.target instanceof HTMLElement)) return;
         if (event.target.closest("input, textarea, button, a")) return;

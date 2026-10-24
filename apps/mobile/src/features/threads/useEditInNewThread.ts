@@ -144,9 +144,13 @@ export function useEditInNewThread(input: {
             : transcript,
       );
       setComposerDraftContext(draftKey, plan.message.context);
-      navigation.navigate("NewTaskSheet", {
-        screen: "NewTaskDraft",
-        params: { draftId: draftKey, title: ALERT_TITLE },
+      navigation.navigate("Thread", {
+        draft: {
+          environmentId,
+          projectId: thread.projectId,
+          draftId: draftKey,
+          title: ALERT_TITLE,
+        },
       });
       if (attachmentNote) Alert.alert(ALERT_TITLE, attachmentNote.trim());
     },

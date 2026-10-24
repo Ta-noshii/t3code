@@ -4,8 +4,8 @@ import { useState } from "react";
 import { Pressable, View } from "react-native";
 import Animated, { FadeInDown, FadeOut } from "react-native-reanimated";
 
-import { SymbolView } from "../../components/AppSymbol";
-import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
 import { useCanvasEvents } from "../../state/canvas";
 import { canvasRouteParams } from "./canvasRoutes";
 

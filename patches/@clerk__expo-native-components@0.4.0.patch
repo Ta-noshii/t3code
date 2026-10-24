@@ -1,0 +1,202 @@
+diff --git a/android/src/main/java/expo/modules/clerk/ClerkExpoModule.kt b/android/src/main/java/expo/modules/clerk/ClerkExpoModule.kt
+--- a/android/src/main/java/expo/modules/clerk/ClerkExpoModule.kt
++++ b/android/src/main/java/expo/modules/clerk/ClerkExpoModule.kt
+@@ -3,9 +3,11 @@
+ package expo.modules.clerk
+ 
+ import android.content.Context
++import android.content.pm.PackageManager
+ import android.os.Handler
+ import android.os.Looper
+ import android.util.Log
++import java.lang.reflect.Modifier
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.unit.dp
+ import com.clerk.api.Clerk
+@@ -30,6 +32,7 @@ import kotlinx.coroutines.withContext
+ import org.json.JSONObject
+ 
+ private const val TAG = "ClerkExpoModule"
++private const val REDIRECT_APPLICATION_ID_META = "com.clerk.expo.REDIRECT_APPLICATION_ID"
+ private const val NATIVE_AUTH_FLOW_CHANGED_EVENT = "clerkNativeAuthFlowChanged"
+ private const val NATIVE_CLIENT_INVALIDATED_EVENT = "clerkNativeClientInvalidated"
+ private const val HOST_SDK_HEADER = "x-clerk-host-sdk"
+@@ -100,6 +103,38 @@ class ClerkExpoModule : Module() {
+     private val reactContext: Context?
+         get() = appContext.reactContext
+ 
++    // OAuth redirects are allowlisted per Clerk instance as clerk://<applicationId>.callback,
++    // and clerk-android derives applicationId from the package name. An app installed under a
++    // different package can name the identifier its instance trusts in manifest meta-data and
++    // register that callback host itself. initialize() sets the field once, synchronously.
++    private fun applyRedirectApplicationIdOverride(context: Context) {
++        val override = try {
++            context.packageManager
++                .getApplicationInfo(context.packageName, PackageManager.GET_META_DATA)
++                .metaData?.getString(REDIRECT_APPLICATION_ID_META)
++        } catch (e: Exception) {
++            null
++        }?.trim()?.takeIf { it.isNotEmpty() } ?: return
++        // Match by value rather than name so an obfuscated release build still finds the field.
++        val field = Clerk::class.java.declaredFields.firstOrNull { candidate ->
++            candidate.type == String::class.java &&
++                Modifier.isStatic(candidate.modifiers) &&
++                runCatching {
++                    candidate.isAccessible = true
++                    candidate.get(null) == context.packageName
++                }.getOrDefault(false)
++        }
++        if (field == null) {
++            Log.w(TAG, "Clerk application id field not found; OAuth keeps the package redirect")
++            return
++        }
++        try {
++            field.set(null, override)
++        } catch (e: Exception) {
++            Log.w(TAG, "Unable to override the Clerk redirect application id", e)
++        }
++    }
++
+     private fun clerkConfigurationOptions(proxyUrl: String?): ClerkConfigurationOptions {
+         val hostSdkVersion = BuildConfig.CLERK_EXPO_VERSION.trim()
+         val customHeaders = buildMap {
+@@ -162,6 +197,7 @@ class ClerkExpoModule : Module() {
+                 val didConfigure = when {
+                     activePublishableKey == null -> {
+                         Clerk.initialize(context, pubKey, clerkConfigurationOptions(normalizedProxyUrl))
++                        applyRedirectApplicationIdOverride(context)
+                         true
+                     }
+                     activePublishableKey != pubKey || activeProxyUrl != normalizedProxyUrl -> {
+diff --git a/ios/ClerkAuthNativeView.swift b/ios/ClerkAuthNativeView.swift
+index 5f8d2ba..b170304 100644
+--- a/ios/ClerkAuthNativeView.swift
++++ b/ios/ClerkAuthNativeView.swift
+@@ -111,7 +111,12 @@ public class ClerkAuthNativeView: ClerkNativeViewHost {
+
+   override func makeHostedController() -> UIViewController? {
+     let hostBackAction: (() -> Void)? = currentHostBackButton
+-      ? { [weak self] in self?.onHostBack([:]) }
++      ? { [weak self] in
++          guard let self else { return }
++          if !self.popEnclosingNavigationRoute() {
++            self.onHostBack([:])
++          }
++      }
+       : nil
+
+     return ClerkNativeBridge.shared.makeAuthViewController(
+diff --git a/ios/ClerkUserProfileNativeView.swift b/ios/ClerkUserProfileNativeView.swift
+index f2ca604..46f406d 100644
+--- a/ios/ClerkUserProfileNativeView.swift
++++ b/ios/ClerkUserProfileNativeView.swift
+@@ -47,7 +47,12 @@ public class ClerkUserProfileNativeView: ClerkUserProfileCustomPageHost {
+
+   override func makeHostedController() -> UIViewController? {
+     let hostBackAction: (() -> Void)? = currentHostBackButton
+-      ? { [weak self] in self?.onHostBack([:]) }
++      ? { [weak self] in
++          guard let self else { return }
++          if !self.popEnclosingNavigationRoute() {
++            self.onHostBack([:])
++          }
++      }
+       : nil
+
+     return ClerkNativeBridge.shared.makeUserProfileViewController(
+diff --git a/ios/ClerkNativeViewHost.swift b/ios/ClerkNativeViewHost.swift
+--- a/ios/ClerkNativeViewHost.swift
++++ b/ios/ClerkNativeViewHost.swift
+@@ -5,6 +5,7 @@
+   private lazy var hostingCoordinator = ClerkNativeHostingCoordinator(containerView: self)
+   private var hasInitialized: Bool = false
+   private var configuredObserver: NSObjectProtocol?
++  private var isPoppingHostRoute = false
+ 
+   public required init(appContext: AppContext? = nil) {
+     super.init(appContext: appContext)
+@@ -23,6 +24,7 @@
+     super.didMoveToWindow()
+ 
+     guard window != nil else {
++      isPoppingHostRoute = false
+       if hasInitialized {
+         hostedViewDidDetachFromWindow()
+       }
+@@ -58,6 +60,39 @@
+ 
+   func hostedViewDidDetachFromWindow() {}
+ 
++  func popEnclosingNavigationRoute() -> Bool {
++    guard !isPoppingHostRoute else { return true }
++
++    // Follow controller containment, not the responder chain: past a presented controller the
++    // responder chain continues to its presenter, so a host inside a modal would pop the screen
++    // behind the modal instead of letting `onHostBack` dismiss it.
++    var route = enclosingViewController(of: self)
++
++    while let candidate = route {
++      if let navigationController = candidate.parent as? UINavigationController,
++         navigationController.viewControllers.count > 1 {
++        guard navigationController.topViewController === candidate else { return false }
++
++        isPoppingHostRoute = true
++        guard navigationController.popViewController(animated: true) != nil else {
++          isPoppingHostRoute = false
++          return false
++        }
++        if let coordinator = navigationController.transitionCoordinator {
++          coordinator.animate(alongsideTransition: nil) { [weak self] _ in
++            self?.isPoppingHostRoute = false
++          }
++        } else {
++          isPoppingHostRoute = false
++        }
++        return true
++      }
++      route = candidate.parent
++    }
++
++    return false
++  }
++
+   private func addConfiguredObserver() {
+     guard configuredObserver == nil else { return }
+ 
+@@ -162,7 +197,7 @@
+     controller.view.frame = containerView.bounds
+     controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+ 
+-    if let parentVC = findViewController(from: containerView) {
++    if let parentVC = enclosingViewController(of: containerView) {
+       parentVC.addChild(controller)
+       containerView.addSubview(controller.view)
+       controller.didMove(toParent: parentVC)
+@@ -190,15 +225,15 @@
+     guard let containerView else { return }
+     hostingController?.view.frame = containerView.bounds
+   }
+-
+-  private func findViewController(from view: UIView) -> UIViewController? {
+-    var responder: UIResponder? = view
+-    while let nextResponder = responder?.next {
+-      if let vc = nextResponder as? UIViewController {
+-        return vc
+-      }
+-      responder = nextResponder
+-    }
+-    return nil
+-  }
+-}
++}
++
++private func enclosingViewController(of view: UIView) -> UIViewController? {
++  var responder: UIResponder? = view
++  while let nextResponder = responder?.next {
++    if let viewController = nextResponder as? UIViewController {
++      return viewController
++    }
++    responder = nextResponder
++  }
++  return nil
++}

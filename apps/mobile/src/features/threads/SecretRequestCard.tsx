@@ -12,13 +12,13 @@ import {
 import type { EnvironmentId, OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
 import * as Clipboard from "expo-clipboard";
 import { useRef, useState } from "react";
-import { Pressable, View, type ColorValue } from "react-native";
+import { View, type ColorValue } from "react-native";
 
-import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
+import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { RequestActionButton } from "./RequestActionButton";
+import { Button } from "../../components/ui/Button";
 
 /**
  * Feed card for a secret an agent asked the user for, or a command in its
@@ -94,7 +94,6 @@ function PendingSecretRequestForm(props: {
       setSubmitting(false);
     });
     if (result._tag === "Success") {
-      // The card switches to its answered row once the item updates.
       setSecret("");
       return;
     }
@@ -103,8 +102,6 @@ function PendingSecretRequestForm(props: {
     }
   };
 
-  // Same hierarchy as web: what is asked, why, the field, then the promise
-  // about where the value goes.
   return (
     <View className="mb-3 gap-3 rounded-[20px] border border-border bg-card-alt p-4">
       <View className="gap-1">
@@ -159,8 +156,10 @@ function PendingSecretRequestForm(props: {
           {error}
         </Text>
       ) : null}
-      <RequestActionButton
+      <Button
         label={copy.saveLabel}
+        tone="primary"
+        fullWidth
         disabled={submitting || secret.trim().length === 0}
         onPress={() => void send({ type: "save", secret })}
       />
@@ -174,17 +173,12 @@ function PendingSecretRequestForm(props: {
           />
           <Text className="flex-1 font-sans text-xs text-foreground-muted">{copy.privacyNote}</Text>
         </View>
-        {/* Quiet like the web card's: the field and Save are the action. */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: submitting }}
+        <Button
+          label={copy.declineLabel}
+          tone="text"
           disabled={submitting}
-          hitSlop={8}
-          className="px-1 py-1 active:opacity-60 disabled:opacity-50"
           onPress={() => void send({ type: "decline" })}
-        >
-          <Text className="font-sans text-xs text-foreground-muted">{copy.declineLabel}</Text>
-        </Pressable>
+        />
       </View>
     </View>
   );
@@ -219,14 +213,14 @@ function MultilineSecretPaste(props: {
           : `Pasted ${props.secret.length} characters on ${lines} ${lines === 1 ? "line" : "lines"}`}
       </Text>
       {props.secret.length > 0 ? (
-        <RequestActionButton
+        <Button
           label="Clear"
           tone="secondary"
           disabled={props.disabled}
           onPress={() => props.onChange("")}
         />
       ) : null}
-      <RequestActionButton
+      <Button
         label="Paste"
         tone="secondary"
         disabled={props.disabled}

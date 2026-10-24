@@ -10,10 +10,10 @@ import { ActivityIndicator, Alert, AppState, Pressable, View } from "react-nativ
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
-import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
-import { AppText as Text } from "../../components/AppText";
-import { ControlPillMenu } from "../../components/ControlPillMenu";
-import { EmptyState } from "../../components/EmptyState";
+import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { Menu } from "../../components/ui/Menu";
+import { EmptyState } from "../../components/ui/EmptyState";
 import { formatEnvironmentQueryError } from "../../state/query";
 import { canvasEnvironment, useCanvasEvents } from "../../state/canvas";
 import { usePreparedConnection } from "../../state/session";
@@ -289,7 +289,7 @@ export function CanvasScreen(props: StaticScreenProps<CanvasRouteParams>) {
           ) : null}
         </View>
         {document && !readOnly && ready ? (
-          <ControlPillMenu
+          <Menu
             title="Add image"
             actions={IMAGE_ACTIONS}
             onPressAction={({ nativeEvent }) => {
@@ -299,7 +299,7 @@ export function CanvasScreen(props: StaticScreenProps<CanvasRouteParams>) {
             }}
           >
             <BarButton icon="photo" label="Add image" />
-          </ControlPillMenu>
+          </Menu>
         ) : null}
       </View>
       {loaded.kind === "error" ? (

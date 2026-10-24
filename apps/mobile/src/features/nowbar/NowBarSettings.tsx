@@ -1,7 +1,7 @@
 import * as Notifications from "expo-notifications";
 import { useEffect, useState } from "react";
 import { Alert, AppState, View } from "react-native";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { SettingsRow } from "../settings/components/SettingsRow";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { SettingsSwitchRow } from "../settings/components/SettingsSwitchRow";
