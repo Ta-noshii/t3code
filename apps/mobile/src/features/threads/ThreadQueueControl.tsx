@@ -233,7 +233,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
       ) : null}
       {canSendAll ? (
         <View className="py-3">
-          <MaterialButton
+          <Button
             label={`Send all ${sendAllCount} as one steer`}
             tone="primary"
             disabled={busyRunId !== null || draggedRunId !== null}

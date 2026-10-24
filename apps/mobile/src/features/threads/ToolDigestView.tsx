@@ -15,8 +15,8 @@ import * as Clipboard from "expo-clipboard";
 import { type ReactNode, useState } from "react";
 import { Linking, Pressable, View } from "react-native";
 
-import { AppText as Text } from "../../components/AppText";
-import { type AppSymbolName, SymbolView } from "../../components/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { type AppSymbolName, SymbolView } from "../../components/ui/AppSymbol";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { cn } from "../../lib/cn";
 import { getProviderClient } from "../../lib/providerClients";
