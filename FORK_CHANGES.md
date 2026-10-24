@@ -64,9 +64,13 @@ Agents can also turn a phrase in their prose into a reply link, `[the tracklist]
 
 A `progress_update` MCP tool lets an agent declare a list of items and mark each one pending, running, done, failed or skipped. The thread shows it as a progress bar. Updates merge per item id, so subagents started with `delegate_task` can report on their parent's tracker out of order; their calls go to the topmost thread in the subagent lineage. Forks keep their own tracker. The tracker is event-sourced as `thread.progress-updated`.
 
+In the sidebar, a row with an unfinished tracker keeps its "Working 3m" label, and its status icon becomes a ring that fills as items finish, with failed items in red. The mobile thread list shows the count, such as `23/50`, in place of the timestamp.
+
 ### `patch/html-render-messages`
 
 Pages shown with `html_render` get `window.t3.sendMessage(text)`, which queues the text as the user's next message. Web and desktop accept it only right after the user used the frame; mobile asks first. A widget that asks the user to choose can send the answer back instead of the user copying it.
+
+The sandboxed page can't use `localStorage`, so `window.t3.loadState()`, `saveState(value)` and `clearState()` ask the client to keep one JSON value per render: `localStorage` on web and desktop, the expo-sqlite kv store on mobile. Input then survives switching threads or tabs, full screen, and restarts. The client keeps the 200 most recently saved renders, up to 100,000 characters each.
 
 ### `fix/chatview-react-compiler`
 
