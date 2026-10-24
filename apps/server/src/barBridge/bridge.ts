@@ -621,13 +621,13 @@ class BarBridge {
       const disconnected = yield* Deferred.make<void>();
       const hooks = RpcClient.ConnectionHooks.of({
         onConnect: Effect.void,
-        onPingTimeout: Effect.sync(() => log("Server stopped answering pings")),
         onDisconnect: Deferred.succeed(disconnected, undefined).pipe(Effect.asVoid),
       });
       const layerProtocol = Layer.effect(
         RpcClient.Protocol,
         RpcClient.makeProtocolSocket({
           pingTimeout: PING_TIMEOUT,
+          onPingTimeout: Effect.sync(() => log("Server stopped answering pings")),
           retryTransientErrors: false,
           retryPolicy: Schedule.recurs(0),
         }),
