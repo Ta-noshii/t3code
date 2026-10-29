@@ -151,43 +151,45 @@ const make = Effect.gen(function* () {
   // process has lost its connection, and recovery closes the card.
   const shellPrompts = new Map<TurnItemId, ShellPromptWaiter>();
 
-  const answerShellPrompt = (turnItemId: TurnItemId, reply: ShellAnswer) =>
-    Effect.gen(function* () {
-      const waiter = shellPrompts.get(turnItemId);
-      const claimed =
-        waiter === undefined
-          ? "missing"
-          : yield* Ref.modify(waiter.state, (state) =>
-              state === "open" ? (["claimed", "answering"] as const) : ([state, state] as const),
-            );
-      if (waiter === undefined || claimed !== "claimed") {
-        return yield* new SecretRequestError({
-          reason:
-            claimed === "answering" || claimed === "closed" ? "already_answered" : "agent_stopped",
-        });
+  const answerShellPrompt = Effect.fn("SecretRequests.answerShellPrompt")(function* (
+    turnItemId: TurnItemId,
+    reply: ShellAnswer,
+  ) {
+    const waiter = shellPrompts.get(turnItemId);
+    const claimed =
+      waiter === undefined
+        ? "missing"
+        : yield* Ref.modify(waiter.state, (state) =>
+            state === "open" ? (["claimed", "answering"] as const) : ([state, state] as const),
+          );
+    if (waiter === undefined || claimed !== "claimed") {
+      return yield* new SecretRequestError({
+        reason:
+          claimed === "answering" || claimed === "closed" ? "already_answered" : "agent_stopped",
+      });
+    }
+    const recorded = yield* waiter
+      .record(reply.type === "save" ? "saved" : "declined")
+      .pipe(Effect.exit);
+    if (recorded._tag === "Failure") {
+      // The card still says pending; reopen it for another try unless the
+      // process went away meanwhile, which closes it instead.
+      const next = yield* Ref.modify(waiter.state, (state) =>
+        state === "withdrawn" ? (["withdrawn", "closed"] as const) : (["open", "open"] as const),
+      );
+      if (next === "withdrawn") {
+        shellPrompts.delete(turnItemId);
+        yield* waiter.record("cancelled").pipe(Effect.ignore);
       }
-      const recorded = yield* waiter
-        .record(reply.type === "save" ? "saved" : "declined")
-        .pipe(Effect.exit);
-      if (recorded._tag === "Failure") {
-        // The card still says pending; reopen it for another try unless the
-        // process went away meanwhile, which closes it instead.
-        const next = yield* Ref.modify(waiter.state, (state) =>
-          state === "withdrawn" ? (["withdrawn", "closed"] as const) : (["open", "open"] as const),
-        );
-        if (next === "withdrawn") {
-          shellPrompts.delete(turnItemId);
-          yield* waiter.record("cancelled").pipe(Effect.ignore);
-        }
-        return yield* recorded;
-      }
-      yield* Ref.set(waiter.state, "closed");
-      shellPrompts.delete(turnItemId);
-      yield* Deferred.succeed(waiter.answer, reply);
-    });
+      return yield* recorded;
+    }
+    yield* Ref.set(waiter.state, "closed");
+    shellPrompts.delete(turnItemId);
+    yield* Deferred.succeed(waiter.answer, reply);
+  });
 
-  const prompt: SecretRequests["Service"]["prompt"] = (input) =>
-    Effect.gen(function* () {
+  const prompt: SecretRequests["Service"]["prompt"] = Effect.fn("SecretRequests.prompt")(
+    function* (input) {
       const records = yield* threadManagement
         .getThreadRecords(input.threadId, ["runs"], { turnItemTypes: [], messageRoles: [] })
         .pipe(
@@ -278,7 +280,8 @@ const make = Effect.gen(function* () {
         ),
       );
       return { turnItemId, outcome, withdraw };
-    }).pipe(Effect.withSpan("SecretRequests.prompt"));
+    },
+  );
 
   const answer: SecretRequests["Service"]["answer"] = Effect.fn("SecretRequests.answer")(
     function* (input) {

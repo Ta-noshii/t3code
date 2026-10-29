@@ -20,7 +20,7 @@ import { type AppSymbolName, SymbolView } from "../../components/ui/AppSymbol";
 import { MaskedView } from "@expo/ui/community/masked-view";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import {
   useEffect,
   useEffectEvent,
@@ -936,6 +936,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
 ) {
   const { row, expanded } = props;
   const openLinkedThread = useOpenLinkedThread();
+  const navigation = useNavigation();
   const streamsOutput =
     useCommandOutputStreaming(props.environmentId) &&
     row.projectedItem.item.type === "command_execution";
@@ -1055,9 +1056,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
     environmentId: props.environmentId,
     renderMarkdown: props.renderReasoning,
     onOpenThread: (threadId) =>
-      navigation.dispatch(
-        StackActions.push("Thread", { environmentId: String(props.environmentId), threadId }),
-      ),
+      openLinkedThread({ environmentId: String(props.environmentId), threadId }),
     onOpenCanvas: (path) =>
       navigation.navigate("Canvas", { environmentId: props.environmentId, path }),
   };

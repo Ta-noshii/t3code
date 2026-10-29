@@ -26,7 +26,7 @@ export function HtmlRenderFrame(props: {
   readonly threadRef: ScopedThreadRef | undefined;
   readonly onFullscreenChange?: (fullscreen: boolean) => void;
   /** Sends the page's `window.t3.sendMessage` text as the reader's next message. */
-  readonly onSendMessage: ((text: string) => Promise<void>) | undefined;
+  readonly onSendMessage?: ((text: string) => Promise<void>) | undefined;
 }) {
   const { attachmentId, title } = props.htmlRender;
   const [width, setWidth] = useState(HTML_RENDER_COLUMN_WIDTH);

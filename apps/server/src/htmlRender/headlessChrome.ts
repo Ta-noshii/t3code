@@ -696,7 +696,7 @@ export const evaluatePage = Effect.fn("headlessChrome.evaluatePage")(
       profileDirectory: path.join(directory, "profile"),
       resources: input.resources,
     });
-    const page = yield* browser.openPage(EVALUATE_VIEWPORT_WIDTH);
+    const page = yield* browser.openPage(EVALUATE_VIEWPORT_WIDTH, "light");
     yield* page.load(pageBody(input.html), "");
     const evaluated = yield* page.evaluate(input.expression);
     if (evaluated.exceptionDetails !== undefined) {

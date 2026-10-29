@@ -544,6 +544,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               workspaceRoot={workspaceRoot}
               onOpenToolDiff={ctx.onOpenToolDiff}
               onImageExpand={ctx.onImageExpand}
+              onOpenThread={ctx.onOpenThread}
               source={ctx.turnItemSource}
             />
           ) : (

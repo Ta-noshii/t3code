@@ -9713,7 +9713,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           message.delegatedCompletion !== undefined ||
           message.notification !== undefined ||
           isNativeMaintenanceCommand(message) ||
-          isGoalCommand(message)
+          parseGoalCommand(message) !== null
         ) {
           return [];
         }

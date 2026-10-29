@@ -28,28 +28,27 @@ const toFailure = (error: { readonly _tag: string; readonly message: string }) =
   });
 
 /** The calling thread and its project; canvases belong to a thread's project. */
-const callerContext = (operation: string) =>
-  Effect.gen(function* () {
-    const scope = yield* McpInvocationContext.McpInvocationContext;
-    const { thread } = yield* McpInvocationContext.requireThreadScope(scope, operation);
-    const threads = yield* ThreadManagementService.ThreadManagementService;
-    const shell = yield* threads.getThreadShell(thread.threadId).pipe(
-      Effect.mapError(
-        () =>
-          new OrchestratorMcpFailure({
-            code: "orchestration_error",
-            message: "The thread could not be read.",
-          }),
-      ),
-    );
-    if (shell === null) {
-      return yield* new OrchestratorMcpFailure({
-        code: "thread_not_found",
-        message: "The thread was not found.",
-      });
-    }
-    return { threadId: thread.threadId, projectId: shell.projectId };
-  });
+const callerContext = Effect.fn("callerContext")(function* (operation: string) {
+  const scope = yield* McpInvocationContext.McpInvocationContext;
+  const { thread } = yield* McpInvocationContext.requireThreadScope(scope, operation);
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const shell = yield* threads.getThreadShell(thread.threadId).pipe(
+    Effect.mapError(
+      () =>
+        new OrchestratorMcpFailure({
+          code: "orchestration_error",
+          message: "The thread could not be read.",
+        }),
+    ),
+  );
+  if (shell === null) {
+    return yield* new OrchestratorMcpFailure({
+      code: "thread_not_found",
+      message: "The thread was not found.",
+    });
+  }
+  return { threadId: thread.threadId, projectId: shell.projectId };
+});
 
 const imageSource = (input: {
   readonly path?: string | undefined;

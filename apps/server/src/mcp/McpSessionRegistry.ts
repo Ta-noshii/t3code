@@ -173,21 +173,23 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
     },
   );
 
-  const resolveKind = (kind: CredentialRecord["kind"], rawToken: string) =>
-    Effect.gen(function* () {
-      if (rawToken.length === 0) return undefined;
-      const tokenHash = yield* hashToken(rawToken);
-      const timestamp = yield* currentTimeMillis;
-      return yield* SynchronizedRef.modify(state, ({ records }) => {
-        const record = records.get(tokenHash);
-        if (!record || record.kind !== kind || timestamp - record.lastAliveAt > livenessWindowMs) {
-          return [undefined, { records }] as const;
-        }
-        const next = new Map(records);
-        next.set(tokenHash, { ...record, lastAliveAt: timestamp });
-        return [record.scope, { records: next }] as const;
-      });
+  const resolveKind = Effect.fn("McpSessionRegistry.resolveKind")(function* (
+    kind: CredentialRecord["kind"],
+    rawToken: string,
+  ) {
+    if (rawToken.length === 0) return undefined;
+    const tokenHash = yield* hashToken(rawToken);
+    const timestamp = yield* currentTimeMillis;
+    return yield* SynchronizedRef.modify(state, ({ records }) => {
+      const record = records.get(tokenHash);
+      if (!record || record.kind !== kind || timestamp - record.lastAliveAt > livenessWindowMs) {
+        return [undefined, { records }] as const;
+      }
+      const next = new Map(records);
+      next.set(tokenHash, { ...record, lastAliveAt: timestamp });
+      return [record.scope, { records: next }] as const;
     });
+  });
   const resolve: McpSessionRegistryShape["resolve"] = Effect.fn("McpSessionRegistry.resolve")(
     function* (rawToken) {
       return yield* resolveKind("mcp", rawToken);

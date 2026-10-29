@@ -424,7 +424,7 @@ function simpleThreadCommand(
     | "thread.settle"
     | "thread.pin"
     | "thread.unpin"
-    | "thread.guest-share.close",
+    | "thread.guest-share.close"
     | "thread.progress.clear",
   input: ThreadCommandInput,
 ) {

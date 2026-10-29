@@ -6863,26 +6863,25 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
          * this run's model and sandbox from thread/start or its last turn.
          * Codex sends no turn/started for the turn review/start returns.
          */
-        const startNativeReview = (
+        const startNativeReview = Effect.fn("CodexAdapterV2.startNativeReview")(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
           target: CodexReviewTarget,
-        ) =>
-          Effect.gen(function* () {
-            const threadId = yield* getNativeThreadId(turnInput.providerThread);
-            startingReviewThreads.add(threadId);
-            const started = yield* client
-              .request("review/start", { threadId, target })
-              .pipe(Effect.ensuring(Effect.sync(() => startingReviewThreads.delete(threadId))));
-            reviewTurns.set(started.turn.id, { nativeThreadId: threadId, inReview: true });
-            yield* registerRootTurn({
-              turnInput,
-              nativeTurnId: started.turn.id,
-              startedAt:
-                started.turn.startedAt === null
-                  ? yield* DateTime.now
-                  : codexTimestamp(started.turn.startedAt),
-            });
+        ) {
+          const threadId = yield* getNativeThreadId(turnInput.providerThread);
+          startingReviewThreads.add(threadId);
+          const started = yield* client
+            .request("review/start", { threadId, target })
+            .pipe(Effect.ensuring(Effect.sync(() => startingReviewThreads.delete(threadId))));
+          reviewTurns.set(started.turn.id, { nativeThreadId: threadId, inReview: true });
+          yield* registerRootTurn({
+            turnInput,
+            nativeTurnId: started.turn.id,
+            startedAt:
+              started.turn.startedAt === null
+                ? yield* DateTime.now
+                : codexTimestamp(started.turn.startedAt),
           });
+        });
 
         /**
          * Setting or resuming a goal starts the first goal turn with this run's
