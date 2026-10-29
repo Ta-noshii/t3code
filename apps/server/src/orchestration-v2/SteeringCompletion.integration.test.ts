@@ -2009,9 +2009,10 @@ it.effect("sends every queued message as one steer and leaves /compact queued", 
         yield* worker.drain();
         const after = yield* orchestrator.getThreadProjection(threadId);
         assert.deepEqual(steered, ["First\n\nSecond"]);
+        // The harness's compactThread records into `started`, so /compact shows as its own turn.
         assert.deepEqual(
           started.map((turn) => turn.message.text),
-          ["first"],
+          ["first", "/compact"],
         );
         const [a, compact, b] = queuedStatuses(after);
         assert.deepEqual([a, b], ["cancelled", "cancelled"]);
