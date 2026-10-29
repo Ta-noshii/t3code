@@ -35,7 +35,7 @@ export function AttachmentDocumentBody(props: {
   readonly environmentId: EnvironmentId | null;
   readonly htmlRender: boolean;
   /** Names the render whose `window.t3.saveState` state the page keeps. */
-  readonly stateKey: string | undefined;
+  readonly stateKey?: string | undefined;
   readonly nativeViewer: "pending" | "open" | "unavailable" | null;
   readonly nativeError: string | null;
   readonly onOpenNative: () => void;

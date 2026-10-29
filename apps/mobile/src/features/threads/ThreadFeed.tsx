@@ -345,7 +345,7 @@ export interface ThreadFeedProps {
   readonly dispatchingMessageId: MessageId | null;
   readonly onEditPendingMessage: ((message: QueuedThreadMessage) => void) | null;
   /** Null where a sent message cannot be edited in a new thread. */
-  readonly onEditInNewThread: ((messageId: MessageId) => Promise<void>) | null;
+  readonly onEditInNewThread?: ((messageId: MessageId) => Promise<void>) | null | undefined;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   /** Null while the thread's creation is queued: reading detail then caches a not-found as deleted. */
@@ -1847,7 +1847,7 @@ function renderFeedEntry(
                   <SymbolView name="pencil" size={14} tintColor={iconSubtleColor} />
                 </Pressable>
               ) : null}
-              {props.onEditInNewThread !== null && message.projectedItem ? (
+              {props.onEditInNewThread && message.projectedItem ? (
                 <EditInNewThreadButton
                   environmentId={props.environmentId}
                   iconColor={iconSubtleColor}

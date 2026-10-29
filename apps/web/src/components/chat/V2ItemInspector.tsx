@@ -1,5 +1,5 @@
 import type { ToolCallDiffTarget } from "../../diffPanelStore";
-import type { EnvironmentId, OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationV2ProjectedTurnItem, ThreadId } from "@t3tools/contracts";
 import {
   toolCallLines,
   turnItemDetailRevision,
@@ -43,6 +43,8 @@ interface V2ItemInspectorProps {
   readonly onOpenToolDiff?: ((target: ToolCallDiffTarget) => void) | undefined;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
   readonly source?: TurnItemSource | undefined;
+  /** Opens a thread a T3 tool result names. */
+  readonly onOpenThread?: ((threadId: ThreadId) => void) | undefined;
 }
 
 function SyntaxTokens({

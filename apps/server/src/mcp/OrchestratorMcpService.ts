@@ -3127,51 +3127,46 @@ const make = Effect.gen(function* () {
         status: result.type === "already_terminal" ? result.run.status : "interrupt_requested",
       } satisfies OrchestratorMcpThreadInterruptResult;
     }),
-    codexReview: (scope, input) =>
-      Effect.gen(function* () {
-        const providers = yield* loadProviders;
-        const callerInstanceId = scope.thread?.providerInstanceId;
-        const codex = providers.filter((provider) => provider.driver === CODEX_DRIVER);
-        const provider =
+    codexReview: Effect.fn("OrchestratorMcpService.codexReview")(function* (scope, input) {
+      const providers = yield* loadProviders;
+      const callerInstanceId = scope.thread?.providerInstanceId;
+      const codex = providers.filter((provider) => provider.driver === CODEX_DRIVER);
+      const provider =
+        input.providerInstanceId === undefined
+          ? (codex.find((candidate) => candidate.instanceId === callerInstanceId) ??
+            codex.find((candidate) => candidate.enabled !== false) ??
+            codex[0])
+          : providers.find((candidate) => candidate.instanceId === input.providerInstanceId);
+      if (provider === undefined) {
+        return yield* failure(
+          "invalid_request",
           input.providerInstanceId === undefined
-            ? (codex.find((candidate) => candidate.instanceId === callerInstanceId) ??
-              codex.find((candidate) => candidate.enabled !== false) ??
-              codex[0])
-            : providers.find((candidate) => candidate.instanceId === input.providerInstanceId);
-        if (provider === undefined) {
-          return yield* failure(
-            "invalid_request",
-            input.providerInstanceId === undefined
-              ? "No Codex provider instance is configured."
-              : `Provider instance ${input.providerInstanceId} was not found.`,
-          );
-        }
-        if (provider.driver !== CODEX_DRIVER) {
-          return yield* failure(
-            "invalid_request",
-            `codex_review needs a Codex instance; ${provider.instanceId} runs ${provider.driver}.`,
-          );
-        }
-        const target = codexReviewTarget(input.target);
-        return yield* service.delegateTask(scope, {
-          task: formatCodexReviewCommand(target),
-          target: {
-            providerInstanceId: provider.instanceId,
-            ...(input.model === undefined ? {} : { model: input.model }),
-            options: [
-              { id: "reasoningEffort", value: input.effort ?? CODEX_REVIEW_DEFAULT_EFFORT },
-            ],
-          },
-          title: input.title ?? `Review ${codexReviewTargetLabel(target)}`,
-          // The reviewer reads; plan mode would only get in its way.
-          interactionMode: "default",
-          ...(input.mode === undefined ? {} : { mode: input.mode }),
-          ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-          ...(input.clientRequestId === undefined
-            ? {}
-            : { clientRequestId: input.clientRequestId }),
-        });
-      }).pipe(Effect.withSpan("OrchestratorMcpService.codexReview")),
+            ? "No Codex provider instance is configured."
+            : `Provider instance ${input.providerInstanceId} was not found.`,
+        );
+      }
+      if (provider.driver !== CODEX_DRIVER) {
+        return yield* failure(
+          "invalid_request",
+          `codex_review needs a Codex instance; ${provider.instanceId} runs ${provider.driver}.`,
+        );
+      }
+      const target = codexReviewTarget(input.target);
+      return yield* service.delegateTask(scope, {
+        task: formatCodexReviewCommand(target),
+        target: {
+          providerInstanceId: provider.instanceId,
+          ...(input.model === undefined ? {} : { model: input.model }),
+          options: [{ id: "reasoningEffort", value: input.effort ?? CODEX_REVIEW_DEFAULT_EFFORT }],
+        },
+        title: input.title ?? `Review ${codexReviewTargetLabel(target)}`,
+        // The reviewer reads; plan mode would only get in its way.
+        interactionMode: "default",
+        ...(input.mode === undefined ? {} : { mode: input.mode }),
+        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        ...(input.clientRequestId === undefined ? {} : { clientRequestId: input.clientRequestId }),
+      });
+    }),
   });
   return service;
 });

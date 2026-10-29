@@ -67,39 +67,36 @@ const describeFailure = (failure: unknown): string => {
 };
 
 /** One page's scan at every width: its report blocks, or why they could not be read. */
-const scanWidths = <E, R>(
+const scanWidths = Effect.fn("scanWidths")(function* <E, R>(
   call: OverflowCheckCall<E, R>,
   widths: readonly number[],
   height: number,
   max: number,
   settle: number,
-) =>
-  Effect.gen(function* () {
-    const blocks: string[] = [];
-    let overflows = 0;
-    let complete = true;
-    let status = 0;
-    for (const [index, width] of widths.entries()) {
-      yield* call("resize", { mode: "freeform", width, height });
-      const waitMs = index === 0 ? 400 + settle : 400;
-      const value = yield* call(
-        "evaluate",
-        { expression: overflowScanExpression(max, waitMs), awaitPromise: true },
-        SCAN_TIMEOUT_MS + waitMs,
-      );
-      if (!isScan(value)) {
-        blocks.push(
-          `${width}px: could not read the scanner result: ${String(value).slice(0, 400)}`,
-        );
-        complete = false;
-        continue;
-      }
-      blocks.push(value.report);
-      overflows += value.overflows;
-      status = value.status ?? 0;
+) {
+  const blocks: string[] = [];
+  let overflows = 0;
+  let complete = true;
+  let status = 0;
+  for (const [index, width] of widths.entries()) {
+    yield* call("resize", { mode: "freeform", width, height });
+    const waitMs = index === 0 ? 400 + settle : 400;
+    const value = yield* call(
+      "evaluate",
+      { expression: overflowScanExpression(max, waitMs), awaitPromise: true },
+      SCAN_TIMEOUT_MS + waitMs,
+    );
+    if (!isScan(value)) {
+      blocks.push(`${width}px: could not read the scanner result: ${String(value).slice(0, 400)}`);
+      complete = false;
+      continue;
     }
-    return { blocks, overflows, complete, status };
-  });
+    blocks.push(value.report);
+    overflows += value.overflows;
+    status = value.status ?? 0;
+  }
+  return { blocks, overflows, complete, status };
+});
 
 /**
  * Drives the tab through each width and stitches the per-width reports into
@@ -107,81 +104,82 @@ const scanWidths = <E, R>(
  * inside and outside T3 Code. With `urls`, the tab visits each page in turn
  * and the report is grouped by page.
  */
-export const runOverflowCheck = <E, R>(call: OverflowCheckCall<E, R>, input: OverflowCheckInput) =>
-  Effect.gen(function* () {
-    const widths =
-      input.widths && input.widths.length > 0 ? input.widths : OVERFLOW_CHECK_DEFAULT_WIDTHS;
-    const height = input.height ?? 900;
-    const max = input.max ?? 10;
-    const previous = input.restore
-      ? (((yield* call("status", {})) as PreviewAutomationStatus).viewportSetting ??
-        FILL_PREVIEW_VIEWPORT)
-      : undefined;
-    const check = checkPages(call, input, widths, height, max);
-    // Restore on failure and interruption too, so restore=true never strands the tab at a test width.
-    return yield* previous === undefined
-      ? check
-      : check.pipe(
-          Effect.ensuring(
-            Effect.ignore(Effect.suspend(() => call("resize", resizeInputFor(previous)))),
-          ),
-        );
-  });
+export const runOverflowCheck = Effect.fn("runOverflowCheck")(function* <E, R>(
+  call: OverflowCheckCall<E, R>,
+  input: OverflowCheckInput,
+) {
+  const widths =
+    input.widths && input.widths.length > 0 ? input.widths : OVERFLOW_CHECK_DEFAULT_WIDTHS;
+  const height = input.height ?? 900;
+  const max = input.max ?? 10;
+  const previous = input.restore
+    ? (((yield* call("status", {})) as PreviewAutomationStatus).viewportSetting ??
+      FILL_PREVIEW_VIEWPORT)
+    : undefined;
+  const check = checkPages(call, input, widths, height, max);
+  // Restore on failure and interruption too, so restore=true never strands the tab at a test width.
+  return yield* previous === undefined
+    ? check
+    : check.pipe(
+        Effect.ensuring(
+          Effect.ignore(Effect.suspend(() => call("resize", resizeInputFor(previous)))),
+        ),
+      );
+});
 
-const checkPages = <E, R>(
+const checkPages = Effect.fn("checkPages")(function* <E, R>(
   call: OverflowCheckCall<E, R>,
   input: OverflowCheckInput,
   widths: readonly number[],
   height: number,
   max: number,
-) =>
-  Effect.gen(function* () {
-    if (!input.urls || input.urls.length === 0) {
-      const scan = yield* scanWidths(call, widths, height, max, 0);
-      const verdict = !scan.complete
-        ? "The check did not complete at every width; see above."
-        : scan.overflows > 0
-          ? `${scan.overflows} overflow${scan.overflows === 1 ? "" : "s"} to fix. Fix the "← cause" element, re-run, then screenshot.`
-          : "No overflow. Info lines, if any, are for you to judge.";
-      return { report: [...scan.blocks, "", verdict].join("\n"), overflows: scan.overflows };
-    }
+) {
+  if (!input.urls || input.urls.length === 0) {
+    const scan = yield* scanWidths(call, widths, height, max, 0);
+    const verdict = !scan.complete
+      ? "The check did not complete at every width; see above."
+      : scan.overflows > 0
+        ? `${scan.overflows} overflow${scan.overflows === 1 ? "" : "s"} to fix. Fix the "← cause" element, re-run, then screenshot.`
+        : "No overflow. Info lines, if any, are for you to judge.";
+    return { report: [...scan.blocks, "", verdict].join("\n"), overflows: scan.overflows };
+  }
 
-    const settle = input.settle ?? 1500;
-    const lines: string[] = [];
-    let overflows = 0;
-    let needWork = 0;
-    let notLoaded = 0;
-    for (const url of input.urls) {
-      // A page that fails to open is reported and the rest are still checked.
-      const navigation = yield* Effect.result(call("navigate", { url }));
-      if (navigation._tag === "Failure") {
-        lines.push(`${url}: did not load (${describeFailure(navigation.failure)})`);
-        needWork += 1;
-        notLoaded += 1;
-        continue;
-      }
-      const scan = yield* scanWidths(call, widths, height, max, settle);
-      if (!scan.complete || scan.status >= 400) {
-        const reason = scan.complete
-          ? `HTTP ${scan.status}`
-          : (scan.blocks.find((block) => block.includes("could not read")) ?? "scan failed");
-        lines.push(`${url}: did not load (${reason.split("\n")[0]})`);
-        needWork += 1;
-        notLoaded += 1;
-        continue;
-      }
-      if (scan.blocks.every((block) => block.endsWith(": clean"))) {
-        lines.push(`${url}: clean`);
-      } else {
-        lines.push(url, ...scan.blocks.flatMap((block) => block.split("\n").map((l) => `  ${l}`)));
-      }
-      if (scan.overflows > 0) needWork += 1;
-      overflows += scan.overflows;
+  const settle = input.settle ?? 1500;
+  const lines: string[] = [];
+  let overflows = 0;
+  let needWork = 0;
+  let notLoaded = 0;
+  for (const url of input.urls) {
+    // A page that fails to open is reported and the rest are still checked.
+    const navigation = yield* Effect.result(call("navigate", { url }));
+    if (navigation._tag === "Failure") {
+      lines.push(`${url}: did not load (${describeFailure(navigation.failure)})`);
+      needWork += 1;
+      notLoaded += 1;
+      continue;
     }
-    const total = input.urls.length;
-    const verdict =
-      needWork > 0
-        ? `${needWork} of ${total} pages need work: ${overflows} overflow${overflows === 1 ? "" : "s"}${notLoaded > 0 ? `, ${notLoaded} did not load` : ""}.${overflows > 0 ? ' Fix the "← cause" elements, re-run, then screenshot.' : ""}`
-        : `No overflow on ${total} pages. Info lines, if any, are for you to judge.`;
-    return { report: [...lines, "", verdict].join("\n"), overflows };
-  });
+    const scan = yield* scanWidths(call, widths, height, max, settle);
+    if (!scan.complete || scan.status >= 400) {
+      const reason = scan.complete
+        ? `HTTP ${scan.status}`
+        : (scan.blocks.find((block) => block.includes("could not read")) ?? "scan failed");
+      lines.push(`${url}: did not load (${reason.split("\n")[0]})`);
+      needWork += 1;
+      notLoaded += 1;
+      continue;
+    }
+    if (scan.blocks.every((block) => block.endsWith(": clean"))) {
+      lines.push(`${url}: clean`);
+    } else {
+      lines.push(url, ...scan.blocks.flatMap((block) => block.split("\n").map((l) => `  ${l}`)));
+    }
+    if (scan.overflows > 0) needWork += 1;
+    overflows += scan.overflows;
+  }
+  const total = input.urls.length;
+  const verdict =
+    needWork > 0
+      ? `${needWork} of ${total} pages need work: ${overflows} overflow${overflows === 1 ? "" : "s"}${notLoaded > 0 ? `, ${notLoaded} did not load` : ""}.${overflows > 0 ? ' Fix the "← cause" elements, re-run, then screenshot.' : ""}`
+      : `No overflow on ${total} pages. Info lines, if any, are for you to judge.`;
+  return { report: [...lines, "", verdict].join("\n"), overflows };
+});

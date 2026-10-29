@@ -182,17 +182,21 @@ const make = Effect.gen(function* () {
     );
 
   return CanvasRenderer.of({
+    // @effect-diagnostics-next-line effectFnOpportunity:off - one-line wrappers over run().
     render: (input) => run({ op: "render", ...input }).pipe(expect("png")),
+    // @effect-diagnostics-next-line effectFnOpportunity:off - one-line wrappers over run().
     convert: (input) =>
       run({ op: "convert", ...input }).pipe(
         expect("elements"),
         Effect.map((value) => value.elements),
       ),
+    // @effect-diagnostics-next-line effectFnOpportunity:off - one-line wrappers over run().
     normalize: (elements) =>
       run({ op: "normalize", elements }).pipe(
         expect("elements"),
         Effect.map((value) => value.elements),
       ),
+    // @effect-diagnostics-next-line effectFnOpportunity:off - one-line wrappers over run().
     downscale: (input) => run({ op: "downscale", ...input }).pipe(expect("dataURL")),
   });
 });

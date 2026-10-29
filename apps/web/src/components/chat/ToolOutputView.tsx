@@ -170,7 +170,9 @@ function ModelMeta({
   const known = meta.model
     ? provider.entry?.models.find((candidate) => candidate.slug === meta.model)
     : undefined;
-  const name = known ? getTriggerDisplayModelName(known) : (meta.model ?? provider.displayName);
+  const name = known
+    ? getTriggerDisplayModelName(known, provider.driverKind)
+    : (meta.model ?? provider.displayName);
   const color = meta.providerInstanceId ? providerTextColor(provider.driverKind) : undefined;
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">

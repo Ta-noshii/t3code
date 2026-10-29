@@ -88,6 +88,7 @@ describe("threadQueueControlPresentation", () => {
       canSendNow: false,
       isGuestMessage: true,
       text: "Why?",
+      attachments: [],
     });
 
     expect(guest.canEdit).toBe(false);
