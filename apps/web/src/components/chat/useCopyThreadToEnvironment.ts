@@ -42,7 +42,6 @@ interface CopyThreadToEnvironmentInput {
   readonly timelineMessages: ReadonlyArray<ChatMessage>;
   readonly phase: SessionPhase;
   readonly isSendBusy: boolean;
-  readonly isConnecting: boolean;
   readonly setThreadError: ReturnType<typeof makeThreadErrorSetter>;
 }
 
@@ -61,7 +60,6 @@ export function useCopyThreadToEnvironment(input: CopyThreadToEnvironmentInput) 
     timelineMessages,
     phase,
     isSendBusy,
-    isConnecting,
     setThreadError,
   } = input;
   const navigate = useNavigate();
@@ -79,7 +77,7 @@ export function useCopyThreadToEnvironment(input: CopyThreadToEnvironmentInput) 
     if (!targetEnvironment) return;
     const targetLabel = `${target.environmentLabel} (${target.projectLabel})`;
     const sourceLabel = environmentById.get(environmentId)?.label ?? "another machine";
-    if (phase === "running" || isSendBusy || isConnecting) {
+    if (phase === "running" || phase === "connecting" || isSendBusy) {
       setThreadError(activeThread.id, "Stop the current turn before copying this chat.");
       return;
     }

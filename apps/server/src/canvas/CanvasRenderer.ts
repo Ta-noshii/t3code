@@ -182,18 +182,24 @@ const make = Effect.gen(function* () {
     );
 
   return CanvasRenderer.of({
-    render: (input) => run({ op: "render", ...input }).pipe(expect("png")),
-    convert: (input) =>
+    render: Effect.fn("CanvasRenderer.render")((input) =>
+      run({ op: "render", ...input }).pipe(expect("png")),
+    ),
+    convert: Effect.fn("CanvasRenderer.convert")((input) =>
       run({ op: "convert", ...input }).pipe(
         expect("elements"),
         Effect.map((value) => value.elements),
       ),
-    normalize: (elements) =>
+    ),
+    normalize: Effect.fn("CanvasRenderer.normalize")((elements) =>
       run({ op: "normalize", elements }).pipe(
         expect("elements"),
         Effect.map((value) => value.elements),
       ),
-    downscale: (input) => run({ op: "downscale", ...input }).pipe(expect("dataURL")),
+    ),
+    downscale: Effect.fn("CanvasRenderer.downscale")((input) =>
+      run({ op: "downscale", ...input }).pipe(expect("dataURL")),
+    ),
   });
 });
 

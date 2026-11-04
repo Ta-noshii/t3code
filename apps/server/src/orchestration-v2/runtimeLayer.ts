@@ -253,7 +253,7 @@ const layerThreadRecapProvided = ThreadRecapService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       ProjectionStore.layer,
-      layerProviderAdapterRegistryProvided,
+      ProviderAdapterRegistry.layerFromProviderInstanceRegistry,
       layerRuntimePolicyProvided,
     ),
   ),
@@ -264,8 +264,8 @@ const layerThreadTransferProvided = ThreadTransferService.layer.pipe(
     Layer.mergeAll(
       layerProjectService,
       layerOrchestratorProvided,
-      layerProviderAdapterRegistryProvided,
-      layerEventSinkProvided,
+      ProviderAdapterRegistry.layerFromProviderInstanceRegistry,
+      layerEventSink,
       IdAllocator.layer,
     ),
   ),

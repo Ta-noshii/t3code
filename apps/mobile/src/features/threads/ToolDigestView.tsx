@@ -1,3 +1,4 @@
+import { getProviderClient } from "@t3tools/client-runtime/provider-clients";
 import { resolveProviderInstanceDisplayName } from "@t3tools/client-runtime/state/provider-instance-display";
 import {
   providerLabel,
@@ -19,7 +20,6 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { type AppSymbolName, SymbolView } from "../../components/ui/AppSymbol";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { cn } from "../../lib/cn";
-import { getProviderClient } from "../../lib/providerClients";
 import { useEnvironmentServerConfig } from "../../state/entities";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 

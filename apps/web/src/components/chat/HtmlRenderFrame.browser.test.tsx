@@ -28,6 +28,7 @@ describe("HtmlRenderFrame", () => {
         htmlRender={{ attachmentId: "attachment", title: "Report", height: 200 }}
         threadRef={undefined}
         onFullscreenChange={onFullscreenChange}
+        onSendMessage={undefined}
       />,
     );
 

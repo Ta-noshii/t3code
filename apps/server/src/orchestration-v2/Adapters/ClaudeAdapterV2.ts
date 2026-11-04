@@ -355,7 +355,6 @@ const applyAutoCompactWindowToLiveQueries = Effect.fnUntraced(function* (
   if (previous === undefined || previous === value) return;
   const tokens = autoCompactTokens(value);
   for (const query of liveQueriesByInstance.get(instanceId) ?? []) {
-    if (query.setAutoCompactWindow === undefined) continue;
     yield* query.applyFlagSettings({ autoCompactWindow: tokens } as ClaudeFlagSettings).pipe(
       Effect.catch((cause) =>
         Effect.logWarning("orchestration-v2.claude-auto-compact-live-apply-failed", {

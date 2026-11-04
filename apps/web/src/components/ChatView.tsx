@@ -2940,7 +2940,6 @@ export default function ChatView(props: ChatViewProps) {
     timelineMessages,
     phase,
     isSendBusy,
-    isConnecting,
     setThreadError,
   });
   const onCompactContext = () => {

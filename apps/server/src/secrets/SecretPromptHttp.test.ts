@@ -124,6 +124,7 @@ it.effect("shows the card in the thread the credential names and returns the ans
 it.effect("withdraws the card when the command goes away", () =>
   withRoute(({ prompt, withdrawn, shown }) =>
     Effect.gen(function* () {
+      // @effect-diagnostics-next-line abortControllerInEffect:off - stands in for the CLI process going away mid-request.
       const controller = new AbortController();
       const running = yield* Effect.forkChild(prompt(["--title", "token"], controller.signal));
       yield* Deferred.await(shown);

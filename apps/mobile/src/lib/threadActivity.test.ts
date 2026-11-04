@@ -25,7 +25,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildThreadFeed,
-  workEntryRowLabel,
   threadFeedCompactionLabels,
   createThreadFeedCache,
   deriveThreadFeedPresentation,

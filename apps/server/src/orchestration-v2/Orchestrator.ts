@@ -9666,12 +9666,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
    * one message, reusing the first message's id. Cancelling and steering commit together,
    * so a run that ends mid-command fails it with the queue untouched.
    */
-  const dispatchQueuedMessagesSendAll = (
-    command: Extract<OrchestrationV2Command, { readonly type: "queued-messages.send-all" }>,
-    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
-    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
-  ) =>
-    Effect.gen(function* () {
+  const dispatchQueuedMessagesSendAll = Effect.fn("Orchestrator.dispatchQueuedMessagesSendAll")(
+    function* (
+      command: Extract<OrchestrationV2Command, { readonly type: "queued-messages.send-all" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+      effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+    ) {
       const projection = yield* projectionStore
         .getThreadRecords(
           command.threadId,
@@ -9713,7 +9713,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           message.delegatedCompletion !== undefined ||
           message.notification !== undefined ||
           isNativeMaintenanceCommand(message) ||
-          isGoalCommand(message)
+          parseGoalCommand(message) !== null
         ) {
           return [];
         }
@@ -9777,7 +9777,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           : { senderThreadId: first.message.senderThreadId }),
         forceRestart: false,
       });
-    });
+    },
+  );
 
   const dispatchQueuedRunReorder = Effect.fn("Orchestrator.dispatchQueuedRunReorder")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "queued-run.reorder" }>,

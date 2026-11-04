@@ -55,9 +55,6 @@ describe("threadQueueControlPresentation", () => {
         busy: false,
         canPromoteToSteer: true,
         canSendNow,
-        canReorder: true,
-        index: 0,
-        queuedCount: 1,
         text,
         attachments: [],
       });
@@ -91,6 +88,7 @@ describe("threadQueueControlPresentation", () => {
       canSendNow: false,
       isGuestMessage: true,
       text: "Why?",
+      attachments: [],
     });
 
     expect(guest.canEdit).toBe(false);
