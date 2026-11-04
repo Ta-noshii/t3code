@@ -7,14 +7,20 @@ test("release packaging preserves upstream account configuration and identifies 
   process.env.NOWBAR_REQUIRE_CLOUD_CONFIG = "1";
   const clerk = { publishableKey: "pk_live_public", jwtTemplate: "t3-relay" };
   const relay = { url: "https://relay.t3.codes" };
-  const result = plugin({ version: "1.1.1", android: {}, extra: { clerk, relay, eas: {} } });
+  const result = plugin({
+    version: "1.1.1",
+    android: {},
+    extra: { clerk, relay, eas: { projectId: "upstream", observe: { endpointUrl: "https://up" } } },
+  });
   assert.equal(result.version, "1.1.1-nowbar.6");
   assert.equal(result.android.versionCode, 6);
   assert.deepEqual(result.extra.clerk, clerk);
   assert.deepEqual(result.extra.relay, relay);
   assert.equal(result.extra.nowbar.remotePushConfigured, false);
   assert.equal(result.updates.enabled, false);
-  assert.equal(result.extra.eas, undefined);
+  // expo-observe needs a project ID to start; neither upstream's project nor its ingest is kept.
+  assert.equal(result.extra.eas.projectId, "00000000-0000-4000-8000-000000000000");
+  assert.equal(result.extra.eas.observe.endpointUrl, "https://observe.invalid");
 });
 
 test("release cannot silently lose any setting required to show T3 Connect", () => {

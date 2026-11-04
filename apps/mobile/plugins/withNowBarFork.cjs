@@ -85,6 +85,14 @@ module.exports = function withNowBarFork(config) {
   // native module. Fork upgrades are whole, consistently signed APKs instead.
   config.updates = { enabled: false };
   delete config.owner;
-  if (config.extra) delete config.extra.eas;
+  // expo-observe throws at startup without a project ID, which stops the app
+  // from registering. A placeholder keeps it off upstream's EAS project, and
+  // the `.invalid` endpoint (RFC 6761) never resolves, so no report leaves.
+  if (config.extra) {
+    config.extra.eas = {
+      projectId: "00000000-0000-4000-8000-000000000000",
+      observe: { endpointUrl: "https://observe.invalid" },
+    };
+  }
   return upstreamPackage ? withUpstreamClerkRedirect(config, upstreamPackage) : config;
 };
