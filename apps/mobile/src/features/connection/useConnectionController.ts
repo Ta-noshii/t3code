@@ -10,7 +10,7 @@ import type {
 } from "@t3tools/contracts/relay";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { Alert } from "react-native";
 import { AsyncResult } from "effect/reactivity";
 
@@ -71,67 +71,51 @@ export function useConnectionController() {
     [registeredIds, relayEnvironments],
   );
 
-  const connectPairingUrl = useCallback(
-    (pairingUrl: string, expectedEnvironmentId?: EnvironmentId) =>
-      connectPairingUrlMutation({
-        pairingUrl,
-        ...(expectedEnvironmentId === undefined ? {} : { expectedEnvironmentId }),
-      }),
-    [connectPairingUrlMutation],
-  );
-  const connectRelayEnvironment = useCallback(
-    (environment: RelayClientEnvironmentRecord) =>
-      registerEnvironment(
-        new RelayConnectionRegistration({
-          target: new RelayConnectionTarget({
-            environmentId: environment.environmentId,
-            label: environment.label,
-          }),
+  const connectPairingUrl = (pairingUrl: string, expectedEnvironmentId?: EnvironmentId) =>
+    connectPairingUrlMutation({
+      pairingUrl,
+      ...(expectedEnvironmentId === undefined ? {} : { expectedEnvironmentId }),
+    });
+  const connectRelayEnvironment = (environment: RelayClientEnvironmentRecord) =>
+    registerEnvironment(
+      new RelayConnectionRegistration({
+        target: new RelayConnectionTarget({
+          environmentId: environment.environmentId,
+          label: environment.label,
         }),
-      ),
-    [registerEnvironment],
-  );
-  const removeEnvironment = useCallback(
-    (environmentId: EnvironmentId) => removeEnvironmentMutation(environmentId),
-    [removeEnvironmentMutation],
-  );
-  const retryEnvironment = useCallback(
-    (environmentId: EnvironmentId) => retryEnvironmentMutation(environmentId),
-    [retryEnvironmentMutation],
-  );
-  const setEnvironmentEnabled = useCallback(
-    async (environmentId: EnvironmentId, enabled: boolean) => {
-      const result = await setEnvironmentEnabledMutation({ environmentId, enabled });
-      // The switch snaps back on failure; say why instead of only logging it.
-      if (AsyncResult.isFailure(result) && !Cause.hasInterruptsOnly(result.cause)) {
-        const error: unknown = Cause.squash(result.cause);
-        const detail =
-          typeof error === "object" && error !== null && "detail" in error
-            ? String(error.detail)
-            : error instanceof Error
-              ? error.message
-              : String(error);
-        Alert.alert(
-          enabled ? "Could not turn this environment on" : "Could not turn this environment off",
-          detail,
-        );
-      }
-      return result;
-    },
-    [setEnvironmentEnabledMutation],
-  );
-  const updateEnvironment = useCallback(
-    (
-      environmentId: EnvironmentId,
-      updates: { readonly label: string; readonly displayUrl: string },
-    ) =>
-      updateBearer({
-        environmentId,
-        label: updates.label,
-        httpBaseUrl: updates.displayUrl,
       }),
-    [updateBearer],
-  );
+    );
+  const removeEnvironment = (environmentId: EnvironmentId) =>
+    removeEnvironmentMutation(environmentId);
+  const retryEnvironment = (environmentId: EnvironmentId) =>
+    retryEnvironmentMutation(environmentId);
+  const setEnvironmentEnabled = async (environmentId: EnvironmentId, enabled: boolean) => {
+    const result = await setEnvironmentEnabledMutation({ environmentId, enabled });
+    // The switch snaps back on failure; say why instead of only logging it.
+    if (AsyncResult.isFailure(result) && !Cause.hasInterruptsOnly(result.cause)) {
+      const error: unknown = Cause.squash(result.cause);
+      const detail =
+        typeof error === "object" && error !== null && "detail" in error
+          ? String(error.detail)
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      Alert.alert(
+        enabled ? "Could not turn this environment on" : "Could not turn this environment off",
+        detail,
+      );
+    }
+    return result;
+  };
+  const updateEnvironment = (
+    environmentId: EnvironmentId,
+    updates: { readonly label: string; readonly displayUrl: string },
+  ) =>
+    updateBearer({
+      environmentId,
+      label: updates.label,
+      httpBaseUrl: updates.displayUrl,
+    });
 
   return {
     connectedEnvironments,

@@ -1,3 +1,4 @@
+import { pipe } from "effect/Function";
 import {
   secretRequestAnswerInput,
   secretRequestCopy,
@@ -98,7 +99,7 @@ function PendingSecretRequestForm(props: {
       return;
     }
     if (!isAtomCommandInterrupted(result)) {
-      setError(secretRequestFailureMessage(squashAtomCommandFailure(result)));
+      pipe(squashAtomCommandFailure(result), secretRequestFailureMessage, setError);
     }
   };
 
@@ -119,7 +120,9 @@ function PendingSecretRequestForm(props: {
             </Text>
           </>
         ) : item.reason.trim() ? (
-          <Text className="font-sans text-sm leading-5 text-foreground-muted">{item.reason}</Text>
+          <Text className="font-sans text-sm leading-5 text-foreground-muted" selectable>
+            {item.reason}
+          </Text>
         ) : null}
       </View>
       {copy.multiline ? (

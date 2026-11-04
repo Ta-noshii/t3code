@@ -8,7 +8,7 @@ import {
 } from "@t3tools/client-runtime/nowbar";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
-import * as NodeSocket from "@effect/platform-node/NodeSocket";
+import * as NodeWS from "@effect/platform-node/NodeWS";
 import {
   ORCHESTRATION_V2_WS_METHODS,
   WS_METHODS,
@@ -97,7 +97,7 @@ const main = Effect.gen(function* () {
   const layerSocketConstructor = Layer.succeed(
     Socket.WebSocketConstructor,
     (url, protocols) =>
-      new NodeSocket.NodeWS.WebSocket(url, protocols as string | string[] | undefined, {
+      new NodeWS.WebSocket(url, protocols as string | string[] | undefined, {
         headers: { authorization: `Bearer ${connection.bearerToken}` },
       }) as unknown as globalThis.WebSocket,
   );
@@ -276,8 +276,7 @@ NodeRuntime.runMain(
           : new WatchStoppedError({ cause }),
       );
     }),
-    // Socket failures may contain credential-bearing request headers. Keep the
-    // cause on the error, but print only the fixed message at the CLI boundary.
+    // Socket errors can expose credential headers; retain the cause but print only the fixed message.
     Effect.tapError((error) => Effect.logError(error.message)),
   ),
   { disableErrorReporting: true },

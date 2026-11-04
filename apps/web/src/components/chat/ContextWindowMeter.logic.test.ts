@@ -102,7 +102,7 @@ describe("resolveContextWindowModelDisplayName", () => {
         },
         modelOptionsByInstance,
       ),
-    ).toBe("5.6 Sol");
+    ).toBe("GPT-5.6 Sol");
   });
 });
 

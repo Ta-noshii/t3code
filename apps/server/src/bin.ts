@@ -6,6 +6,7 @@
  * loads; everything else defers to the real CLI in ./binCli.ts.
  */
 import { isEntrypoint } from "./entrypoint.ts";
+import { enableCliCompileCache } from "./cliCompileCache.ts";
 
 if (
   isEntrypoint({
@@ -18,7 +19,18 @@ if (
   // Guard sockets before either dispatch path can load outbound-capable modules.
   const { ignoreMacosTypeOfServiceEinval } = await import("./outboundHttp.ts");
   ignoreMacosTypeOfServiceEinval();
-  if (command === "__managed-chatgpt-token") {
+  if (command === "__document-text") {
+    const { extractDocumentText } = await import("./provider/documentTextWorker.ts");
+    try {
+      process.stdout.write(await extractDocumentText(process.argv[3]!, process.argv[4]!));
+    } catch (error) {
+      if (error instanceof Error && "code" in error && /^E[A-Z0-9]+$/.test(String(error.code))) {
+        throw error;
+      }
+      // Exit 2 identifies document rejections; OS and process failures remain retryable.
+      process.exitCode = 2;
+    }
+  } else if (command === "__managed-chatgpt-token") {
     const { runManagedChatGptTokenCli } = await import("./cli/managedChatGptToken.ts");
     await runManagedChatGptTokenCli(process.argv.slice(3));
   } else if (command === "acp-mcp-bridge" || command === "acp-mcp-call") {
@@ -28,8 +40,8 @@ if (
     const { runSecretCliFastPath } = await import("./secrets/secretPromptCli.ts");
     await runSecretCliFastPath(process.argv.slice(3));
   } else {
-    // Before anything reads stdin: the desktop app's Windows launcher starts
-    // the CLI without one. Never for the fast paths, whose stdin is a pipe.
+    enableCliCompileCache();
+    // Windows desktop launches without stdin; attach before reading, except on fast paths using pipes.
     const { attachConsoleStdin } = await import("./cli/consoleStdin.ts");
     attachConsoleStdin();
     // A server started from an agent shell must not pass that shell's thread
@@ -37,7 +49,11 @@ if (
     delete process.env.T3CODE_THREAD_ID;
     delete process.env.T3CODE_AGENT_SHELL_URL;
     delete process.env.T3CODE_AGENT_SHELL_AUTHORIZATION;
+    const importStart = performance.now();
     const { runCli } = await import("./binCli.ts");
+    if (process.env.T3CODE_STARTUP_PROFILE_DIR) {
+      performance.measure("server.import.binCli", { start: importStart });
+    }
     runCli();
   }
 }

@@ -6,6 +6,7 @@ import {
   secretRequestCopy,
   secretRequestDisplay,
   secretRequestFailureMessage,
+  secretRequestPrivacyNote,
   type SecretRequestItem,
 } from "./secretRequest.ts";
 
@@ -23,6 +24,13 @@ describe("secretRequestDisplay", () => {
     expect(secretRequestDisplay({ secretStatus: "saved" }, "inherited")).toMatchObject({
       outcome: "saved",
     });
+  });
+});
+
+describe("secretRequestPrivacyNote", () => {
+  it("does not promise to hide a value that the agent's commands can read", () => {
+    expect(secretRequestPrivacyNote({})).toBe("Stored securely, never shown to the agent");
+    expect(secretRequestPrivacyNote({ delivery: "file" })).not.toContain("never shown");
   });
 });
 

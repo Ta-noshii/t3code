@@ -85,6 +85,8 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
       );
     case "canvas":
       return surface.id === "canvas" && (surface.path === null || typeof surface.path === "string");
+    case "side-chat":
+      return typeof surface.threadId === "string" && surface.id === `side-chat:${surface.threadId}`;
     case "pull-request":
       return (
         typeof surface.projectId === "string" &&

@@ -3,10 +3,9 @@ import * as Schema from "effect/Schema";
 import { NonBlankString, ThreadId, TurnItemId } from "./baseSchemas.ts";
 
 /**
- * The user's answer to an agent's request for a secret. A saved value is kept
- * by the server under a one-use SecretRef, or handed to the shell process
- * that asked; the thread learns only the status. The value arrives exactly as
- * typed: the ref store trims it, a shell prompt keeps it (passwords).
+ * Server stores the value under a one-use SecretRef, or hands it to the shell
+ * process that asked; the thread learns only status. The value arrives exactly
+ * as typed: the ref store trims it, a shell prompt keeps it (passwords).
  */
 export const SecretRequestAnswerInput = Schema.Struct({
   threadId: ThreadId,
@@ -31,6 +30,8 @@ const SECRET_REQUEST_FAILURE_MESSAGES = {
     "That secretRef was already used or does not exist. Ask the user again with request_secret.",
   ref_expired: "That secretRef expired. Ask the user again with request_secret.",
   consume_failed: "Could not use that secretRef. Try again.",
+  not_a_file_request:
+    'The user did not save this secret for shell use. Ask again with request_secret and delivery: "file".',
 } as const;
 
 export const SecretRequestFailureReason = Schema.Literals(
