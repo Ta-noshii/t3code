@@ -1823,6 +1823,7 @@ function makeNativeForkFallbackHarness() {
       activeProviderThreadId: providerThreadId,
       branch: null,
       worktreePath: null,
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
     },
     runs: [
       {
@@ -1921,19 +1922,16 @@ function makeNativeForkFallbackHarness() {
     checkpoints: [],
     updatedAt: now,
   } as unknown as OrchestrationV2ThreadProjection;
-  const targetRow = (
+  const sourceItem = (
     id: string,
-    runId: RunId | null,
-    visibility: "local" | "inherited",
+    runId: RunId,
     type: OrchestrationV2TurnItem["type"] = "assistant_message",
-  ) => ({ visibility, item: { id: TurnItemId.make(id), runId, type } });
-  // The fork's own timeline: inherited rows up to the fork point, then its own.
-  const targetRows = [
-    targetRow("item-from-grandparent", RunId.make("run-fork-fallback-grandparent"), "inherited"),
-    targetRow("item-imported", null, "inherited"),
-    targetRow("item-reasoning", sourceRun.id, "inherited", "reasoning"),
-    targetRow("item-kept", sourceRun.id, "inherited"),
-    targetRow("item-target-prompt", runId, "local", "user_message"),
+  ) => ({ id: TurnItemId.make(id), runId, type }) as unknown as OrchestrationV2TurnItem;
+  // The source's conversation: the fork point's run, then a run after it.
+  const sourceItems = [
+    sourceItem("item-reasoning", sourceRun.id, "reasoning"),
+    sourceItem("item-kept", sourceRun.id),
+    sourceItem("item-after-fork-point", laterSourceRun.id),
   ];
   const events: Array<OrchestrationV2DomainEvent> = [];
   const commit = (incoming: ReadonlyArray<OrchestrationV2DomainEvent>) => {
@@ -2027,9 +2025,14 @@ function makeNativeForkFallbackHarness() {
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getTurnStartContext: turnStartContext,
           getRuntimeRecoveryProjection: turnStartContext,
-          getThreadRecords: () =>
+          getThreadRecords: (_threadId, fields, options) =>
             Effect.succeed({
-              thread: projection.thread,
+              turnItems: (fields as ReadonlyArray<string>).includes("turnItems")
+                ? sourceItems.filter((item) =>
+                    (options?.turnItemRunIds ?? []).includes(item.runId as RunId),
+                  )
+                : [],
+              thread: { ...projection.thread, id: sourceThreadId },
               runs: [
                 {
                   ...sourceRun,
@@ -2050,10 +2053,6 @@ function makeNativeForkFallbackHarness() {
               attempts: [],
               providerTurns: [],
             } as never),
-          getThreadProjection: (requested) =>
-            requested === threadId
-              ? Effect.succeed({ visibleTurnItems: targetRows } as never)
-              : Effect.die("The fallback reads the fork's own inherited rows"),
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           open: () => Effect.succeed(session as never),
@@ -2106,12 +2105,8 @@ effectIt.effect("continues a fork from the source transcript when the native for
       coveredRunOrdinals: { from: 1, to: 1 },
       strategy: "full_thread_summary",
     });
-    // The inherited conversation goes over; reasoning and the fork's own prompt do not.
-    expect(handoffInput?.items.map((item) => item.id)).toEqual([
-      "item-from-grandparent",
-      "item-imported",
-      "item-kept",
-    ]);
+    // The source's conversation up to the fork point goes over, not what came after it.
+    expect(handoffInput?.items.map((item) => item.id)).toEqual(["item-reasoning", "item-kept"]);
     const projection = harness.projection();
     expect(projection.contextTransfers).toMatchObject([
       {

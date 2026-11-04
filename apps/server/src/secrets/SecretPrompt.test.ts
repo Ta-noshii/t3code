@@ -42,13 +42,16 @@ const withService = <A, E>(
     const layerDependencies = Layer.mergeAll(
       NodeCrypto.layer,
       NodeServices.layer,
-      Layer.mock(ServerSecretStore.ServerSecretStore)({
-        get: (name) => Effect.succeed(Option.fromNullishOr(stored.get(name))),
-        set: (name, value) => Effect.sync(() => void stored.set(name, value)),
-        create: (name, value) => Effect.sync(() => void stored.set(name, value)),
-        getOrCreateRandom: (_name, bytes) => Effect.succeed(new Uint8Array(bytes).fill(7)),
-        remove: (name) => Effect.sync(() => void stored.delete(name)),
-      }),
+      Layer.succeed(
+        ServerSecretStore.ServerSecretStore,
+        ServerSecretStore.ServerSecretStore.of({
+          get: (name) => Effect.succeed(Option.fromNullishOr(stored.get(name))),
+          set: (name, value) => Effect.sync(() => void stored.set(name, value)),
+          create: (name, value) => Effect.sync(() => void stored.set(name, value)),
+          getOrCreateRandom: (_name, bytes) => Effect.succeed(new Uint8Array(bytes).fill(7)),
+          remove: (name) => Effect.sync(() => void stored.delete(name)),
+        }),
+      ),
       Layer.mock(ThreadManagementService.ThreadManagementService)({
         getThreadRecords: () =>
           Effect.succeed({
