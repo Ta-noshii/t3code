@@ -31,7 +31,7 @@ const segmentColor: Record<OrchestrationV2AgentProgressItemStatus, string> = {
   failed: "bg-destructive",
   // Fixed blue: app themes map primary to their action color, which can be
   // the same red as failed.
-  running: "bg-info motion-safe:animate-pulse",
+  running: "bg-info",
   skipped: "bg-muted-foreground/45",
   pending: "bg-muted-foreground/15",
 };
