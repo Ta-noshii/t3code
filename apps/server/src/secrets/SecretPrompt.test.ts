@@ -48,6 +48,8 @@ const withService = <A, E>(
         create: (name, value) => Effect.sync(() => void stored.set(name, value)),
         getOrCreateRandom: (_name, bytes) => Effect.succeed(new Uint8Array(bytes).fill(7)),
         remove: (name) => Effect.sync(() => void stored.delete(name)),
+        // Never created: these tests save no files.
+        directory: "/nonexistent/t3-secret-prompt-test",
       }),
       Layer.mock(ThreadManagementService.ThreadManagementService)({
         getThreadRecords: () =>

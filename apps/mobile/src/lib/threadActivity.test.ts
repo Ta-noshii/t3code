@@ -2113,9 +2113,9 @@ it("caps live thought previews while preserving reasoning detail", () => {
   );
   const header = rows.find((row) => row.type === "work-toggle");
   expect(header).toMatchObject({ summary: "Thinking", live: true });
-  expect(header?.thought).toMatch(/^Considering the pending approval/);
-  expect(header?.thought).not.toContain("\n");
-  expect(header!.thought!.length).toBeLessThanOrEqual(203);
+  // A live thought streams in the trail, so the header has no preview line.
+  expect(header?.thought).toBeUndefined();
+  expect(header?.trail?.steps).toMatchObject([{ kind: "thought", live: true }]);
   const activity = feed.flatMap((row) => (row.type === "activity-group" ? row.activities : []))[0]!;
   expect(activity.detail).toBe(text);
   expect(JSON.parse(activity.getFullDetail()!).item).toMatchObject({ text });
