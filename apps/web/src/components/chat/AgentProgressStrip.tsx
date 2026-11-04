@@ -29,7 +29,9 @@ const MAX_ITEM_SEGMENTS = 60;
 const segmentColor: Record<OrchestrationV2AgentProgressItemStatus, string> = {
   done: "bg-success",
   failed: "bg-destructive",
-  running: "bg-primary",
+  // Fixed blue: app themes map primary to their action color, which can be
+  // the same red as failed.
+  running: "bg-info motion-safe:animate-pulse",
   skipped: "bg-muted-foreground/45",
   pending: "bg-muted-foreground/15",
 };
@@ -53,7 +55,7 @@ const statusIcon: Record<OrchestrationV2AgentProgressItemStatus, typeof CircleIc
 const statusIconColor: Record<OrchestrationV2AgentProgressItemStatus, string> = {
   done: "text-success",
   failed: "text-destructive",
-  running: "text-primary",
+  running: "text-info",
   skipped: "text-muted-foreground/60",
   pending: "text-muted-foreground/40",
 };
