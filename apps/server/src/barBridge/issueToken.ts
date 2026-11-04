@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
 import * as Duration from "effect/Duration";
@@ -39,6 +40,8 @@ export const issueBarToken = (baseDir: string): Promise<string> =>
     );
     return session.token;
   }).pipe(
-    Effect.provide(Layer.mergeAll(NodeServices.layer, NetService.layer, FetchHttpClient.layer)),
+    Effect.provide(
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer, FetchHttpClient.layer),
+    ),
     Effect.runPromise,
   );

@@ -7,8 +7,6 @@ import {
   ContextHandoffId,
   ContextTransferId,
   GitCommandError,
-  ContextHandoffId,
-  ContextTransferId,
   MessageId,
   NodeId,
   ProviderSessionId,

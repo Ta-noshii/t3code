@@ -1661,12 +1661,14 @@ describe("CodexAdapterV2 post-settle continuation", () => {
 
   it("starts a thread at the selected reasoning effort, which review/start uses", () => {
     const params = CodexAdapterV2.codexThreadRuntimeParams({
+      threadId: null,
       mcpSession: undefined,
       modelSelection: { model: "gpt-5.4", options: [{ id: "reasoningEffort", value: "medium" }] },
     });
     assert.equal(params.config.model_reasoning_effort, "medium");
     assert.isUndefined(
       CodexAdapterV2.codexThreadRuntimeParams({
+        threadId: null,
         mcpSession: undefined,
         modelSelection: { model: "gpt-5.4" },
       }).config.model_reasoning_effort,
@@ -1675,6 +1677,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
 
   it("gives each thread's shell commands that thread's agent shell credential", () => {
     const params = CodexAdapterV2.codexThreadRuntimeParams({
+      threadId: null,
       mcpSession: {
         environmentId: EnvironmentId.make("environment-codex-mcp"),
         threadId: ThreadId.make("thread-codex-shell"),
@@ -2724,7 +2727,12 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         assert.equal(harness.terminalEvents()[0]?.status, "completed");
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
         ),
       ),
     ),

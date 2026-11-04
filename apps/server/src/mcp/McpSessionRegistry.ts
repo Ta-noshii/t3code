@@ -119,7 +119,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
       const providerSessionId = yield* random.uuidV4();
       const rawToken = yield* random.randomBytes(32).pipe(Effect.map(tokenFromBytes), Effect.orDie);
       const tokenHash = yield* hashToken(rawToken);
-      const rawShellToken = yield* crypto
+      const rawShellToken = yield* random
         .randomBytes(32)
         .pipe(Effect.map(tokenFromBytes), Effect.orDie);
       const shellTokenHash = yield* hashToken(rawShellToken);

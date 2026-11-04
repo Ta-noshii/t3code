@@ -30,9 +30,6 @@ import {
   presentPendingBackgroundWork,
   presentProviderGoal,
   presentRunStop,
-  });
-});
-
   latestPromptSuggestion,
   shouldRecapThread,
   THREAD_RECAP_AWAY_MS,
@@ -543,7 +540,6 @@ describe("presentPendingBackgroundWork", () => {
       },
     ]);
     expect(presentation?.items[0]?.label).toBe("mv a.ts b.ts\ncat > b.ts <<'EOF'\nexport {};\nEOF");
-  });
   });
 });
 

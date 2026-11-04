@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   EnvironmentId,
   type OrchestrationV2AgentProgress,
@@ -8,7 +9,6 @@ import {
 } from "@t3tools/contracts";
 import { applyAgentProgressUpdate, summarizeAgentProgress } from "@t3tools/shared/agentProgress";
 import { describe, expect, it } from "@effect/vitest";
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
@@ -26,11 +26,6 @@ const ROOT = ThreadId.make("thread-root");
 const CHILD = ThreadId.make("thread-child");
 const GRANDCHILD = ThreadId.make("thread-grandchild");
 const FORK = ThreadId.make("thread-fork");
-
-const testCrypto = Crypto.make({
-  randomBytes: (size) => new Uint8Array(size).fill(7),
-  digest: (_algorithm, data) => Effect.succeed(data),
-});
 
 function child(
   id: ThreadId,
@@ -95,7 +90,7 @@ const makeHarness = Effect.fn("makeProgressToolkitHarness")(function* () {
         return { sequence: 1, storedEvents: [] };
       }),
   });
-  const dependencies = Layer.mergeAll(threads, Layer.succeed(Crypto.Crypto, testCrypto));
+  const dependencies = Layer.mergeAll(threads, NodeCrypto.layer);
   const toolkit = yield* ProgressToolkit.pipe(
     Effect.provide(
       McpToolAccess.HandlersLayer.layer(ProgressHandlers.layer).pipe(Layer.provide(dependencies)),

@@ -65,7 +65,7 @@ const layerCanvasMock = Layer.mock(CanvasService.CanvasService)({
 });
 
 const layerTest = McpHttpServer.layerCanvasToolkit.pipe(
-  Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
   Layer.provideMerge(McpToolAccessTestkit.liveThreadsLayer),
   Layer.provideMerge(layerCanvasMock),
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-canvas-toolkit-test-" })),
