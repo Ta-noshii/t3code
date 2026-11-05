@@ -6,6 +6,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import {
+  isJsonToolText,
   toolCallLines,
   turnItemDetailRevision,
   turnItemNeedsDetailFetch,
@@ -60,7 +61,7 @@ function SyntaxTokens({
   language,
 }: {
   readonly text: string;
-  readonly language: "json" | "typescript";
+  readonly language: "json" | "typescript" | "html";
 }) {
   const resolvedTheme = useRenderedAppearance();
   const highlighter = use(getSyntaxHighlighterPromise(language));
@@ -81,16 +82,6 @@ function SyntaxTokens({
 const monoClassName =
   "font-mono text-(length:--font-size-code,var(--text-2xs)) leading-relaxed whitespace-pre-wrap break-words select-text";
 
-function isJsonText(text: string): boolean {
-  if (!text) return false;
-  try {
-    JSON.parse(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function StructuredValue({
   value,
   highlightJson = false,
@@ -98,10 +89,10 @@ function StructuredValue({
 }: {
   readonly value: unknown;
   readonly highlightJson?: boolean;
-  readonly language?: "typescript";
+  readonly language?: "typescript" | "html" | "json";
 }) {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  const isJson = highlightJson && isJsonText(text);
+  const isJson = highlightJson && isJsonToolText(text);
   if (!text) return null;
   return (
     <pre className={cn("max-h-80 overflow-auto text-muted-foreground", monoClassName)}>
@@ -179,10 +170,8 @@ interface ToolOutputState {
 
 const NO_CONTEXT: ToolViewContext = { cwd: undefined, threadRef: undefined };
 
-function ToolOutput(props: ToolOutputState & { readonly context?: ToolViewContext | undefined }) {
-  // Images load as assets below; the detail read carries no image bytes.
-  const blocks = props.blocks?.filter((block) => block.kind !== "image") ?? null;
-  const images = (props.hideImages ? [] : props.images).map((resource) => (
+function ToolOutputImages(props: ToolOutputState) {
+  return (props.hideImages ? [] : props.images).map((resource) => (
     <ChatMarkdownAssetImage
       key={resource.index}
       environmentId={props.environmentId}
@@ -192,34 +181,32 @@ function ToolOutput(props: ToolOutputState & { readonly context?: ToolViewContex
       onImageExpand={props.onImageExpand}
     />
   ));
+}
+
+function ToolOutput(props: ToolOutputState & { readonly context?: ToolViewContext | undefined }) {
+  // Images load as assets above; the detail read carries no image bytes.
+  const blocks = props.blocks?.filter((block) => block.kind !== "image") ?? null;
   // Some tools answer with nothing on purpose, such as a thread wait that ran out.
   const hasResult =
     blocks !== null &&
     (blocks.length > 0 || toolResultDigest(props.toolName, null, props.input) !== null);
-  const text =
-    blocks && hasResult ? (
-      <ToolOutputView
-        blocks={blocks}
-        raw={props.raw}
-        toolName={props.toolName}
-        input={props.input}
-        context={props.context ?? NO_CONTEXT}
-      />
-    ) : props.output ? (
-      <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
-    ) : props.pending ? (
-      <div className="text-muted-foreground italic">Loading output…</div>
-    ) : props.error ? (
-      <div className="text-destructive">Couldn&apos;t load output: {props.error}</div>
-    ) : props.empty && images.length === 0 ? (
-      <div className="text-muted-foreground italic">No output.</div>
-    ) : null;
-  return (
-    <>
-      {images}
-      {text}
-    </>
-  );
+  return blocks && hasResult ? (
+    <ToolOutputView
+      blocks={blocks}
+      raw={props.raw}
+      toolName={props.toolName}
+      input={props.input}
+      context={props.context ?? NO_CONTEXT}
+    />
+  ) : props.output ? (
+    <StructuredValue value={props.output} highlightJson />
+  ) : props.pending ? (
+    <div className="text-muted-foreground italic">Loading output…</div>
+  ) : props.error ? (
+    <div className="text-destructive">Couldn&apos;t load output: {props.error}</div>
+  ) : props.empty && (props.hideImages || props.images.length === 0) ? (
+    <div className="text-muted-foreground italic">No output.</div>
+  ) : null;
 }
 
 export function FetchedToolOutput(props: {
@@ -233,6 +220,7 @@ export function FetchedToolOutput(props: {
   const { output } = useFetchedTurnItem(props.projectedItem, props.environmentId, props.source);
   return (
     <div className={cn("mt-1.5 space-y-1.5", monoClassName)}>
+      <ToolOutputImages {...output} onImageExpand={props.onImageExpand} hideImages={props.hideImages} />
       <ToolOutput {...output} onImageExpand={props.onImageExpand} hideImages={props.hideImages} />
     </div>
   );
@@ -254,6 +242,7 @@ function ToolCallBody(
       <div className="space-y-3">
         <ToolCallDigestView digest={digest} context={props.context ?? NO_CONTEXT} />
         <div className="border-t border-border/40 pt-2">
+          <ToolOutputImages {...props} />
           <ToolOutput {...props} />
         </div>
       </div>
@@ -262,14 +251,19 @@ function ToolCallBody(
   const call = toolCallLines({ command: props.command, args: props.args });
   return (
     <div className={cn("space-y-1.5", monoClassName)}>
+      <ToolOutputImages {...props} />
       {call.command ? <ShellCommandBlock command={call.command} /> : null}
       {call.args ? (
         <div className="text-foreground/85">
           {call.args.map(([key, value]) => (
             <div key={key}>
               <span className="text-muted-foreground">{key} </span>
-              {key === "code" && isJavaScriptReplTool(props.toolName) ? (
+              {key === "html" ? (
+                <StructuredValue value={value} language="html" />
+              ) : key === "code" && isJavaScriptReplTool(props.toolName) ? (
                 <StructuredValue value={value} language="typescript" />
+              ) : isJsonToolText(value) ? (
+                <StructuredValue value={value} language="json" />
               ) : (
                 value
               )}

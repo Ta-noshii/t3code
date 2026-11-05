@@ -4,6 +4,7 @@ import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { isCompactCommand } from "@t3tools/client-runtime/state/thread-workflows";
 import { readEnvironmentScope } from "./session";
 import { useAtomValue } from "@effect/atom-react";
+import { shouldCompactBeforeSend } from "@t3tools/client-runtime/state/context-window";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/shell";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { resolvePendingHandoff } from "@t3tools/client-runtime/handoff";
@@ -667,6 +668,25 @@ export function useThreadComposerState() {
             : "auto";
 
     const metadata = makeQueuedMessageMetadata();
+    const compactBeforeSend =
+      followUpDispatchMode === null &&
+      selectedEnvironmentRuntime?.connectionState === "connected" &&
+      selectedThreadProjection !== null &&
+      serverConfig != null &&
+      shouldCompactBeforeSend({
+        projection: selectedThreadProjection.projection,
+        visibleTurnItems: selectedThreadVisibleTurnItems,
+        selection: modelSelection,
+        providers: serverConfig.providers,
+        settings: serverConfig.settings,
+        text,
+        threadIdle:
+          !activeThreadBusy &&
+          !runlessWorkActive &&
+          !isCompacting &&
+          selectedThreadQueuedMessages.length === 0,
+        now: metadata.createdAt,
+      });
     const messageId = MessageId.make(metadata.messageId);
     onWillEnqueue?.();
     clearThreadComposerError(threadKey);
@@ -684,7 +704,11 @@ export function useThreadComposerState() {
         provider,
         draft.interactionMode ?? thread.interactionMode,
       ),
-      ...(followUpDispatchMode === null ? {} : { dispatchMode: followUpDispatchMode }),
+      ...(compactBeforeSend
+        ? { compactBeforeSend, dispatchMode: "queue" as const }
+        : followUpDispatchMode === null
+          ? {}
+          : { dispatchMode: followUpDispatchMode }),
       createdAt: metadata.createdAt,
     });
     clearComposerDraftContent(threadKey, { deferAttachmentCleanup: true });
