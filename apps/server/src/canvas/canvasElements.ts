@@ -100,6 +100,7 @@ export interface CanvasElementPatch {
   readonly [field: string]: unknown;
 }
 
+// @effect-diagnostics-next-line extendsNativeError:off - thrown by these pure helpers and caught at their Effect boundary.
 export class CanvasPatchError extends Error {}
 
 const randomNonce = () => Math.floor(Math.random() * 2 ** 31);

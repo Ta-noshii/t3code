@@ -42,47 +42,51 @@ export function HostPushCoordinator() {
   return null;
 }
 
+// Outside the component: React Compiler skips a component with a try block.
+async function exportPushDevice(userId: string, pushLive: boolean) {
+  try {
+    const permission = await Notifications.requestPermissionsAsync();
+    if (!permission.granted) throw new Error("Allow notifications in Android settings first.");
+    const token = await Notifications.getDevicePushTokenAsync();
+    if (typeof token.data !== "string" || !token.data)
+      throw new Error("Firebase did not issue a device token.");
+    const deviceId = await loadOrCreateAgentAwarenessDeviceId();
+    configureAndroidAgentNotifications(deviceId, userId, pushLive);
+    saveNowBarPreferences({ push: true });
+    const file = new File(Paths.cache, "t3-nowbar-device.json");
+    file.write(
+      JSON.stringify({
+        token: token.data,
+        deviceId,
+        userId,
+        packageName: Constants.expoConfig?.android?.package,
+        unreadSince: nowBarNative?.readState().since,
+      }),
+    );
+    try {
+      await Sharing.shareAsync(file.uri, {
+        mimeType: "application/json",
+        dialogTitle: "Pair this phone with the misc push sender",
+      });
+    } finally {
+      if (file.exists) file.delete();
+    }
+  } catch (error) {
+    Alert.alert(
+      "Remote notifications",
+      error instanceof Error ? error.message : "Could not prepare push setup.",
+    );
+  }
+}
+
 export function HostPushSettings({ userId }: { readonly userId: string | null }) {
   const preferences = useNowBarPreferences();
   const [busy, setBusy] = useState(false);
   const exportDevice = async () => {
     if (!userId) return;
     setBusy(true);
-    try {
-      const permission = await Notifications.requestPermissionsAsync();
-      if (!permission.granted) throw new Error("Allow notifications in Android settings first.");
-      const token = await Notifications.getDevicePushTokenAsync();
-      if (typeof token.data !== "string" || !token.data)
-        throw new Error("Firebase did not issue a device token.");
-      const deviceId = await loadOrCreateAgentAwarenessDeviceId();
-      configureAndroidAgentNotifications(deviceId, userId, preferences.pushLive);
-      saveNowBarPreferences({ push: true });
-      const file = new File(Paths.cache, "t3-nowbar-device.json");
-      file.write(
-        JSON.stringify({
-          token: token.data,
-          deviceId,
-          userId,
-          packageName: Constants.expoConfig?.android?.package,
-          unreadSince: nowBarNative?.readState().since,
-        }),
-      );
-      try {
-        await Sharing.shareAsync(file.uri, {
-          mimeType: "application/json",
-          dialogTitle: "Pair this phone with the misc push sender",
-        });
-      } finally {
-        if (file.exists) file.delete();
-      }
-    } catch (error) {
-      Alert.alert(
-        "Remote notifications",
-        error instanceof Error ? error.message : "Could not prepare push setup.",
-      );
-    } finally {
-      setBusy(false);
-    }
+    await exportPushDevice(userId, preferences.pushLive);
+    setBusy(false);
   };
   return (
     <>

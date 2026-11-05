@@ -2180,7 +2180,7 @@ function makeNativeForkFallbackHarness() {
         runId,
         willRetry,
       });
-    }).pipe(Effect.provide(layer), Effect.provide(layerWorktreeLocation()));
+    }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(layerWorktreeLocation()))));
   return {
     transferId,
     handoffId,

@@ -133,7 +133,7 @@ const make = Effect.gen(function* () {
       .readFileString(path.join(root, CANVAS_HOST_PAGE_PATH))
       .pipe(Effect.mapError(rendererMissing));
     const executable = yield* previewBrowser.executable;
-    // @effect-diagnostics-next-line preferSchemaOverJson:off - the op is plain JSON data for the page.
+    // @effect-diagnostics-next-line globalJsonInEffect:off - the op is plain JSON data for the page.
     const input = new TextEncoder().encode(JSON.stringify(op));
     const result = yield* browsers.withPermits(1)(
       HeadlessChrome.evaluatePage({

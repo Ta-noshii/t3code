@@ -10,6 +10,32 @@ import { nowBarUpdateProgressLabel } from "./NowBarUpdateDialog";
 import { checkNowBarUpdate, useNowBarUpdate } from "./updates";
 import { NowBarLab } from "./NowBarLab";
 
+// Outside the component: React Compiler skips a component with a try block.
+async function setNowBarEnabled(enabled: boolean) {
+  try {
+    if (enabled) {
+      const permission = await Notifications.requestPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          "Notifications are disabled",
+          "Allow notifications in Android settings to use Now Bar.",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Open settings", onPress: () => nowBarNative?.openSettings() },
+          ],
+        );
+        return;
+      }
+    }
+    saveNowBarPreferences({ enabled });
+  } catch (error) {
+    Alert.alert(
+      "Now Bar",
+      error instanceof Error ? error.message : "Could not change notification settings.",
+    );
+  }
+}
+
 export function NowBarSettings() {
   const preferences = useNowBarPreferences();
   const update = useNowBarUpdate();
@@ -25,31 +51,9 @@ export function NowBarSettings() {
   if (!nowBarNative) return null;
   const enable = async (enabled: boolean) => {
     setBusy(true);
-    try {
-      if (enabled) {
-        const permission = await Notifications.requestPermissionsAsync();
-        if (!permission.granted) {
-          Alert.alert(
-            "Notifications are disabled",
-            "Allow notifications in Android settings to use Now Bar.",
-            [
-              { text: "Cancel", style: "cancel" },
-              { text: "Open settings", onPress: () => nowBarNative?.openSettings() },
-            ],
-          );
-          return;
-        }
-      }
-      saveNowBarPreferences({ enabled });
-      setCapabilities(nowBarNative?.capabilities());
-    } catch (error) {
-      Alert.alert(
-        "Now Bar",
-        error instanceof Error ? error.message : "Could not change notification settings.",
-      );
-    } finally {
-      setBusy(false);
-    }
+    await setNowBarEnabled(enabled);
+    setCapabilities(nowBarNative?.capabilities());
+    setBusy(false);
   };
   return (
     <View className="gap-3">

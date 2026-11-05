@@ -7,6 +7,15 @@ import { nowBarNative, useNowBarPreferences } from "./native";
 import { checkNowBarUpdate } from "./updates";
 import { useNowBarUnread } from "./unread";
 
+// Outside the component: React Compiler skips a component with a try block.
+function publishRows(payload: string) {
+  try {
+    nowBarNative?.publish(payload);
+  } catch (error) {
+    console.warn("[nowbar] Could not refresh notification", error);
+  }
+}
+
 export function NowBarCoordinator() {
   const threads = useThreadShells();
   const catalogs = useServerConfigs();
@@ -65,13 +74,7 @@ export function NowBarCoordinator() {
 
   useEffect(() => {
     if (!nowBarNative) return;
-    const publish = () => {
-      try {
-        nowBarNative?.publish(preferences.enabled ? payload : "[]");
-      } catch (error) {
-        console.warn("[nowbar] Could not refresh notification", error);
-      }
-    };
+    const publish = () => publishRows(preferences.enabled ? payload : "[]");
     publish();
     const heartbeat = nowBarNative.addListener("heartbeat", publish);
     // The same snapshot renews the native freshness lease. The foreground

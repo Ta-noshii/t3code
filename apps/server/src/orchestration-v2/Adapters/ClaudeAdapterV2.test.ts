@@ -1547,6 +1547,10 @@ describe("ClaudeAdapterV2 thread recap", () => {
                 setPermissionMode: () => Effect.void,
                 backgroundTasks: () => Effect.succeed(false),
                 stopTask: () => Effect.void,
+                mcpServerStatus: Effect.succeed([]),
+                readMcpResource: () => Effect.die("unused"),
+                callMcpTool: () => Effect.die("unused"),
+                listPermissionRules: Effect.succeed([]),
                 interrupt: Effect.void,
                 close: Effect.sync(() => void (closed += 1)),
               };

@@ -215,15 +215,14 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
     busyRef.current = true;
     setBusyRunId(activeRun.id);
     void Haptics.selectionAsync();
-    try {
-      await sendAllQueued({
-        ...target,
-        input: { threadId: target.threadId, targetRunId: activeRun.id },
-      });
-    } finally {
+    // `.finally`, not a try block: React Compiler skips a component with one.
+    await sendAllQueued({
+      ...target,
+      input: { threadId: target.threadId, targetRunId: activeRun.id },
+    }).finally(() => {
       busyRef.current = false;
       setBusyRunId(null);
-    }
+    });
   };
 
   const content = (

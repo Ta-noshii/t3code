@@ -747,31 +747,32 @@ export function useThreadComposerState() {
     const metadata = makeQueuedMessageMetadata();
     const messageId = MessageId.make(metadata.messageId);
     clearThreadComposerError(threadKey);
-    try {
-      await enqueueThreadOutboxMessage({
-        environmentId: thread.environmentId,
-        threadId: thread.id,
-        messageId,
-        commandId: CommandId.make(metadata.commandId),
-        text,
-        attachments: [],
-        modelSelection,
-        runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
-        interactionMode: resolveProviderInteractionMode(
-          provider,
-          draft.interactionMode ?? thread.interactionMode,
-        ),
-        dispatchMode: "queue",
-        createdAt: metadata.createdAt,
-      });
-    } catch (error) {
-      setThreadComposerError(
-        threadKey,
-        error instanceof Error ? error.message : "Failed to send the reply.",
-      );
-      return null;
-    }
-    return messageId;
+    // Promise form, not a try block: React Compiler skips a hook with value blocks inside one.
+    return enqueueThreadOutboxMessage({
+      environmentId: thread.environmentId,
+      threadId: thread.id,
+      messageId,
+      commandId: CommandId.make(metadata.commandId),
+      text,
+      attachments: [],
+      modelSelection,
+      runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
+      interactionMode: resolveProviderInteractionMode(
+        provider,
+        draft.interactionMode ?? thread.interactionMode,
+      ),
+      dispatchMode: "queue",
+      createdAt: metadata.createdAt,
+    }).then(
+      () => messageId,
+      (error: unknown) => {
+        setThreadComposerError(
+          threadKey,
+          error instanceof Error ? error.message : "Failed to send the reply.",
+        );
+        return null;
+      },
+    );
   };
 
   const onChangeDraftMessage = (value: string) => {

@@ -23,7 +23,6 @@ import {
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Mac from "effect/crypto/Mac";
-import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -35,6 +34,8 @@ import * as Ref from "effect/Ref";
 import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+// @effect-diagnostics-next-line nodeBuiltinImport:off - only draws a key for a turn item id.
+import * as NodeCrypto from "node:crypto";
 import * as Semaphore from "effect/Semaphore";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -80,10 +81,13 @@ export interface SecretPromptHandle {
 }
 
 /** A shell prompt could not be shown: the thread has no run the shell belongs to. */
-export class SecretPromptUnavailableError extends Data.TaggedError("SecretPromptUnavailableError")<{
-  readonly reason: "no_active_run" | "record_failed";
-  readonly cause?: unknown;
-}> {}
+export class SecretPromptUnavailableError extends Schema.TaggedError<SecretPromptUnavailableError>()(
+  "SecretPromptUnavailableError",
+  {
+    reason: Schema.Literals(["no_active_run", "record_failed"]),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 type ShellAnswer =
   | { readonly type: "save"; readonly secret: string }

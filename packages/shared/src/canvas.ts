@@ -325,6 +325,7 @@ export function unionCanvasRects(rects: ReadonlyArray<CanvasRect>): CanvasRect |
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
+// @effect-diagnostics-next-line extendsNativeError:off - thrown by these pure helpers and caught at their Effect boundary.
 export class CanvasCropError extends Error {}
 
 const CANVAS_SCREENSHOT_DEFAULT_PADDING = 24;
