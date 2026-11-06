@@ -98,6 +98,8 @@ jobs:
           run-install: |
             args:
               - --filter=@t3tools/mobile...
+              # The root owns effect-tsgo, which the mobile typecheck runs.
+              - --filter=@t3tools/monorepo
               - --frozen-lockfile
 
       - uses: gradle/actions/setup-gradle@v5
@@ -110,7 +112,7 @@ jobs:
           # From apps/mobile, so only the mobile test config loads: a run from the
           # root loads every package's config, and this job installs mobile only.
           (cd apps/mobile && vp test run src/features/nowbar/model.test.ts src/features/nowbar/update-manifest.test.ts src/features/nowbar/debug.test.ts src/lib/appLinking.test.ts)
-          (cd apps/mobile && node_modules/.bin/tsc --noEmit)
+          (cd apps/mobile && vp run typecheck)
 
       - name: Configure Firebase for this fork
         if: steps.source.outputs.build == 'true'
