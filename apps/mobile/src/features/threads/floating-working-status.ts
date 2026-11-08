@@ -48,6 +48,7 @@ export type FloatingWorkingStatus =
       readonly accessibilityLabel: string;
       readonly action: FloatingStatusAction;
     }
+  | { readonly kind: "extension"; readonly label: string; readonly onPress: () => void }
   | { readonly kind: "preparing"; readonly label: string }
   | {
       readonly kind: "connection";

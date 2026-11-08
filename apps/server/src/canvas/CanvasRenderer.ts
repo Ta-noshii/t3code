@@ -133,7 +133,7 @@ const make = Effect.gen(function* () {
       .readFileString(path.join(root, CANVAS_HOST_PAGE_PATH))
       .pipe(Effect.mapError(rendererMissing));
     const executable = yield* previewBrowser.executable;
-    // @effect-diagnostics-next-line preferSchemaOverJson:off - the op is plain JSON data for the page.
+    // @effect-diagnostics-next-line globalJsonInEffect:off - the op is plain JSON data for the page.
     const input = new TextEncoder().encode(JSON.stringify(op));
     const result = yield* browsers.withPermits(1)(
       HeadlessChrome.evaluatePage({
@@ -182,22 +182,24 @@ const make = Effect.gen(function* () {
     );
 
   return CanvasRenderer.of({
-    // @effect-diagnostics-next-line effectFnOpportunity:off - one-line wrappers over run().
-    render: (input) => run({ op: "render", ...input }).pipe(expect("png")),
-    // @effect-diagnostics-next-line effectFnOpportunity:off - one-line wrappers over run().
-    convert: (input) =>
+    render: Effect.fn("CanvasRenderer.render")((input) =>
+      run({ op: "render", ...input }).pipe(expect("png")),
+    ),
+    convert: Effect.fn("CanvasRenderer.convert")((input) =>
       run({ op: "convert", ...input }).pipe(
         expect("elements"),
         Effect.map((value) => value.elements),
       ),
-    // @effect-diagnostics-next-line effectFnOpportunity:off - one-line wrappers over run().
-    normalize: (elements) =>
+    ),
+    normalize: Effect.fn("CanvasRenderer.normalize")((elements) =>
       run({ op: "normalize", elements }).pipe(
         expect("elements"),
         Effect.map((value) => value.elements),
       ),
-    // @effect-diagnostics-next-line effectFnOpportunity:off - one-line wrappers over run().
-    downscale: (input) => run({ op: "downscale", ...input }).pipe(expect("dataURL")),
+    ),
+    downscale: Effect.fn("CanvasRenderer.downscale")((input) =>
+      run({ op: "downscale", ...input }).pipe(expect("dataURL")),
+    ),
   });
 });
 

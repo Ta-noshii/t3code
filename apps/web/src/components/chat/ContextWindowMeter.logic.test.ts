@@ -1,11 +1,12 @@
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
+import { hasDismissedResumeCompaction } from "@t3tools/client-runtime/state/context-window";
 import {
   buildAutoCompactWindowOptions,
-  hasAvailableCompactionProvider,
-  hasDismissedResumeCompaction,
+  formatContextWindowCompactionMessage,
   parseAutoCompactWindow,
+  hasAvailableCompactionProvider,
   resolveContextWindowModelDisplayName,
   shouldReserveContextWindowMeter,
 } from "./ContextWindowMeter.logic";
@@ -157,6 +158,20 @@ describe("shouldReserveContextWindowMeter", () => {
         providerReportsContextWindow: null,
       }),
     ).toBe(true);
+  });
+});
+
+describe("formatContextWindowCompactionMessage", () => {
+  it("describes a configured auto-compact window when no threshold is reported", () => {
+    expect(formatContextWindowCompactionMessage("Claude Opus 4.7", null, 400_000)).toBe(
+      "Compacts automatically as context nears 400,000 tokens.",
+    );
+  });
+
+  it("prefers the reported threshold over the configured window", () => {
+    expect(formatContextWindowCompactionMessage("Claude Opus 4.7", 300_000, 400_000)).toBe(
+      "Compacts automatically at about 300,000 tokens.",
+    );
   });
 });
 

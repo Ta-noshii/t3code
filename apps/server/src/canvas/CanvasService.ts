@@ -800,7 +800,10 @@ const make = Effect.gen(function* () {
     while (libraryContaining(current)?.group) {
       const folder = current;
       // rmdir only removes an empty folder, so a file added meanwhile stays.
-      const removed = yield* Effect.tryPromise(() => NodeFSP.rmdir(folder)).pipe(
+      const removed = yield* Effect.tryPromise({
+        try: () => NodeFSP.rmdir(folder),
+        catch: () => false as const,
+      }).pipe(
         Effect.as(true),
         Effect.orElseSucceed(() => false),
       );
@@ -1030,7 +1033,7 @@ const make = Effect.gen(function* () {
       if (input.full !== true) {
         return { canvas, revision: stored.revision, elements: summarizeCanvasElements(live) };
       }
-      // @effect-diagnostics-next-line preferSchemaOverJson:off - only measures the size.
+      // @effect-diagnostics-next-line globalJsonInEffect:off - only measures the size.
       const size = JSON.stringify(live).length;
       if (size > CANVAS_FULL_READ_MAX_CHARS) {
         return yield* new CanvasTooLargeError({ path: resolved.path });

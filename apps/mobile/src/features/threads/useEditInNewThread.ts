@@ -17,24 +17,12 @@ import {
   waitForComposerDraftsLoaded,
 } from "../../state/use-composer-drafts";
 import { useSelectedThreadVisibleTurnItems } from "../../state/use-thread-detail";
-import { environmentThreadShells, threadEnvironment } from "../../state/threads";
-import { appAtomRegistry } from "../../state/atom-registry";
+import { threadEnvironment } from "../../state/threads";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { waitForThreadShellReady } from "./threadForkNavigation";
+import { waitForThreadShell } from "./threadForkNavigation";
 
 const ALERT_TITLE = "Edit in new thread";
-
-/** Resolves once a newly created thread's shell has reached this client. */
-export async function waitForThreadShell(
-  environmentId: EnvironmentId,
-  threadId: ThreadId,
-): Promise<boolean> {
-  const atom = environmentThreadShells.threadShellAtom(scopeThreadRef(environmentId, threadId));
-  return waitForThreadShellReady({
-    read: () => appAtomRegistry.get(atom) !== null,
-  });
-}
 
 /**
  * "Edit in new thread" on a sent user message: a new thread holds the conversation up to
@@ -104,7 +92,7 @@ export function useEditInNewThread(input: {
         const draftKey = scopedThreadKey(environmentId, targetThreadId);
         setComposerDraftText(draftKey, prompt);
         setComposerDraftContext(draftKey, plan.message.context);
-        if (!(await waitForThreadShell(environmentId, targetThreadId))) {
+        if (!(await waitForThreadShell(scopeThreadRef(environmentId, targetThreadId)))) {
           Alert.alert(
             ALERT_TITLE,
             "The new thread was created, but its data did not reach this client. Reconnect and open it from the thread list.",
@@ -146,9 +134,9 @@ export function useEditInNewThread(input: {
       setComposerDraftContext(draftKey, plan.message.context);
       navigation.navigate("Thread", {
         draft: {
+          environmentId,
+          projectId: thread.projectId,
           draftId: draftKey,
-          environmentId: String(environmentId),
-          projectId: String(thread.projectId),
           title: ALERT_TITLE,
         },
       });

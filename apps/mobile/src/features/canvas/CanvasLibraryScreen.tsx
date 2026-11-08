@@ -235,7 +235,6 @@ export function CanvasLibraryScreen(props: StaticScreenProps<CanvasLibraryRouteP
       <AppBar
         title="Canvases"
         subtitle={project?.title}
-        sidebar={false}
         onBack={() => navigation.goBack()}
         actions={
           canWrite
