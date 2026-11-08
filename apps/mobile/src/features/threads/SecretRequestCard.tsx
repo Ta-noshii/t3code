@@ -213,8 +213,6 @@ function PendingSecretRequestForm(props: {
           onSubmitEditing={(value) => void send({ type: "save", secret: value })}
         />
       )}
-        />
-      )}
       {error !== null ? (
         <Text
           accessibilityRole="alert"

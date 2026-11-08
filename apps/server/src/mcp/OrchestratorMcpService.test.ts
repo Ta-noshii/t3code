@@ -1660,6 +1660,14 @@ describe("OrchestratorMcpService provider resolution", () => {
                     ),
                 }),
                 ServerSettings.layerTest({
+                  // Only codex and claudeAgent are on without configuration, and the
+                  // curated list hides providers the caller's project has turned off.
+                  providerInstances: {
+                    [opencodeInstanceId]: {
+                      driver: ProviderDriverKind.make("opencode"),
+                      enabled: true,
+                    },
+                  },
                   favorites: [
                     { provider: codexInstanceId, model: "gpt-4" },
                     { provider: opencodeInstanceId, model: "oc/m10" },

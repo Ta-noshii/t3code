@@ -4,13 +4,19 @@ import { assert, it } from "@effect/vitest";
 import {
   ProjectId,
   ProviderInstanceId,
+  SecretProviderId,
+  SecretProviderKind,
   ThreadId,
   type OrchestrationV2ServerCommand,
 } from "@t3tools/contracts";
+import { defineSecretProviderDriver } from "@t3tools/secret-provider-core/server/driver";
+import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
+import { defineSecretProvider } from "@t3tools/secret-provider-core/shared/definition";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -21,6 +27,32 @@ const threadId = ThreadId.make("thread-shell");
 const codex = ProviderInstanceId.make("codex");
 
 type RecordCommand = Extract<OrchestrationV2ServerCommand, { type: "secret_request.record" }>;
+
+const FAKE_KIND = SecretProviderKind.make("fake");
+const vault = SecretProviderId.make("vault");
+/** A secret provider holding one `fake://` value, standing in for a password manager. */
+const layerFakeVault = SecretResolver.layer({
+  drivers: [
+    defineSecretProviderDriver({
+      kind: FAKE_KIND,
+      definition: defineSecretProvider({
+        kind: FAKE_KIND,
+        label: "Fake",
+        configSchema: Schema.Struct({}),
+        isReference: (reference) => reference.startsWith("fake://"),
+        referencePlaceholder: "fake://item",
+        invalidReferenceMessage: "Use fake://item.",
+      }),
+      read: (_config, references) =>
+        Effect.succeed(
+          references.map((reference) =>
+            reference === "fake://sudo" ? "from the vault " : undefined,
+          ),
+        ),
+    }),
+  ],
+  secretProviders: Effect.succeed({ [vault]: { kind: FAKE_KIND, label: "Vault", config: {} } }),
+}).pipe(Layer.provide(Layer.merge(NodeServices.layer, NodeCrypto.layer)));
 
 /**
  * Runs `body` against the service with a thread whose run is active. Recorded
@@ -42,6 +74,7 @@ const withService = <A, E>(
     const layerDependencies = Layer.mergeAll(
       NodeCrypto.layer,
       NodeServices.layer,
+      layerFakeVault,
       Layer.mock(ServerSecretStore.ServerSecretStore)({
         get: (name) => Effect.succeed(Option.fromNullishOr(stored.get(name))),
         set: (name, value) => Effect.sync(() => void stored.set(name, value)),
@@ -127,6 +160,41 @@ it.effect("a saved answer reaches the waiting command and nothing else", () =>
       assert.notInclude(JSON.stringify(records), "hunter2");
       assert.equal(stored.size, 0);
       assert.isTrue(Option.isNone(yield* service.savedRef({ threadId, turnItemId })));
+    }),
+  ),
+);
+
+it.effect("a secret provider reference is read and reaches the command as typed", () =>
+  withService(({ service, stored, records }) =>
+    Effect.gen(function* () {
+      const { turnItemId, outcome } = yield* service.prompt(sudoPrompt);
+      yield* service.answer({
+        threadId,
+        turnItemId,
+        answer: { type: "reference", reference: { provider: vault, reference: "fake://sudo" } },
+      });
+      assert.deepEqual(yield* outcome, { status: "saved", value: "from the vault " });
+      assert.equal(records.at(-1)?.secretStatus, "saved");
+      assert.equal(stored.size, 0);
+    }),
+  ),
+);
+
+it.effect("an unreadable reference leaves the prompt open for another answer", () =>
+  withService(({ service, records }) =>
+    Effect.gen(function* () {
+      const { turnItemId, outcome } = yield* service.prompt(sudoPrompt);
+      const error = yield* service
+        .answer({
+          threadId,
+          turnItemId,
+          answer: { type: "reference", reference: { provider: vault, reference: "fake://none" } },
+        })
+        .pipe(Effect.flip);
+      assert.equal(error.reason, "reference_unreadable");
+      assert.equal(records.at(-1)?.secretStatus, "pending");
+      yield* service.answer({ threadId, turnItemId, answer: { type: "save", secret: "typed" } });
+      assert.deepEqual(yield* outcome, { status: "saved", value: "typed" });
     }),
   ),
 );

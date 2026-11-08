@@ -657,7 +657,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
     CanvasLibrary: createNativeStackScreen({
       screen: CanvasLibraryScreen,
       linking: CANVAS_LIBRARY_LINKING,
-      options: GLASS_HEADER_OPTIONS,
+      options: pageRoute(),
     }),
     Canvas: createNativeStackScreen({
       screen: CanvasScreen,
