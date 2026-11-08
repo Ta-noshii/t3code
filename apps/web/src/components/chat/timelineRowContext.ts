@@ -117,6 +117,7 @@ export interface TimelineRowActivityState {
   /** The settled last message, when it is the agent's, can offer suggested replies. */
   suggestedRepliesMessageId: string | null;
   backgroundWorktreeSetup: WorktreeSetupSnapshot | null;
+  liveAnswerPreview: string | null;
 }
 
 export const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);

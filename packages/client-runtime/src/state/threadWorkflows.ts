@@ -199,13 +199,19 @@ export function runsAsOwnTurn(text: string, attachments: ReadonlyArray<unknown>)
 
 /**
  * The queued messages "Send all" merges into one steer. Messages that run as their own
- * turn, and /goal, which never steers, stay queued; the server applies the same rule.
+ * turn, a message that starts a fresh session, and /goal, which never steers, stay
+ * queued; the server applies the same rule.
  */
 export function getSendAllQueuedRuns<
-  T extends { readonly text: string; readonly attachments: ReadonlyArray<unknown> },
+  T extends {
+    readonly text: string;
+    readonly attachments: ReadonlyArray<unknown>;
+    readonly run?: { readonly freshContext?: boolean | undefined };
+  },
 >(queuedRuns: ReadonlyArray<T>): ReadonlyArray<T> {
   return queuedRuns.filter(
-    ({ text, attachments }) =>
+    ({ text, attachments, run }) =>
+      run?.freshContext !== true &&
       !runsAsOwnTurn(text, attachments) &&
       !(attachments.length === 0 && /^\/goal(?:\s|$)/u.test(text.trim())),
   );

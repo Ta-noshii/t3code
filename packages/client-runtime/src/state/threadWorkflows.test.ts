@@ -428,6 +428,7 @@ describe("send all queued messages", () => {
       { text: "/goal ship it", attachments: [] },
       { text: "/compact", attachments: [{}] },
       { text: " /logout", attachments: [] },
+      { text: "Fresh start", attachments: [], run: { freshContext: true } },
       { text: "Second", attachments: [] },
     ];
     expect(getSendAllQueuedRuns(queued).map(({ text }) => text)).toEqual([

@@ -1446,6 +1446,8 @@ export function planComposerTurn(input: {
   readonly phase: SessionPhase;
   readonly dispatchMode: ComposerDispatchMode;
   readonly hasAttachments: boolean;
+  /** The turn starts a new provider session, so it neither compacts first nor steers. */
+  readonly freshContext: boolean;
 }) {
   const isFirstMessage =
     !input.sendQueuesBehindSetup && (!input.isServerThread || input.activeMessageCount === 0);
@@ -1455,9 +1457,14 @@ export function planComposerTurn(input: {
   // old history. The message queues behind the /compact run, since steering into it is
   // rejected.
   const compactBeforeSend =
+    !input.freshContext &&
     input.resumeCompactionTokens !== null &&
     !input.keepFullHistory &&
     !COMPACT_COMMAND_PATTERN.test(input.messageText);
+  const dispatchMode =
+    input.freshContext && (input.dispatchMode === "steer" || input.dispatchMode === "restart")
+      ? "queue"
+      : input.dispatchMode;
   // The server refuses to steer /compact into a running turn, so a typed one
   // always queues as its own turn.
   const queueCompactCommand =
@@ -1469,9 +1476,8 @@ export function planComposerTurn(input: {
     missingWorktreeBaseBranch: shouldCreateWorktree && !input.activeThreadBranch,
     baseBranchForWorktree: shouldCreateWorktree ? input.activeThreadBranch : null,
     compactBeforeSend,
-    turnDispatchMode: queues ? ("queue" as const) : input.dispatchMode,
-    shouldQueueBehindActiveRun:
-      queues || (input.phase === "running" && input.dispatchMode === "queue"),
+    turnDispatchMode: queues ? ("queue" as const) : dispatchMode,
+    shouldQueueBehindActiveRun: queues || (input.phase === "running" && dispatchMode === "queue"),
   };
 }
 
