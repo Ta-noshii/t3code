@@ -29,6 +29,7 @@ import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@t3t
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
+import { agentProgressFinished, isAgentProgressComplete } from "@t3tools/shared/agentProgress";
 import type { MenuAction } from "@react-native-menu/menu";
 import { memo, useCallback, useMemo, useState, type ComponentProps } from "react";
 import { Platform, Pressable, Text as RNText, useWindowDimensions, View } from "react-native";
@@ -766,6 +767,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const rowAccessibilityLabel = `${thread.title}${props.hasQueuedMessages ? ", messages queued to send" : ""}${isRegeneratingTitle ? ", regenerating title" : ""}`;
   const timeLabel = props.timeLabel;
+  // An unfinished agent tracker's count takes the timestamp's place.
+  const progressCount =
+    thread.progressSummary != null && !isAgentProgressComplete(thread.progressSummary)
+      ? `${agentProgressFinished(thread.progressSummary)}/${thread.progressSummary.total}`
+      : null;
 
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   const handleAcknowledgeWoke = useCallback(() => {
@@ -1262,7 +1268,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                   : rowAppearance.tertiaryForegroundClassName,
               )}
             >
-              {timeLabel}
+              {progressCount ?? timeLabel}
             </Text>
           )}
         </View>

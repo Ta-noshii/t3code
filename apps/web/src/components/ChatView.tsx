@@ -83,7 +83,6 @@ import {
   deriveThreadActivityRun,
   deriveLatestThreadRun,
   deriveThreadStructureRuntime,
-  latestPromptSuggestion,
   limitRecoveryOwnsSnooze,
 } from "@t3tools/client-runtime/state/thread-execution";
 import {
@@ -317,6 +316,7 @@ import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEn
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { modelFallbackBannerItem } from "./chat/ComposerUsageLimits";
+import { AgentProgressStrip } from "./chat/AgentProgressStrip";
 import { useThreadRecap } from "./chat/useThreadRecap";
 import { useCanvasFocus } from "./canvas/useCanvasFocus";
 import { useCopyThreadToEnvironment } from "./chat/useCopyThreadToEnvironment";
@@ -448,6 +448,7 @@ export default function ChatView(props: ChatViewProps) {
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const clearThreadProgress = useOrchestrationCommand(threadEnvironment.clearProgress);
   const canWriteSourceControl = useEnvironmentScope(environmentId, AuthSourceControlWriteScope);
   const setThreadRuntimeMode = useOrchestrationCommand(threadEnvironment.setRuntimeMode, {
     reportFailure: false,
@@ -810,7 +811,6 @@ export default function ChatView(props: ChatViewProps) {
     serverProjection === null ? null : deriveRunlessWorkStartedAt(serverProjection);
   const providerSubagentStatus =
     serverProjection === null ? null : deriveProviderSubagentStatus(serverProjection);
-  const promptSuggestion = latestPromptSuggestion(serverProjection);
   const isProviderSubagent =
     serverThread !== null && isProviderNativeSubagentThread(serverThread.source);
   const supportsProviderSwitchingViaHandoff = threadSupportsProviderHandoff(serverProjection);
@@ -1902,7 +1902,7 @@ export default function ChatView(props: ChatViewProps) {
         threadId: activeThreadId,
         message: { messageId: newMessageId(), role: "user", text, attachments: [] },
         runtimeMode,
-        interactionMode,
+        interactionMode: DEFAULT_INTERACTION_MODE,
         dispatchMode: "queue",
       },
     });
@@ -2649,6 +2649,23 @@ export default function ChatView(props: ChatViewProps) {
             onDismiss: threadRecap.dismiss,
           },
         ];
+  // Subagents report to the topmost parent, so a child thread has no tracker of its own.
+  const progressSummary = activeThreadShell?.progressSummary ?? null;
+  const progressStrip =
+    activeThreadShell && progressSummary !== null ? (
+      <AgentProgressStrip
+        key={activeThreadShell.id}
+        summary={progressSummary}
+        items={serverProjection?.thread.progress?.items ?? null}
+        dismissDisabled={!canOperateThread}
+        onDismiss={() =>
+          void clearThreadProgress({
+            environmentId,
+            input: { threadId: activeThreadShell.id },
+          })
+        }
+      />
+    ) : null;
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =
@@ -2742,7 +2759,7 @@ export default function ChatView(props: ChatViewProps) {
         },
       }),
     ];
-  })() as ComposerBannerStackItem[];
+  })();
 
   if (
     terminalUiLaunchContext !== null &&
@@ -3754,6 +3771,7 @@ export default function ChatView(props: ChatViewProps) {
                                     ? EMPTY_COMPOSER_BANNER_ITEMS
                                     : composerBannerItems
                                 }
+                                progressStrip={isDraftHeroState ? null : progressStrip}
                                 resumeCompactionTokens={resumeCompactionTokens}
                                 keepFullHistory={keepFullHistory}
                                 onToggleKeepFullHistory={toggleKeepFullHistoryStable}
@@ -3792,7 +3810,6 @@ export default function ChatView(props: ChatViewProps) {
                                 activeProjectId={activeProject?.id ?? null}
                                 projectName={activeProject?.title}
                                 compactThreadUnavailable={compactThreadUnavailable}
-                                promptSuggestion={promptSuggestion}
                                 compactDisabled={compactDisabled}
                                 resolvedTheme={resolvedTheme}
                                 settings={settings}

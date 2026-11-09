@@ -5349,13 +5349,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const interruptedTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const steeredTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
-        // The provider turn that last completed, until Claude's guess at the
-        // next prompt arrives for it (after the turn's result) or a new turn
-        // starts.
-        const lastCompletedTurn = yield* Ref.make<{
-          readonly threadId: ThreadId;
-          readonly providerTurn: OrchestrationV2ProviderTurn;
-        } | null>(null);
         // Wake buffers replay result frames, so ledger growth is measured once on arrival.
         const resultLedgerUsage = new WeakMap<SDKMessage, ClaudeLedgerUsage>();
         const resultsReportingNewContextWindow = new WeakSet<SDKMessage>();
@@ -8346,12 +8339,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               },
             ),
           };
-          yield* Ref.set(
-            lastCompletedTurn,
-            input.status === "completed"
-              ? { threadId: input.context.input.threadId, providerTurn: finalProviderTurn }
-              : null,
-          );
           yield* Effect.all(
             [
               emitProviderEvent({
@@ -9062,24 +9049,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             yield* Ref.update(nestedSubagentTaskIds, (current) =>
               current.has(message.task_id) ? current : new Set(current).add(message.task_id),
             );
-          }
-          if (message.type === "prompt_suggestion") {
-            // Claude's guess at the next prompt follows the turn's result, so
-            // it belongs to the turn that just completed. A turn that already
-            // started makes it stale. The event carries the app thread so the
-            // session ingests it after the run's own event stream has closed.
-            const suggestion = message.suggestion.trim();
-            const completed = yield* Ref.getAndSet(lastCompletedTurn, null);
-            if (suggestion.length === 0 || completed === null || (yield* Ref.get(activeTurn))) {
-              return;
-            }
-            yield* emitProviderEvent({
-              type: "provider_turn.updated",
-              driver: CLAUDE_PROVIDER,
-              threadId: completed.threadId,
-              providerTurn: { ...completed.providerTurn, promptSuggestion: suggestion },
-            });
-            return;
           }
           if (message.type === "rate_limit_event") {
             const rateLimitInfo = message.rate_limit_info;

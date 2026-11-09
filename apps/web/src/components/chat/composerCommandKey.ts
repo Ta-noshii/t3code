@@ -87,7 +87,6 @@ export function composerCommandKeyHandler(input: {
   readonly dismissPromptSuggestion: () => void;
 }) {
   const {
-    offeredPromptSuggestion,
     keybindings,
     sendShortcut,
     routeKind,
@@ -216,19 +215,6 @@ export function composerCommandKeyHandler(input: {
     const { trigger } = resolveActiveComposerTrigger();
     const menuIsActive =
       !isLiteralPendingAnswer && (composerMenuOpenRef.current || trigger !== null);
-    // Tab fills an empty composer with the suggestion. It shows only after a
-    // finished turn, so it never meets a Tab binding that acts on a running one.
-    if (
-      key === "Tab" &&
-      !event.shiftKey &&
-      submissionIntent === null &&
-      !menuIsActive &&
-      offeredPromptSuggestion !== null &&
-      promptRef.current.trim().length === 0
-    ) {
-      replacePromptFromHistory(offeredPromptSuggestion);
-      return true;
-    }
     if (key === "Escape") {
       if (event.isComposing || event.keyCode === 229) return false;
       if (!menuIsActive && promptSuggestion !== null && promptRef.current.length === 0) {

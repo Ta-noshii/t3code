@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Usage: NOWBAR_VERSION_CODE=11 scripts/build-nowbar-local.sh
-# Requires Node 24, Java 17 (JAVA_HOME), Java 21 (JAVA21_HOME), Android SDK and pnpm.
+# Requires the repository's Node version (package.json engines), Java 17 (JAVA_HOME), Java 21 (JAVA21_HOME), Android SDK and pnpm.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 : "${NOWBAR_VERSION_CODE:?Choose the next unused release code before building}"
@@ -19,13 +19,14 @@ export T3CODE_ANDROID_GOOGLE_SERVICES_FILE="${T3CODE_ANDROID_GOOGLE_SERVICES_FIL
 test -r "$signing_dir/nowbar.p12"
 test -r "$signing_dir/password.txt"
 test -r "$T3CODE_ANDROID_GOOGLE_SERVICES_FILE"
-node --input-type=module -e 'const major = Number(process.versions.node.split(".")[0]); if (major !== 24) throw new Error("Use the repository Node 24 toolchain"); const code = Number(process.env.NOWBAR_VERSION_CODE); if (!Number.isSafeInteger(code) || code < 1 || code > 2100000000) throw new Error("Invalid Android version code");'
+node --input-type=module -e 'import {readFileSync} from "node:fs"; const wanted = JSON.parse(readFileSync("package.json", "utf8")).engines.node; if (process.versions.node !== wanted) throw new Error(`Use the repository Node ${wanted} toolchain`); const code = Number(process.env.NOWBAR_VERSION_CODE); if (!Number.isSafeInteger(code) || code < 1 || code > 2100000000) throw new Error("Invalid Android version code");'
 if [[ ! -x node_modules/.bin/vp || ! -d apps/mobile/node_modules/expo ]]; then
   pnpm install --filter @t3tools/mobile... --frozen-lockfile
 fi
 node --test apps/mobile/plugins/withNowBarFork.test.cjs
-node_modules/.bin/vp test run apps/mobile/src/features/nowbar/model.test.ts apps/mobile/src/features/nowbar/update-manifest.test.ts apps/mobile/src/features/nowbar/debug.test.ts apps/mobile/src/lib/appLinking.test.ts
-(cd apps/mobile && node_modules/.bin/tsc --noEmit)
+# From apps/mobile, so only the mobile test config loads.
+(cd apps/mobile && ../../node_modules/.bin/vp test run src/features/nowbar/model.test.ts src/features/nowbar/update-manifest.test.ts src/features/nowbar/debug.test.ts src/lib/appLinking.test.ts)
+(cd apps/mobile && ../../node_modules/.bin/vp run typecheck)
 
 # Regenerate only when native configuration changes; Kotlin/resources are linked directly.
 config_stamp=$( { printf '%s\n' "$NOWBAR_VERSION_CODE" "$APP_VARIANT" "$T3CODE_CLERK_PUBLISHABLE_KEY" "$T3CODE_CLERK_JWT_TEMPLATE" "$T3CODE_RELAY_URL" "$NOWBAR_PUSH_TRANSPORT" "$T3CODE_ANDROID_GOOGLE_SERVICES_FILE"; sha256sum apps/mobile/app.config.* apps/mobile/package.json pnpm-lock.yaml "$T3CODE_ANDROID_GOOGLE_SERVICES_FILE"; find apps/mobile/plugins -type f -print0 | sort -z | xargs -0 sha256sum; } | sha256sum | cut -d ' ' -f1)

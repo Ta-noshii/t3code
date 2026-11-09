@@ -1,3 +1,4 @@
+import { agentProgressFinished, isAgentProgressComplete } from "@t3tools/shared/agentProgress";
 import * as DateTime from "effect/DateTime";
 import type { EnvironmentProject, EnvironmentThreadShell } from "./state/shell.ts";
 
@@ -200,8 +201,17 @@ export function projectNowBarRows(
             : backgroundLiveness(thread) === "monitoring"
               ? "monitoring"
               : "working";
-      // v2 shells carry no plan progress, so rows show no step count.
-      const total = 0;
+      // An unfinished tracker from the agent's progress tool is the row's step count.
+      const summary = thread.progressSummary;
+      const progress =
+        !finished && summary && summary.total > 0 && !isAgentProgressComplete(summary)
+          ? {
+              total: summary.total,
+              completed: agentProgressFinished(summary),
+              // Cap the title so the count survives the push payload's 100-character status.
+              text: `${summary.title.slice(0, 60)} · ${agentProgressFinished(summary)}/${summary.total}`,
+            }
+          : null;
       const status = finished
         ? phase === "error"
           ? "Agent hit an error · Open to inspect"
@@ -216,7 +226,8 @@ export function projectNowBarRows(
               ? "Your agent has a question"
               : thread.hasActionableProposedPlan
                 ? "Plan ready for your review"
-                : ((phase === "working" && runState(thread) === "running"
+                : (progress?.text ??
+                  (phase === "working" && runState(thread) === "running"
                     ? statuses?.get(threadKey(thread))
                     : undefined) ??
                   (phase === "monitoring" ? "Watching for changes" : "Agent is working"));
@@ -257,8 +268,8 @@ export function projectNowBarRows(
                 : undefined,
         status: status.slice(0, 240),
         startedAt: Number.isFinite(startedAt) ? startedAt : 0,
-        total,
-        completed: 0,
+        total: progress?.total ?? 0,
+        completed: progress?.completed ?? 0,
         url: `t3code-nowbar://threads/${encodeURIComponent(thread.environmentId)}/${encodeURIComponent(thread.id)}`,
       };
     })

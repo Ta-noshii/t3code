@@ -310,6 +310,45 @@ describe("Now Bar agent projection", () => {
       )[0]?.phase,
     ).toBe("attention");
   });
+  it("shows an unfinished progress tracker as the row's step count", () => {
+    const progressSummary = {
+      title: "Migrate call sites",
+      total: 50,
+      done: 20,
+      failed: 2,
+      skipped: 1,
+      running: 1,
+      segments: "",
+      updatedAt: "2026-09-09T10:00:03Z",
+    };
+    const [row] = projectNowBarRows(
+      [thread({ progressSummary } as Partial<EnvironmentThreadShell>)],
+      [],
+      connected,
+    );
+    expect(row).toMatchObject({
+      total: 50,
+      completed: 23,
+      status: "Migrate call sites · 23/50",
+    });
+    // Attention text still wins, but the bar keeps the count.
+    expect(
+      projectNowBarRows(
+        [thread({ progressSummary, hasPendingApprovals: true } as Partial<EnvironmentThreadShell>)],
+        [],
+        connected,
+      )[0],
+    ).toMatchObject({ total: 50, completed: 23, status: "Approval needed · Review to continue" });
+    // A finished tracker no longer drives the row.
+    const done = { ...progressSummary, done: 47, running: 0 };
+    expect(
+      projectNowBarRows(
+        [thread({ progressSummary: done } as Partial<EnvironmentThreadShell>)],
+        [],
+        connected,
+      )[0],
+    ).toMatchObject({ total: 0, completed: 0, status: "Agent is working" });
+  });
   it("does not invent a progress percentage or include archived work", () => {
     expect(projectNowBarRows([thread()], [], connected)[0]?.total).toBe(0);
     expect(

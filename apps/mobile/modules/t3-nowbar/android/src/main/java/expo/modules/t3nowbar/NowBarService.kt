@@ -367,6 +367,11 @@ class NowBarService : Service() {
         .setContentIntent(open).setDeleteIntent(dismiss)
         .addAction(0, if (ready || phase == "attention") "Review" else "Open thread", open)
         .addAction(0, "Dismiss", dismiss)
+      // Match the foreground card: a pushed step count draws the same segmented bar.
+      if (total > 0) builder.setStyle(NotificationCompat.ProgressStyle()
+        .setProgress(if (total > 100) NowBarPolicy.progress(completed, total) ?: 0 else completed)
+        .setProgressSegments(List(total.coerceAtMost(100)) { NotificationCompat.ProgressStyle.Segment(1).setColor(color) })
+        .setStyledByProgress(true))
       if (!ready) builder.setTimeoutAfter(NowBarPolicy.STOP_AFTER_MS)
       if (!ready && phase != "attention" && row.optLong("startedAt") > 0)
         builder.setWhen(row.optLong("startedAt")).setUsesChronometer(true)

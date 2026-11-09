@@ -802,9 +802,6 @@ export function useThreadComposerState(input: {
     const threadKey = scopedThreadKey(thread.environmentId, thread.id);
     const draft = getComposerDraftSnapshot(threadKey);
     const modelSelection = draft.modelSelection ?? thread.modelSelection;
-    const provider = selectedEnvironmentRuntime?.serverConfig?.providers.find(
-      (entry) => entry.instanceId === modelSelection.instanceId,
-    );
     const metadata = makeQueuedMessageMetadata();
     const messageId = MessageId.make(metadata.messageId);
     clearThreadComposerError(threadKey);
@@ -818,10 +815,7 @@ export function useThreadComposerState(input: {
       attachments: [],
       modelSelection,
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
-      interactionMode: resolveProviderInteractionMode(
-        provider,
-        draft.interactionMode ?? thread.interactionMode,
-      ),
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       dispatchMode: "queue",
       createdAt: metadata.createdAt,
     }).then(

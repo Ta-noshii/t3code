@@ -2,6 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 import {
   agentStatusText,
+  type NowBarRow,
   projectNowBarRows,
   runState,
   threadKey,
@@ -38,6 +39,7 @@ import * as FcmAssertionSigner from "../src/agentActivity/FcmAssertionSigner.ts"
 import * as FcmClient from "../src/agentActivity/FcmClient.ts";
 import * as FcmDeliveries from "../src/agentActivity/FcmDeliveries.ts";
 import { makeAggregateState } from "../src/agentActivity/agentActivityAggregate.ts";
+import { decideProgressPush } from "../src/agentActivity/progressPushThrottle.ts";
 
 const Device = Schema.Struct({
   token: Schema.NonEmptyString,
@@ -153,18 +155,27 @@ const main = Effect.gen(function* () {
     let states = new Map<string, RelayAgentActivityState>();
     let lastSentAt = 0;
     let previousRows = "[]";
+    let previousRowList: ReadonlyArray<NowBarRow> = [];
+    // Count-only changes wait here for their trailing send.
+    let deferredUntil: number | null = null;
+    const lastProgressPushAt = new Map<string, number>();
     const unreadSince = device.unreadSince ?? (yield* Clock.currentTimeMillis);
     yield* Effect.logInfo("Watching this paired environment for Android push verification.");
     yield* rpc[ORCHESTRATION_V2_WS_METHODS.subscribeShell]({}).pipe(
       Stream.merge(
         Stream.tick("60 seconds").pipe(Stream.map(() => ({ kind: "heartbeat" as const }))),
       ),
+      Stream.merge(Stream.tick("1 second").pipe(Stream.map(() => ({ kind: "flush" as const })))),
       Stream.runForEach(
         Effect.fnUntraced(function* (item) {
           switch (item.kind) {
             case "synchronized":
               return;
             case "heartbeat":
+              break;
+            case "flush":
+              if (deferredUntil === null || (yield* Clock.currentTimeMillis) < deferredUntil)
+                return;
               break;
             case "snapshot":
               projects.clear();
@@ -238,6 +249,8 @@ const main = Effect.gen(function* () {
           while (new TextEncoder().encode(encodeJson(remoteRows)).length > 2400) remoteRows.pop();
           const rowPayload = encodeJson(remoteRows);
           const sameRows = rowPayload === previousRows;
+          // Counts that moved back to the sent rows leave nothing to flush.
+          if (sameRows) deferredUntil = null;
           const same = encodeJson([...next.values()]) === encodeJson([...states.values()]);
           states = next;
           const needsLease = remoteRows.some(
@@ -251,7 +264,17 @@ const main = Effect.gen(function* () {
             (!needsLease || now - lastSentAt < 60_000)
           )
             return;
+          const progress = decideProgressPush(previousRowList, remoteRows, lastProgressPushAt, now);
+          // Only progress counts moved: hold the push, and the flush tick sends the latest rows.
+          if (item.kind !== "snapshot" && same && !alert && progress.kind === "defer") {
+            deferredUntil = progress.untilMs;
+            return;
+          }
+          deferredUntil = null;
+          if (progress.kind === "send")
+            for (const key of progress.progressKeys) lastProgressPushAt.set(key, now);
           previousRows = rowPayload;
+          previousRowList = remoteRows;
           const result = yield* sender.send({
             token: device.token,
             packageName: device.packageName,

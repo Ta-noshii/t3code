@@ -3,6 +3,8 @@
 gradle.beforeProject { project ->
   if (project.path == ':app') {
     project.plugins.withId('com.android.application') {
+      // Newer app versions no longer ship the Shiki engine, so there is nothing to bind.
+      if (!project.rootProject.file('../node_modules/react-native-shiki-engine').exists()) return
       def onig = project.rootProject.file('../node_modules/react-native-shiki-engine/android/src/main/jniLibs/arm64-v8a/libonig.so')
       if (!onig.isFile()) throw new GradleException('Missing arm64 Shiki Oniguruma library')
       project.android.defaultConfig.externalNativeBuild.cmake.arguments.add('-DONIG_LIB=' + onig.absolutePath)
