@@ -384,8 +384,8 @@ export function HtmlRenderDocument(props: {
         title={props.title}
         // Never allow-same-origin: the opaque origin keeps the page out of the app's session.
         sandbox="allow-scripts allow-forms"
-        // Lets a page's video or image viewer take the screen.
-        allow="fullscreen"
+        // Lets a page's viewer take the screen and its Copy button use the clipboard.
+        allow="fullscreen; clipboard-write"
         loading="lazy"
         onLoad={() => {
           setLoaded(true);

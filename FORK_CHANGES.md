@@ -73,6 +73,8 @@ On the phone, `nowbar` carries the tracker too. The thread screen's floating sta
 
 Pages shown with `html_render` get `window.t3.sendMessage(text)`, which queues the text as the user's next message. Web and desktop accept it only right after the user used the frame; mobile asks first. A widget that asks the user to choose can send the answer back instead of the user copying it.
 
+The frame allows `clipboard-write`, so a widget's Copy button works after a click in the page.
+
 The sandboxed page can't use `localStorage`, so `window.t3.loadState()`, `saveState(value)` and `clearState()` ask the client to keep one JSON value per render: `localStorage` on web and desktop, the expo-sqlite kv store on mobile. Input then survives switching threads or tabs, full screen, and restarts. The client keeps the 200 most recently saved renders, up to 100,000 characters each.
 
 ### `fix/chatview-react-compiler`
