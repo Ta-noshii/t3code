@@ -1,0 +1,103 @@
+name: Windows desktop build
+
+# Builds the unsigned Windows installer for a desktop build branch made by hand
+# (build/patched-*) and adds it to that build's existing release, so the Windows
+# app gets the same version the Linux desktop runs. The release must already hold
+# the Linux server archive, which the installer embeds as its WSL runtime.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch or commit to build, e.g. build/patched-4452
+        type: string
+        required: true
+      version:
+        description: Version of the existing release, without the leading v
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows ${{ inputs.version }}
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ inputs.version }}
+      T3CODE_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsudDMuY29kZXMk
+      T3CODE_CLERK_JWT_TEMPLATE: t3-relay
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: hzxSgY2cH10sDU2r
+      T3CODE_RELAY_URL: https://relay.t3.codes
+    steps:
+      - name: Check out the build branch
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git config core.autocrlf false
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch -q --filter=blob:none origin "$SOURCE_REF"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          for attempt in 1 2 3 4; do
+            git checkout -q --detach FETCH_HEAD && break
+            [ "$attempt" = 4 ] && exit 1
+            echo "Checkout failed (attempt $attempt), retrying in 20s"; sleep 20
+          done
+          git log --oneline -1
+
+      - name: Download the Linux server archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "v$VERSION" -R "$GITHUB_REPOSITORY" -p "t3-*-linux-x64.tar.gz" -D handoff
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Install Spectre-mitigated MSVC libs
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $proc = Start-Process -FilePath $setupExe `
+            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
+            "Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre", "--quiet", "--norestart" `
+            -Wait -PassThru -NoNewWindow
+          if ($null -eq $proc -or $proc.ExitCode -ne 0) { exit 1 }
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install dependencies
+        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts... --filter=@t3tools/web...
+
+      - name: Set package versions
+        run: node scripts/update-release-package-versions.ts "$VERSION"
+
+      # Unsigned, so Windows SmartScreen warns on first install.
+      - name: Build desktop installer
+        env:
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+        run: |
+          vp run dist:desktop:artifact --platform win --target nsis --arch x64 --build-version "$VERSION" \
+            --wsl-runtime "$GITHUB_WORKSPACE"/handoff/t3-*-linux-x64.tar.gz --verbose
+
+      - name: Add the installer to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -f release/builder-debug.yml
+          gh release upload "v$VERSION" release/*.exe release/*.blockmap release/*.yml -R "$GITHUB_REPOSITORY" --clobber
