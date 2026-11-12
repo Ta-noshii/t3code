@@ -32,11 +32,12 @@ import { CommandOutputPanel, useCommandOutputStreaming } from "./CommandOutputPa
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
-import type { TurnItemSource } from "./timelineRowContext";
+import { useInitialOutputReady, type TurnItemSource } from "./timelineRowContext";
 import { useEnvironmentProviders } from "../../state/environments";
 import { ToolCallDigestView, ToolOutputView, type ToolViewContext } from "./ToolOutputView";
 
 interface V2ItemInspectorProps {
+  readonly onInitialOutputReady?: (() => void) | undefined;
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly environmentId: EnvironmentId;
   readonly cwd?: string | undefined;
@@ -202,6 +203,7 @@ function ToolOutput(props: ToolOutputState & { readonly context?: ToolViewContex
 }
 
 export function FetchedToolOutput(props: {
+  readonly onInitialOutputReady?: (() => void) | undefined;
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly environmentId: EnvironmentId;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
@@ -210,9 +212,14 @@ export function FetchedToolOutput(props: {
   readonly hideImages?: boolean | undefined;
 }) {
   const { output } = useFetchedTurnItem(props.projectedItem, props.environmentId, props.source);
+  useInitialOutputReady(output.pending, props.onInitialOutputReady);
   return (
     <div className={cn("mt-1.5 space-y-1.5", monoClassName)}>
-      <ToolOutputImages {...output} onImageExpand={props.onImageExpand} hideImages={props.hideImages} />
+      <ToolOutputImages
+        {...output}
+        onImageExpand={props.onImageExpand}
+        hideImages={props.hideImages}
+      />
       <ToolOutput {...output} onImageExpand={props.onImageExpand} />
     </div>
   );
@@ -289,6 +296,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
   const providers = useEnvironmentProviders().get(props.environmentId);
   const item = fetched.item;
   const outputState = fetched.output;
+  useInitialOutputReady(streamsOutput || outputState.pending, props.onInitialOutputReady);
   return (
     <div className="space-y-2 text-xs" data-v2-item-inspector={item.type}>
       {item.type === "reasoning" && item.text ? (
@@ -314,6 +322,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
           outputSlot={
             streamsOutput ? (
               <CommandOutputPanel
+                onInitialOutputReady={props.onInitialOutputReady}
                 environmentId={props.environmentId}
                 threadId={props.projectedItem.sourceThreadId}
                 itemId={props.projectedItem.sourceItemId}
