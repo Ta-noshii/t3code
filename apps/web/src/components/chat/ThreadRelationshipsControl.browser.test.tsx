@@ -398,3 +398,47 @@ it("hides a deleted fork and keeps unloaded and archived forks with their curren
   await expect.element(screen.getByText("Archived fork", { exact: true })).toBeVisible();
   await expect.element(screen.getByText("deleted-fork", { exact: true })).not.toBeInTheDocument();
 });
+
+it("nests a subagent's own subagents under its row and counts them as running", async () => {
+  setup();
+  const current = (state.projection as { thread: Record<string, unknown> }).thread;
+  const agent = (id: string, parent: string, title: string, status: string, minute: number) => ({
+    ...current,
+    id,
+    title,
+    status,
+    activityRunStatus: status === "running" ? "running" : null,
+    createdAt: DateTime.makeUnsafe(Date.UTC(2026, 10, 12, 12, minute)),
+    lineage: { parentThreadId: parent, relationshipToParent: "subagent" },
+  });
+  state.relatedShells = [
+    agent("review", "fork", "Save history deep review", "completed", 1),
+    agent("audit", "review", "Audit the MySQL migration", "running", 2),
+    agent("audit-check", "audit", "Check the rollback path", "running", 3),
+    agent("bench", "review", "Benchmark the autosave", "completed", 4),
+    agent("playtest", "fork", "Cosmeos Valley play test", "running", 5),
+  ];
+  state.threadTitles = {};
+  // The parent row is not under test.
+  current.lineage = { parentThreadId: null, relationshipToParent: null };
+  await using screen = await render(
+    <ThreadRelationshipsPanel
+      environmentId={environmentId}
+      threadId={threadId}
+      showLineage
+      showSideChats={false}
+    />,
+  );
+
+  await expect.element(screen.getByText("Lineage · 3 running")).toBeVisible();
+  const titles = [...document.querySelectorAll('[aria-label="Related threads"] li')].map(
+    (row) => row.textContent,
+  );
+  expect(titles.map((title) => title?.replace(/(Running|Completed|Done).*$/, ""))).toEqual([
+    "Cosmeos Valley play test",
+    "Save history deep review",
+    "Benchmark the autosave",
+    "Audit the MySQL migration",
+    "Check the rollback path",
+  ]);
+});
