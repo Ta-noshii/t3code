@@ -121,7 +121,7 @@ export function HtmlRenderFrame(props: {
           {expandedSrc !== null ? (
             <HtmlRenderDialog
               src={expandedSrc}
-              title={title}
+              htmlRender={props.htmlRender}
               threadRef={props.threadRef}
               stateKey={stateKey}
               onStateSaved={() => {

@@ -1,10 +1,5 @@
 import type { ToolCallDiffTarget } from "../../diffPanelStore";
-import type {
-  EnvironmentId,
-  OrchestrationV2ProjectedTurnItem,
-  ServerProvider,
-  ThreadId,
-} from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationV2ProjectedTurnItem, ThreadId } from "@t3tools/contracts";
 import {
   isJsonToolText,
   toolCallLines,
@@ -27,8 +22,6 @@ import { useRenderedAppearance } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
 import { resolveDiffThemeName } from "../../lib/diffRendering";
 import { getSyntaxHighlighterPromise } from "../../lib/syntaxHighlighting";
-import { useAtomValue } from "@effect/atom-react";
-import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useTurnItemDetail } from "../../state/queries";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { Button } from "../ui/button";
@@ -39,21 +32,21 @@ import { CommandOutputPanel, useCommandOutputStreaming } from "./CommandOutputPa
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
+import { useInitialOutputReady, type TurnItemSource } from "./timelineRowContext";
+import { useEnvironmentProviders } from "../../state/environments";
 import { ToolCallDigestView, ToolOutputView, type ToolViewContext } from "./ToolOutputView";
-import type { TurnItemSource } from "./timelineRowContext";
 
 interface V2ItemInspectorProps {
+  readonly onInitialOutputReady?: (() => void) | undefined;
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly environmentId: EnvironmentId;
   readonly cwd?: string | undefined;
   readonly workspaceRoot?: string | undefined;
-  /** Opens a thread a tool result names, such as a delegated task's. */
-  readonly onOpenThread?: ((threadId: ThreadId) => void) | undefined;
-  /** Provider statuses, for logos and model names in tool results. */
-  readonly providers?: ReadonlyArray<ServerProvider> | undefined;
   readonly onOpenToolDiff?: ((target: ToolCallDiffTarget) => void) | undefined;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
   readonly source?: TurnItemSource | undefined;
+  /** Opens a thread a T3 tool result names. */
+  readonly onOpenThread?: ((threadId: ThreadId) => void) | undefined;
 }
 
 function SyntaxTokens({
@@ -184,7 +177,7 @@ function ToolOutputImages(props: ToolOutputState) {
 }
 
 function ToolOutput(props: ToolOutputState & { readonly context?: ToolViewContext | undefined }) {
-  // Images load as assets above; the detail read carries no image bytes.
+  // Images load as assets in ToolOutputImages; the detail read carries no image bytes.
   const blocks = props.blocks?.filter((block) => block.kind !== "image") ?? null;
   // Some tools answer with nothing on purpose, such as a thread wait that ran out.
   const hasResult =
@@ -204,24 +197,30 @@ function ToolOutput(props: ToolOutputState & { readonly context?: ToolViewContex
     <div className="text-muted-foreground italic">Loading output…</div>
   ) : props.error ? (
     <div className="text-destructive">Couldn&apos;t load output: {props.error}</div>
-  ) : props.empty && (props.hideImages || props.images.length === 0) ? (
+  ) : props.empty && props.images.length === 0 ? (
     <div className="text-muted-foreground italic">No output.</div>
   ) : null;
 }
 
 export function FetchedToolOutput(props: {
+  readonly onInitialOutputReady?: (() => void) | undefined;
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly environmentId: EnvironmentId;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
+  readonly source?: TurnItemSource | undefined;
   /** The row already previews the image the tool read. */
   readonly hideImages?: boolean | undefined;
-  readonly source?: TurnItemSource | undefined;
 }) {
   const { output } = useFetchedTurnItem(props.projectedItem, props.environmentId, props.source);
+  useInitialOutputReady(output.pending, props.onInitialOutputReady);
   return (
     <div className={cn("mt-1.5 space-y-1.5", monoClassName)}>
-      <ToolOutputImages {...output} onImageExpand={props.onImageExpand} hideImages={props.hideImages} />
-      <ToolOutput {...output} onImageExpand={props.onImageExpand} hideImages={props.hideImages} />
+      <ToolOutputImages
+        {...output}
+        onImageExpand={props.onImageExpand}
+        hideImages={props.hideImages}
+      />
+      <ToolOutput {...output} onImageExpand={props.onImageExpand} />
     </div>
   );
 }
@@ -292,11 +291,12 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
     props.source,
     streamsOutput,
   );
-  const environmentProviders =
-    useAtomValue(serverEnvironment.providersValueAtom(props.environmentId)) ??
-    EMPTY_SERVER_PROVIDERS;
+  // Provider statuses give tool results their logos and model names. Read here,
+  // in the expanded inspector, so status pushes do not re-render every row.
+  const providers = useEnvironmentProviders().get(props.environmentId);
   const item = fetched.item;
   const outputState = fetched.output;
+  useInitialOutputReady(streamsOutput || outputState.pending, props.onInitialOutputReady);
   return (
     <div className="space-y-2 text-xs" data-v2-item-inspector={item.type}>
       {item.type === "reasoning" && item.text ? (
@@ -322,6 +322,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
           outputSlot={
             streamsOutput ? (
               <CommandOutputPanel
+                onInitialOutputReady={props.onInitialOutputReady}
                 environmentId={props.environmentId}
                 threadId={props.projectedItem.sourceThreadId}
                 itemId={props.projectedItem.sourceItemId}
@@ -444,7 +445,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
               threadId: props.projectedItem.sourceThreadId,
             },
             onOpenThread: props.onOpenThread,
-            providers: props.providers ?? environmentProviders,
+            providers,
           }}
         />
       ) : null}
