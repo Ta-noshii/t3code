@@ -409,10 +409,33 @@ export function selectThreadRelationshipShells(
   const current = threads.find((thread) => thread.id === threadId);
   const currentParentId = current === undefined ? null : shellParentThreadId(current);
   if (currentParentId !== null) named.add(currentParentId);
+  // Subagents of subagents nest under their parent's row, so walk the subagent tree down.
+  const subagentChildren = new Map<ThreadId, ThreadId[]>();
+  for (const thread of threads) {
+    const parentId = shellParentThreadId(thread);
+    if (parentId === null || thread.lineage.relationshipToParent !== "subagent") continue;
+    subagentChildren.set(parentId, [...(subagentChildren.get(parentId) ?? []), thread.id]);
+  }
+  const descendants = new Set<string>();
+  const pending: ThreadId[] = [threadId];
+  for (let depth = 0; depth <= MAX_SUBAGENT_TREE_DEPTH && pending.length > 0; depth += 1) {
+    for (const parentId of pending.splice(0)) {
+      for (const childId of subagentChildren.get(parentId) ?? []) {
+        if (childId === threadId || descendants.has(childId)) continue;
+        descendants.add(childId);
+        pending.push(childId);
+      }
+    }
+  }
   return threads.filter(
-    (thread) => named.has(thread.id) || shellParentThreadId(thread) === threadId,
+    (thread) =>
+      named.has(thread.id) ||
+      descendants.has(thread.id) ||
+      shellParentThreadId(thread) === threadId,
   );
 }
+
+const MAX_SUBAGENT_TREE_DEPTH = 4;
 
 const relationshipShellsAtomFamily = Atom.family((key: string) => {
   const ref = parseThreadKey(key);

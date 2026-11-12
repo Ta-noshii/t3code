@@ -8,11 +8,18 @@ import { selectThreadRelationshipShells } from "./entities";
 
 type Projection = Parameters<typeof selectThreadRelationshipShells>[1];
 
-const shell = (id: string, parentThreadId: string | null = null) =>
+const shell = (
+  id: string,
+  parentThreadId: string | null = null,
+  relationshipToParent: "fork" | "subagent" = "fork",
+) =>
   ({
     id,
     forkedFrom: null,
-    lineage: { parentThreadId, relationshipToParent: parentThreadId === null ? null : "fork" },
+    lineage: {
+      parentThreadId,
+      relationshipToParent: parentThreadId === null ? null : relationshipToParent,
+    },
   }) as unknown as OrchestrationV2ThreadShell;
 
 const threadId = "current" as OrchestrationV2ThreadShell["id"];
@@ -63,5 +70,22 @@ describe("selectThreadRelationshipShells", () => {
         (thread) => thread.id,
       ),
     ).toEqual(["current", "parent"]);
+  });
+
+  it("keeps subagents of subagents, but not the subagents of its parent or a fork", () => {
+    const threads = [
+      shell("current", "parent", "subagent"),
+      shell("parent"),
+      shell("sibling", "parent", "subagent"),
+      shell("agent", "current", "subagent"),
+      shell("agent-agent", "agent", "subagent"),
+      shell("agent-agent-agent", "agent-agent", "subagent"),
+      shell("agent-fork", "agent"),
+    ];
+    expect(
+      selectThreadRelationshipShells(threadId, null as Projection, threads).map(
+        (thread) => thread.id,
+      ),
+    ).toEqual(["current", "parent", "agent", "agent-agent", "agent-agent-agent"]);
   });
 });

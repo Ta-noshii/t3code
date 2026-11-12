@@ -140,8 +140,53 @@ type RemoteSubagent = OrchestrationV2Subagent & {
   readonly remoteChild: OrchestrationV2RemoteTaskChild;
 };
 
+/** A subagent row; a nested one (a subagent's own subagent) carries its tree position. */
+type LineageThreadRow = ThreadRelationshipWalkRow & {
+  /** Per ancestor level, whether that level's guide line continues past this row. */
+  readonly treeGuides?: ReadonlyArray<boolean>;
+  readonly lastSibling?: boolean;
+};
+
 /** A task delegated to a linked environment has no thread here, so it gets its own row kind. */
-type LineageRow = ThreadRelationshipWalkRow | { readonly remote: RemoteSubagent };
+type LineageRow = LineageThreadRow | { readonly remote: RemoteSubagent };
+
+const MAX_NESTED_SUBAGENT_DEPTH = 5;
+// Row padding plus half the 16px icon: the x of a top-level row's icon centre.
+const TREE_ORIGIN_PX = 18;
+const TREE_INDENT_PX = 16;
+
+/** The elbow and through-lines that tie a nested subagent row to its parent's icon. */
+function LineageTreeGuides(props: {
+  readonly guides: ReadonlyArray<boolean>;
+  readonly last: boolean;
+}) {
+  const ownX = TREE_ORIGIN_PX + props.guides.length * TREE_INDENT_PX;
+  return (
+    <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0">
+      {props.guides.map((through, level) =>
+        through ? (
+          <span
+            // oxlint-disable-next-line react/no-array-index-key -- levels are positional
+            key={level}
+            className="absolute -top-1 bottom-0 w-px bg-muted-foreground/25"
+            style={{ insetInlineStart: TREE_ORIGIN_PX + level * TREE_INDENT_PX }}
+          />
+        ) : null,
+      )}
+      <span
+        className={cn(
+          "absolute -top-1 w-px bg-muted-foreground/25",
+          props.last ? "h-[calc(50%+0.25rem)]" : "bottom-0",
+        )}
+        style={{ insetInlineStart: ownX }}
+      />
+      <span
+        className="absolute top-1/2 h-px w-2 bg-muted-foreground/25"
+        style={{ insetInlineStart: ownX }}
+      />
+    </span>
+  );
+}
 
 const lineageRowStatus = (row: LineageRow) =>
   "remote" in row ? row.remote.status : row.edge.status;
@@ -202,7 +247,7 @@ function ThreadLineageGroup<Row extends LineageRow>(props: {
 function relationshipLabel(edge: ThreadRelationshipEdge, currentThreadId: ThreadId) {
   if (edge.kind === "transfer") return "Context transfer";
   if (edge.kind === "subagent") {
-    return edge.sourceThreadId === currentThreadId ? "Subagent" : "Parent agent";
+    return edge.targetThreadId === currentThreadId ? "Parent agent" : "Subagent";
   }
   return edge.sourceThreadId === currentThreadId ? "Fork" : "Parent thread";
 }
@@ -539,6 +584,53 @@ export function ThreadRelationshipsPanel(props: {
   );
   const canDetach = projection ? canDetachThreadProviderSession(projection) : false;
 
+  // A subagent's own subagents, depth-first and newest first, nested under its row.
+  const nestedSubagentRows = (
+    row: ThreadRelationshipWalkRow,
+    guides: ReadonlyArray<boolean>,
+  ): ReadonlyArray<LineageThreadRow> => {
+    if (row.depth >= MAX_NESTED_SUBAGENT_DEPTH) return [];
+    const children = orderWebThreadLineageRows({
+      graph,
+      rows: graph.edges
+        .filter(
+          (edge) =>
+            edge.kind === "subagent" &&
+            edge.sourceThreadId === row.threadId &&
+            edge.targetThreadId !== props.threadId &&
+            !isHiddenRelation(edge.targetThreadId),
+        )
+        .map((edge) => ({
+          threadId: edge.targetThreadId,
+          fromThreadId: row.threadId,
+          depth: row.depth + 1,
+          edge,
+        })),
+      currentThreadId: props.threadId,
+      mergeTargetThreadId: null,
+    });
+    return children.flatMap((child, index) => {
+      const last = index === children.length - 1;
+      return [
+        { ...child, treeGuides: guides, lastSibling: last },
+        ...nestedSubagentRows(child, [...guides, !last]),
+      ];
+    });
+  };
+  const nestedByThreadId = new Map(
+    visibleRelationships
+      .filter(
+        ({ edge }) => edge.kind === "subagent" && !isParentThreadRelationship(edge, props.threadId),
+      )
+      .map((row) => [row.threadId, nestedSubagentRows(row, [])] as const),
+  );
+  const nestedStatus = (row: ThreadRelationshipWalkRow) => threadRelationshipRowStatus(graph, row);
+  const withNested = (rows: ReadonlyArray<ThreadRelationshipWalkRow>) =>
+    rows.flatMap((row): ReadonlyArray<LineageThreadRow> => [
+      row,
+      ...(nestedByThreadId.get(row.threadId) ?? []),
+    ]);
+
   const {
     related = [],
     active = [],
@@ -549,7 +641,12 @@ export function ThreadRelationshipsPanel(props: {
     if (!isParent && graph.nodes.get(threadId)?.thread?.lineage.sideChat === true)
       return "sideChats";
     if (edge.kind !== "subagent" || isParent) return "related";
-    return isFinishedAgentStatus(edge.status) ? "previous" : "active";
+    // A finished agent whose own subagent still works stays with the active ones.
+    const nestedActive = (nestedByThreadId.get(threadId) ?? []).some((row) => {
+      const status = nestedStatus(row);
+      return status !== null && !isFinishedAgentStatus(status);
+    });
+    return isFinishedAgentStatus(edge.status) && !nestedActive ? "previous" : "active";
   });
   const { remoteActive = [], remotePrevious = [] } = groupBy(
     (projection?.subagents ?? [])
@@ -564,18 +661,20 @@ export function ThreadRelationshipsPanel(props: {
     expanded: boolean;
   }> = [
     { id: "related", label: null, rows: related, expanded: true },
-    { id: "active", label: null, rows: [...active, ...remoteActive], expanded: true },
+    { id: "active", label: null, rows: [...withNested(active), ...remoteActive], expanded: true },
     {
       id: "previous",
       label: "Previous agents",
-      rows: [...previous, ...remotePrevious],
+      rows: [...withNested(previous), ...remotePrevious],
       expanded: false,
     },
   ];
   const runningCount =
     (projection?.subagents.filter(
       (agent) => agent.childThreadId === null && agent.status === "running",
-    ).length ?? 0) + active.filter(({ edge }) => edge.status === "running").length;
+    ).length ?? 0) +
+    active.filter(({ edge }) => edge.status === "running").length +
+    [...nestedByThreadId.values()].flat().filter((row) => nestedStatus(row) === "running").length;
 
   // A linked environment's agent may have delegated this thread from there.
   const delegatedFrom = currentThread?.delegatedFrom;
@@ -689,7 +788,14 @@ export function ThreadRelationshipsPanel(props: {
         ? null
         : (graph.nodes.get(mergeTargetThreadId)?.thread?.title ?? null);
 
-  const renderRelationshipRow = ({ threadId, edge }: ThreadRelationshipWalkRow) => {
+  const renderRelationshipRow = ({
+    threadId,
+    edge,
+    depth,
+    treeGuides,
+    lastSibling,
+  }: LineageThreadRow) => {
+    const nested = treeGuides !== undefined && depth > 1;
     const node = graph.nodes.get(threadId);
     const isSubagent = edge.kind === "subagent";
     const isMergeTarget = threadId === mergeTargetThreadId;
@@ -848,7 +954,12 @@ export function ThreadRelationshipsPanel(props: {
       );
     }
     return (
-      <li key={threadId} className="group relative flex h-8 items-center rounded-lg">
+      <li
+        key={threadId}
+        className="group relative flex h-8 items-center rounded-lg"
+        style={nested ? { paddingInlineStart: (depth - 1) * TREE_INDENT_PX } : undefined}
+      >
+        {nested ? <LineageTreeGuides guides={treeGuides} last={lastSibling === true} /> : null}
         {isMergeTarget ? (
           <div className={THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS}>
             <Tooltip>
