@@ -10,6 +10,7 @@ import { resolveThreadCurrentPullRequestLink } from "@t3tools/client-runtime/thr
 import { useDraggable } from "@dnd-kit/core";
 import { isAgentProgressComplete } from "@t3tools/shared/agentProgress";
 import { SidebarProgressRing } from "./SidebarProgressRing";
+import { SidebarSubagents } from "./SidebarSubagents";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -1240,6 +1241,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </span>
   ) : null;
 
+  const subagentStrip =
+    thread.subagentCounts.length === 0 ? null : (
+      <SidebarSubagents
+        environmentId={threadRef.environmentId}
+        threadId={threadRef.threadId}
+        rootThreadId={thread.lineage.rootThreadId}
+        counts={thread.subagentCounts}
+        providerEntryByInstanceId={props.providerEntryByInstanceId}
+        onOpen={onThreadActivate}
+        className={variant === "card" ? "px-1 pt-0.5" : "ps-7 pe-1"}
+      />
+    );
+
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
     const inFolder = variant === "folder" || multiline;
@@ -1435,6 +1449,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           </TooltipTrigger>
           {detailsTooltip}
         </Tooltip>
+        {subagentStrip}
       </li>
     );
   }
@@ -1656,6 +1671,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>
+      {subagentStrip}
     </li>
   );
 });

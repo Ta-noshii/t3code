@@ -32,6 +32,7 @@ import {
   type ThreadPullRequestLink,
   isLiveSubagentShell,
   isListedThreadLineage,
+  subagentCountsForShell,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -1419,6 +1420,71 @@ it.effect("shells flag a latest run triggered by a provider background wake", ()
       );
       yield* assertShellIndexCoversShells();
     }
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("SQL shells count subagent threads per provider like the projection does", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = yield* addRolledBackRecoveryCandidate("subagent-counts");
+    const { runs, updatedAt: at } = yield* store.getThreadProjection(threadId);
+    const run = runs[0]!;
+    const claude = ProviderInstanceId.make("claude-work");
+    const claudeDriver = ProviderDriverKind.make("claudeAgent");
+    const tasks = [
+      { name: "codex-running", instance: providerInstanceId, kind: driver, status: "running" },
+      { name: "codex-done", instance: providerInstanceId, kind: driver, status: "completed" },
+      { name: "claude-waiting", instance: claude, kind: claudeDriver, status: "waiting" },
+      // No child thread to open, so the list leaves it out.
+      { name: "native-only", instance: claude, kind: claudeDriver, status: "running" },
+    ] as const;
+    for (const task of tasks) {
+      const id = NodeId.make(`node:subagent-counts:${task.name}`);
+      yield* store.apply({
+        id: EventId.make(`event:subagent-counts:${task.name}`),
+        type: "subagent.updated",
+        threadId,
+        runId: run.id,
+        nodeId: id,
+        driver: task.kind,
+        providerInstanceId: task.instance,
+        occurredAt: at,
+        payload: {
+          id,
+          threadId,
+          runId: run.id,
+          parentNodeId: run.rootNodeId,
+          origin: "app_owned",
+          createdBy: "agent",
+          driver: task.kind,
+          providerInstanceId: task.instance,
+          providerThreadId: null,
+          childThreadId:
+            task.name === "native-only"
+              ? null
+              : ThreadId.make(`thread:subagent-counts:${task.name}`),
+          nativeTaskRef: null,
+          prompt: "Do the work",
+          title: task.name,
+          model: null,
+          status: task.status,
+          result: null,
+          startedAt: at,
+          completedAt: task.status === "completed" ? at : null,
+          updatedAt: at,
+        },
+      });
+    }
+
+    const expected = [
+      { providerInstanceId: claude, driver: claudeDriver, count: 1, active: 1 },
+      { providerInstanceId, driver, count: 2, active: 1 },
+    ];
+    const { subagents } = yield* store.getThreadProjection(threadId);
+    assert.deepEqual(subagentCountsForShell(subagents), expected);
+    const listed = (yield* store.getShellSnapshot()).threads.find((row) => row.id === threadId);
+    assert.deepEqual(listed?.subagentCounts, expected);
+    assert.deepEqual((yield* store.getThreadShell(threadId))?.subagentCounts, expected);
   }).pipe(Effect.provide(layerTest)),
 );
 

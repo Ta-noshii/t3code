@@ -1043,6 +1043,51 @@ export const OrchestrationV2Subagent = Schema.Struct({
 });
 export type OrchestrationV2Subagent = typeof OrchestrationV2Subagent.Type;
 
+/** Subagent threads a thread started, grouped by provider instance, for the thread list. */
+export const OrchestrationV2SubagentCount = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  driver: ProviderDriverKind,
+  count: NonNegativeInt,
+  /** Pending, running or waiting. */
+  active: NonNegativeInt,
+});
+export type OrchestrationV2SubagentCount = typeof OrchestrationV2SubagentCount.Type;
+
+const ACTIVE_SUBAGENT_STATUSES: ReadonlySet<OrchestrationV2Subagent["status"]> = new Set([
+  "pending",
+  "running",
+  "waiting",
+]);
+
+/** Counts only subagents with a child thread, the ones the thread list can open. */
+export const subagentCountsForShell = (
+  subagents: ReadonlyArray<
+    Pick<OrchestrationV2Subagent, "providerInstanceId" | "driver" | "childThreadId" | "status">
+  >,
+): OrchestrationV2SubagentCount[] => {
+  const byInstance = new Map<string, OrchestrationV2SubagentCount>();
+  for (const subagent of subagents) {
+    if (subagent.childThreadId === null) continue;
+    const key = `${subagent.providerInstanceId}\u0000${subagent.driver}`;
+    const current = byInstance.get(key) ?? {
+      providerInstanceId: subagent.providerInstanceId,
+      driver: subagent.driver,
+      count: 0,
+      active: 0,
+    };
+    byInstance.set(key, {
+      ...current,
+      count: current.count + 1,
+      active: current.active + (ACTIVE_SUBAGENT_STATUSES.has(subagent.status) ? 1 : 0),
+    });
+  }
+  // Code-unit order, the same as the shell query's ORDER BY.
+  const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return [...byInstance.values()].toSorted(
+    (a, b) => compare(a.providerInstanceId, b.providerInstanceId) || compare(a.driver, b.driver),
+  );
+};
+
 export function isOrchestrationV2WorkActive(
   status: OrchestrationV2ExecutionNode["status"],
 ): boolean {
@@ -2320,6 +2365,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   progressSummary: Schema.optional(Schema.NullOr(OrchestrationV2AgentProgressSummary)),
   /** Not `replyRequest`, for the same reason as progressSummary. Absent from older servers. */
   needsReply: Schema.optional(Schema.NullOr(OrchestrationV2NeedsReply)),
+  /** Absent from older servers. */
+  subagentCounts: Schema.optional(Schema.Array(OrchestrationV2SubagentCount)),
   itemCount: NonNegativeInt,
   visibleItemCount: NonNegativeInt,
   createdAt: Schema.DateTimeUtc,

@@ -1,5 +1,10 @@
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
-import { needsReplyForShell, pendingGuestMessageCount } from "@t3tools/contracts";
+import {
+  needsReplyForShell,
+  OrchestrationV2SubagentCount,
+  pendingGuestMessageCount,
+  subagentCountsForShell,
+} from "@t3tools/contracts";
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { summarizeAgentProgress } from "@t3tools/shared/agentProgress";
 import { projectTurnItemForWire } from "./WireProjection.ts";
@@ -86,6 +91,7 @@ import {
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
@@ -1104,6 +1110,7 @@ type ShellThreadRow = {
   readonly latest_user_message_at: string | null;
   readonly latest_user_authored_message_at: string | null;
   readonly has_actionable_proposed_plan: number;
+  readonly subagent_counts_json: string | null;
 };
 
 type ShellRunRow = {
@@ -1263,6 +1270,13 @@ const decodeRunAttemptPayload = Schema.decodeUnknownEffect(
 const decodeNodePayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2ExecutionNodeJsonSchema),
 );
+// Rows from older subagents without a provider instance are dropped by the query, so a
+// decode failure only means a malformed row; the strip is then left out.
+const decodeSubagentCountsJson = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Array(OrchestrationV2SubagentCount)),
+);
+const decodeSubagentCounts = (json: string | null): ReadonlyArray<OrchestrationV2SubagentCount> =>
+  json === null ? [] : Option.getOrElse(decodeSubagentCountsJson(json), () => []);
 const decodeSubagentPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2SubagentJsonSchema),
 );
@@ -1808,6 +1822,7 @@ export function threadShellFromProjection(
     ),
     progressSummary: summarizeAgentProgress(projection.thread.progress),
     needsReply: needsReplyForShell(projection.thread.replyRequest, latestRun?.id ?? null),
+    subagentCounts: subagentCountsForShell(projection.subagents),
     itemCount: activeLocalTurnItems(projection).length,
     visibleItemCount: projection.visibleTurnItems.length,
     createdAt: projection.thread.createdAt,
@@ -1932,6 +1947,7 @@ type ShellThreadState = {
   readonly pendingBackgroundTasks: OrchestrationV2ThreadShell["pendingBackgroundTasks"];
   readonly providerInstanceHistory: OrchestrationV2ThreadShell["providerInstanceHistory"];
   readonly goal: OrchestrationV2ThreadShell["goal"];
+  readonly subagentCounts: ReadonlyArray<OrchestrationV2SubagentCount>;
   readonly itemCount: number;
   readonly runlessItemCount: number;
   readonly updatedAt: OrchestrationV2ThreadProjection["updatedAt"];
@@ -2107,6 +2123,7 @@ function shellFromState(input: {
     goal: input.state.goal,
     progressSummary: summarizeAgentProgress(input.state.thread.progress),
     needsReply: needsReplyForShell(input.state.thread.replyRequest, input.state.latestRunId),
+    subagentCounts: [...input.state.subagentCounts],
     itemCount: input.state.itemCount,
     visibleItemCount: input.visibleItemCount,
     createdAt: input.state.thread.createdAt,
@@ -7615,7 +7632,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         worktreePath,
         threadIds,
         listedOnly = false,
-      }: ShellSnapshotOptions & { readonly listedOnly?: boolean } = {},
+        subagentCounts = true,
+      }: ShellSnapshotOptions & {
+        readonly listedOnly?: boolean;
+        /** Agent awareness reads shells without them, so it stays free of aggregates. */
+        readonly subagentCounts?: boolean;
+      } = {},
     ) =>
       sql<ShellThreadRow>`
             SELECT
@@ -7767,7 +7789,32 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 WHERE plan.thread_id = t.thread_id
                   AND plan.kind = 'proposed_plan'
                   AND plan.status = 'active'
-              ) AS has_actionable_proposed_plan
+              ) AS has_actionable_proposed_plan,
+              ${
+                subagentCounts
+                  ? sql`(
+                SELECT json_group_array(json_object(
+                  'providerInstanceId', grouped.provider_instance_id,
+                  'driver', grouped.driver,
+                  'count', grouped.n,
+                  'active', grouped.active
+                ))
+                FROM (
+                  SELECT
+                    COALESCE(subagent.provider_instance_id, json_extract(subagent.payload_json, '$.providerInstanceId')) AS provider_instance_id,
+                    COALESCE(subagent.driver, json_extract(subagent.payload_json, '$.driver')) AS driver,
+                    COUNT(*) AS n,
+                    SUM(subagent.status IN ('pending', 'running', 'waiting')) AS active
+                  FROM orchestration_v2_projection_subagents subagent
+                    INDEXED BY orchestration_v2_projection_subagents_thread_idx
+                  WHERE subagent.thread_id = t.thread_id
+                    AND subagent.child_thread_id IS NOT NULL
+                  GROUP BY 1, 2
+                  ORDER BY 1, 2
+                ) grouped
+                WHERE grouped.provider_instance_id IS NOT NULL AND grouped.driver IS NOT NULL)`
+                  : sql`NULL`
+              } AS subagent_counts_json
             FROM orchestration_v2_projection_threads t
             LEFT JOIN orchestration_v2_projection_runs active ON active.run_id = (
               SELECT r.run_id
@@ -8419,6 +8466,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             providerThreadsByThreadId.get(thread.id) ?? [],
             thread.activeProviderThreadId,
           ),
+          subagentCounts: decodeSubagentCounts(row.subagent_counts_json),
           itemCount: shellItemCountsByThreadId.get(thread.id)?.itemCount ?? 0,
           runlessItemCount: shellItemCountsByThreadId.get(thread.id)?.runlessItemCount ?? 0,
           updatedAt: thread.updatedAt,
@@ -8598,7 +8646,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             Effect.gen(function* () {
               const threadRows = yield* selectShellThreadRows(
                 threadId,
-                threadId === undefined ? { location: "active", listedOnly: true } : {},
+                threadId === undefined
+                  ? { location: "active", listedOnly: true, subagentCounts: false }
+                  : { subagentCounts: false },
               );
               const ids = threadRows.map((row) => ThreadId.make(row.thread_id));
               const providerThreadRows =
