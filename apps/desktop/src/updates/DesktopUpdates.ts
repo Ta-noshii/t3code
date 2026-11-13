@@ -829,8 +829,12 @@ export const make = Effect.gen(function* () {
             [
               Effect.forEach(
                 instances,
+                // A hosted server keeps running; the updated app swaps it once threads are idle.
                 (instance) =>
-                  instance.stop({ timeout: DesktopBackendManager.BACKEND_QUIT_STOP_TIMEOUT }),
+                  instance.stop({
+                    timeout: DesktopBackendManager.BACKEND_QUIT_STOP_TIMEOUT,
+                    detach: true,
+                  }),
                 { concurrency: "unbounded" },
               ),
               sshEnvironment.closeAllTunnels,

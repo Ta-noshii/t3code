@@ -20,6 +20,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import serverPackageJson from "../../../server/package.json" with { type: "json" };
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
+import * as DesktopHostedBackend from "./DesktopHostedBackend.ts";
 import * as DesktopCliShim from "../app/DesktopCliShim.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopState from "../app/DesktopState.ts";
@@ -547,6 +548,20 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       httpBaseUrl: backendExposure.httpBaseUrl,
       captureOutput: true,
       preflightFailure: Option.none(),
+      ...(DesktopHostedBackend.isHostingSupported(environment) &&
+      Option.isSome(environment.appImagePath)
+        ? {
+            hosted: {
+              stateDir: environment.stateDir,
+              baseDir: environment.baseDir,
+              logDir: environment.logDir,
+              appVersion: environment.appVersion,
+              appImagePath: environment.appImagePath.value,
+              appRoot: environment.path.dirname(process.execPath),
+              hostScriptPath: environment.path.join(environment.dirname, "backendHost.cjs"),
+            },
+          }
+        : {}),
     } satisfies DesktopBackendManager.DesktopBackendStartConfig;
   },
 );
@@ -734,7 +749,15 @@ export const make = Effect.gen(function* () {
   const mac = yield* Mac.Mac;
   const random = yield* SecureRandom.SecureRandom;
   // Random generation yields; serialize it so concurrent backends cannot capture distinct bootstrap secrets.
-  const secretRef = yield* SynchronizedRef.make(Option.none<string>());
+  // A server left running by an earlier app accepts only the secret it was started with.
+  const secretRef = yield* SynchronizedRef.make(
+    DesktopHostedBackend.isHostingSupported(environment)
+      ? (yield* DesktopHostedBackend.readLiveHost(environment.stateDir)).pipe(
+          Option.map((record) => record.bootstrapSecret),
+          Option.filter((secret) => secret.length > 0),
+        )
+      : Option.none<string>(),
+  );
   const getOrCreateBootstrapSecret = SynchronizedRef.modifyEffect(secretRef, (current) =>
     Option.match(current, {
       onSome: (secret) => Effect.succeed([secret, current] as const),

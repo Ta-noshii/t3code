@@ -22,6 +22,7 @@ import * as PreviewPasskeys from "../preview/Passkeys.ts";
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopHomeOwner from "../backend/DesktopHomeOwner.ts";
+import * as DesktopHostedBackend from "../backend/DesktopHostedBackend.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLegacyLocalStorage from "./DesktopLegacyLocalStorage.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
@@ -162,7 +163,9 @@ const stopAllPoolInstances = Effect.fn("desktop.app.stopAllPoolInstances")(
     const instances = yield* pool.list;
     yield* Effect.forEach(
       instances,
-      (instance) => instance.stop({ timeout: DesktopBackendManager.BACKEND_QUIT_STOP_TIMEOUT }),
+      // A hosted server keeps running for the next launch; its host stops it once idle.
+      (instance) =>
+        instance.stop({ timeout: DesktopBackendManager.BACKEND_QUIT_STOP_TIMEOUT, detach: true }),
       { concurrency: "unbounded" },
     );
   },
@@ -224,8 +227,23 @@ const bootstrap = Effect.gen(function* () {
     return yield* new DesktopDevelopmentBackendPortRequiredError();
   }
 
+  // A server an earlier app left running through the backend host is ours to attach to.
+  const liveHost =
+    !(settings.wslOnly && settings.wslBackendEnabled) &&
+    DesktopHostedBackend.isHostingSupported(environment)
+      ? yield* DesktopHostedBackend.readLiveHost(environment.stateDir)
+      : Option.none();
+  if (Option.isSome(liveHost)) {
+    yield* logBootstrapInfo("bootstrap found a running backend host", {
+      hostPid: liveHost.value.hostPid,
+      port: liveHost.value.port,
+      runtimeKey: liveHost.value.runtimeKey,
+    });
+  }
+
   // A backend started while another server holds this home's lock can only exit with code 78.
   if (
+    Option.isNone(liveHost) &&
     !(settings.wslOnly && settings.wslBackendEnabled) &&
     !(yield* DesktopHomeOwner.awaitHomeOwnershipRelease())
   ) {
@@ -240,7 +258,9 @@ const bootstrap = Effect.gen(function* () {
     return yield* (yield* ElectronApp.ElectronApp).quit;
   }
 
-  const backendPortSelection = yield* resolveDesktopBackendPort(environment.configuredBackendPort);
+  const backendPortSelection = yield* resolveDesktopBackendPort(
+    Option.isSome(liveHost) ? Option.some(liveHost.value.port) : environment.configuredBackendPort,
+  );
   const backendPort = backendPortSelection.port;
   yield* logBootstrapInfo(
     backendPortSelection.selectedByScan

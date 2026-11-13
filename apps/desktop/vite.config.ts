@@ -116,6 +116,16 @@ export default defineConfig({
       },
     },
     {
+      // Runs detached from the app under ELECTRON_RUN_AS_NODE; Node built-ins only.
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: ["src/backendHost.ts"],
+      clean: false,
+    },
+    {
       format: "cjs",
       outDir: "dist-electron",
       dts: false,
