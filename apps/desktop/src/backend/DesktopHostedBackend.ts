@@ -337,7 +337,7 @@ export const runHostedBackendProcess = Effect.fn("desktop.hostedBackend.run")(fu
   options: RunBackendProcessOptions & {
     readonly hosted: HostedBackendConfig;
     readonly shouldDetach: Effect.Effect<boolean>;
-    readonly probeReadiness: Effect.Effect<boolean>;
+    readonly probeReadiness: (serverPid: number) => Effect.Effect<boolean>;
   },
 ): Effect.fn.Return<BackendProcessExit, HostedBackendError, Scope.Scope> {
   const { hosted } = options;
@@ -468,7 +468,7 @@ export const runHostedBackendProcess = Effect.fn("desktop.hostedBackend.run")(fu
     yield* forwardLines(options.desktopBrowserStream, "b");
   }
 
-  yield* options.probeReadiness.pipe(
+  yield* options.probeReadiness(greeting.serverPid).pipe(
     Effect.repeat({ while: (ready) => !ready }),
     Effect.forkScoped,
   );
