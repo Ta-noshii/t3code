@@ -64,6 +64,7 @@ import { ThreadPullRequestsSheet } from "./features/threads/ThreadPullRequestsSh
 import { ThreadAgentsSheet } from "./features/threads/ThreadAgentsSheet";
 import { ThreadBackgroundWorkSheet } from "./features/threads/ThreadBackgroundWorkSheet";
 import { ThreadQueueSheet } from "./features/threads/ThreadQueueControl";
+import { ThreadProgressSheet } from "./features/threads/agent-progress";
 import {
   FullscreenThreadRouteScreen,
   ThreadRouteScreen,
@@ -696,6 +697,10 @@ const RootStackConfig = createWorkspaceStackNavigator({
     ThreadBackgroundWork: createNativeStackScreen({
       screen: ThreadBackgroundWorkSheet,
       options: sheetRoute({ detent: 0.5, androidMaxDetent: 0.9 }),
+    }),
+    ThreadProgress: createNativeStackScreen({
+      screen: ThreadProgressSheet,
+      options: sheetRoute({ detent: 0.6, androidMaxDetent: 0.95 }),
     }),
     ThreadAgents: createNativeStackScreen({
       screen: ThreadAgentsSheet,

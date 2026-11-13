@@ -782,7 +782,14 @@ function ThreadDetailBody(
             : `${agentProgressFinished(progressSummary)}/${progressSummary.total}`,
           complete: isAgentProgressComplete(progressSummary),
           summary: progressSummary,
-          accessibilityLabel: `${progressSummary.title}: ${agentProgressFinished(progressSummary)} of ${progressSummary.total} finished${progressSummary.failed > 0 ? `, ${progressSummary.failed} failed` : ""}`,
+          accessibilityLabel: `${progressSummary.title}: ${agentProgressFinished(progressSummary)} of ${progressSummary.total} finished${progressSummary.failed > 0 ? `, ${progressSummary.failed} failed` : ""}. Show items`,
+          onPress: () => {
+            Keyboard.dismiss();
+            navigation.navigate("ThreadProgress", {
+              environmentId: props.environmentId,
+              threadId: props.selectedThread.id,
+            });
+          },
           action: {
             label: "Dismiss",
             accessibilityLabel: "Dismiss progress",

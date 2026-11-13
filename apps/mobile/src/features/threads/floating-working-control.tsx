@@ -1,5 +1,4 @@
 import type { SubagentPillSegment } from "@t3tools/client-runtime/state/thread-subagents";
-import type { OrchestrationV2AgentProgressSummary } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -30,6 +29,7 @@ import { ControlPill } from "../../components/ui/ControlPill";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { BrowserPreviewButton } from "../browser/browser-preview-button";
 import { DevicePreviewButton } from "../devices/device-preview-button";
+import { AgentProgressBar } from "./agent-progress";
 import type { FloatingWorkingStatus } from "./floating-working-status";
 import { ShimmeringWorkContent } from "./thread-work-log";
 import { useVisibleSecondClock } from "./use-visible-second-clock";
@@ -557,8 +557,10 @@ function FloatingStatusLabel(props: {
       <StatusLabelRow
         key="progress"
         accessibilityLabel={props.status.accessibilityLabel}
+        accessibilityRole="button"
         className="gap-2"
         onLayout={props.onLayout}
+        onPress={props.status.onPress}
       >
         <SymbolView
           name={props.status.complete ? "checkmark.circle" : "checklist"}
@@ -572,7 +574,9 @@ function FloatingStatusLabel(props: {
         <Text className="font-t3-medium text-xs text-foreground-muted tabular-nums">
           {props.status.count}
         </Text>
-        {props.status.complete ? null : <ProgressMeter summary={props.status.summary} />}
+        {props.status.complete ? null : (
+          <AgentProgressBar summary={props.status.summary} className="h-1 w-14" />
+        )}
       </StatusLabelRow>
     );
   }
@@ -624,31 +628,6 @@ function FloatingStatusLabel(props: {
   }
   return (
     <WorkingDuration key="working" startedAt={props.status.startedAt} onLayout={props.onLayout} />
-  );
-}
-
-// One stacked bar: the capsule is too short for a segment per item.
-function ProgressMeter(props: { readonly summary: OrchestrationV2AgentProgressSummary }) {
-  const { summary } = props;
-  if (summary.total === 0) return null;
-  const parts = [
-    ["done", summary.done, "bg-adaptive-emerald-500"],
-    ["failed", summary.failed, "bg-danger"],
-    ["skipped", summary.skipped, "bg-foreground-muted"],
-    ["running", summary.running, "bg-primary"],
-  ] as const;
-  return (
-    <View className="h-1 w-10 flex-row overflow-hidden rounded-full bg-subtle-strong">
-      {parts.map(([status, count, className]) =>
-        count === 0 ? null : (
-          <View
-            key={status}
-            className={`h-full ${className}`}
-            style={{ width: `${(count / summary.total) * 100}%` }}
-          />
-        ),
-      )}
-    </View>
   );
 }
 

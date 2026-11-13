@@ -1,6 +1,7 @@
 import {
   OrchestrationV2AppThread,
   OrchestrationV2TurnItem,
+  type OrchestrationV2AgentProgress,
   type OrchestrationV2ThreadProjection,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -489,6 +490,19 @@ export function createEnvironmentThreadDetailAtoms<E>(
     }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-turn-subagents:${key}`));
   });
 
+  // The tracker's items; its shell summary has only counts and per-item segments.
+  const progressAtomFamily = Atom.family((key: string) => {
+    let value: OrchestrationV2AgentProgress | null = null;
+    return Atom.make((get) => {
+      const projection = Option.getOrNull(get(threadStateValueAtomFamily(key)).data);
+      const next = projection?.thread.progress ?? null;
+      if (next?.updatedAt !== value?.updatedAt || (next === null) !== (value === null)) {
+        value = next;
+      }
+      return value;
+    }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-progress:${key}`));
+  });
+
   const checkpointSummariesAtomFamily = Atom.family((key: string) => {
     let previous: Pick<OrchestrationV2ThreadProjection, "checkpoints" | "messages"> | null = null;
     let value = EMPTY_CHECKPOINT_SUMMARIES;
@@ -614,6 +628,7 @@ export function createEnvironmentThreadDetailAtoms<E>(
     queuedCountAtom: (ref: ScopedThreadRef) => queuedCountAtomFamily(threadKey(ref)),
     runStopAtom: (ref: ScopedThreadRef) => runStopAtomFamily(threadKey(ref)),
     turnSubagentsAtom: (ref: ScopedThreadRef) => turnSubagentsAtomFamily(threadKey(ref)),
+    progressAtom: (ref: ScopedThreadRef) => progressAtomFamily(threadKey(ref)),
     checkpointSummariesAtom: (ref: ScopedThreadRef) =>
       checkpointSummariesAtomFamily(threadKey(ref)),
     stateAtom: (ref: ScopedThreadRef) => threadStateValueAtomFamily(threadKey(ref)),

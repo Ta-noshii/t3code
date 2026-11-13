@@ -46,6 +46,7 @@ export type FloatingWorkingStatus =
       readonly complete: boolean;
       readonly summary: OrchestrationV2AgentProgressSummary;
       readonly accessibilityLabel: string;
+      readonly onPress: () => void;
       readonly action: FloatingStatusAction;
     }
   | { readonly kind: "extension"; readonly label: string; readonly onPress: () => void }
