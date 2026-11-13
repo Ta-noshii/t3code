@@ -93,6 +93,12 @@ On the Linux AppImage, quitting or updating the desktop app no longer stops the 
 
 The same branch lets the composer's `@` picker offer the current thread's own subagents and side chats (`packages/client-runtime/src/composerThreadItems.ts`); upstream leaves all of them out.
 
+### `feat/needs-reply`
+
+A `mark_needs_reply` MCP tool lets an agent mark the response it is writing as waiting on the user, with an optional short note. The thread stores the run that asked (`replyRequest`, event-sourced as `thread.reply-requested`), and the shell's `needsReply` shows it only while that run is the latest, so the user's next message clears it without any extra bookkeeping. `clear: true` drops it earlier. The orchestration instructions tell agents to use it when a turn ends on a question, a choice or a go-ahead.
+
+In the desktop and web sidebar, an unread marked thread shows "Reply" with a reply icon where it would show "Done", a read one shows a small reply icon next to its time, and the hover card shows the note. The mobile thread list does not show it yet.
+
 ## Android (on `nowbar`)
 
 - **Samsung Now Bar agent monitoring.** The Android app shows agents in Samsung's Now Bar, with a distinct state per agent status, and keeps unread results. It handles attention, privacy and notification settings, keeps the bar fresh when React Native timers pause, and stops monitoring once every environment disconnects.
