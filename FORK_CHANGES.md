@@ -99,6 +99,10 @@ A `mark_needs_reply` MCP tool lets an agent mark the response it is writing as w
 
 In the desktop and web sidebar, an unread marked thread shows "Reply" with a reply icon where it would show "Done", a read one shows a small reply icon next to its time, and the hover card shows the note. On the phone (`nowbar`), the thread list does the same: "Reply" instead of "Done" while unread, then a small reply arrow beside the time, and VoiceOver/TalkBack read "needs your reply".
 
+### `feat/sidebar-subagents`
+
+Based on `feat/needs-reply`; it contributes only its own commit. A sidebar row whose thread started subagent threads gets a collapsed line under it: a chevron on the left, and on the right one provider icon per provider those subagents ran on, each with a count. Counts of running subagents show brighter. Expanding the line reads the thread family (`getThreadFamily`) and shows the subagent threads as a tree, nested by lineage, each with its provider icon, title and a spinner or failure icon; clicking one opens it. The counts come from the shell (`subagentCounts`), which the shell query aggregates from the subagents table, because the shell stream leaves idle subagent shells out. Agent-awareness reads skip that aggregate. Subagents without a child thread are not counted. The phone does not show this line yet.
+
 ## Android (on `nowbar`)
 
 - **Samsung Now Bar agent monitoring.** The Android app shows agents in Samsung's Now Bar, with a distinct state per agent status, and keeps unread results. It handles attention, privacy and notification settings, keeps the bar fresh when React Native timers pause, and stops monitoring once every environment disconnects.
