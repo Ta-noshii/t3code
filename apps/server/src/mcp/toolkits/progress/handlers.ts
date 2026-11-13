@@ -99,4 +99,38 @@ export const layer = McpToolAccess.toLayer(ProgressToolkit, {
       };
     }),
   ),
+  // Marks the caller's own thread: a subagent's question belongs to the thread it runs in.
+  mark_needs_reply: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const { thread } = yield* McpInvocationContext.requireThreadScope(scope, "mark_needs_reply");
+      const threads = yield* ThreadManagementService.ThreadManagementService;
+      const shell = yield* threads
+        .getThreadShell(thread.threadId)
+        .pipe(Effect.mapError(unavailable));
+      const runId = shell?.activeRunId ?? shell?.latestRunId ?? null;
+      if (shell == null || runId === null) {
+        return yield* new OrchestratorMcpFailure({
+          code: "thread_not_found",
+          message: "The calling thread has no run to mark.",
+        });
+      }
+      const clear = input.clear === true;
+      yield* threads
+        .dispatch({
+          type: "thread.reply.request",
+          commandId: yield* newCommandId(),
+          threadId: thread.threadId,
+          request: clear ? null : { runId, note: input.note ?? null },
+        })
+        .pipe(Effect.mapError(dispatchFailure));
+      return {
+        threadId: thread.threadId,
+        needsReply: !clear,
+        message: clear
+          ? "Removed the needs-reply mark."
+          : "Marked as needing a reply. The mark clears when the user sends the next message.",
+      };
+    }),
+  ),
 });

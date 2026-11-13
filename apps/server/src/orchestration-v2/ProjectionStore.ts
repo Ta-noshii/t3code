@@ -1,5 +1,5 @@
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
-import { pendingGuestMessageCount } from "@t3tools/contracts";
+import { needsReplyForShell, pendingGuestMessageCount } from "@t3tools/contracts";
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { summarizeAgentProgress } from "@t3tools/shared/agentProgress";
 import { projectTurnItemForWire } from "./WireProjection.ts";
@@ -912,6 +912,7 @@ export function applyToProjection(
     case "thread.active-reordered":
     case "thread.tags-updated":
     case "thread.progress-updated":
+    case "thread.reply-requested":
     case "thread.pull-request-synced":
       return {
         ...base,
@@ -1780,6 +1781,7 @@ export function threadShellFromProjection(
       projection.thread.activeProviderThreadId,
     ),
     progressSummary: summarizeAgentProgress(projection.thread.progress),
+    needsReply: needsReplyForShell(projection.thread.replyRequest, latestRun?.id ?? null),
     itemCount: activeLocalTurnItems(projection).length,
     visibleItemCount: projection.visibleTurnItems.length,
     createdAt: projection.thread.createdAt,
@@ -2078,6 +2080,7 @@ function shellFromState(input: {
     providerInstanceHistory: input.state.providerInstanceHistory,
     goal: input.state.goal,
     progressSummary: summarizeAgentProgress(input.state.thread.progress),
+    needsReply: needsReplyForShell(input.state.thread.replyRequest, input.state.latestRunId),
     itemCount: input.state.itemCount,
     visibleItemCount: input.visibleItemCount,
     createdAt: input.state.thread.createdAt,
@@ -2244,6 +2247,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.active-reordered":
             case "thread.tags-updated":
             case "thread.progress-updated":
+            case "thread.reply-requested":
             case "thread.visited":
             case "thread.marked-unread":
             case "thread.metadata-updated":
@@ -3062,6 +3066,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             event.type !== "thread.active-reordered" &&
             event.type !== "thread.tags-updated" &&
             event.type !== "thread.progress-updated" &&
+            event.type !== "thread.reply-requested" &&
             event.type !== "thread.visited" &&
             event.type !== "thread.marked-unread" &&
             event.type !== "thread.metadata-updated" &&

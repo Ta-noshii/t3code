@@ -50,6 +50,7 @@ import {
   MessageCircleQuestionIcon,
   PinIcon,
   PinOffIcon,
+  ReplyIcon,
   ShieldQuestionIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -351,6 +352,14 @@ function SidebarThreadTooltip({
             </div>
           </div>
         ) : null}
+        {thread.needsReply ? (
+          <div className={cn("flex min-w-0 items-start gap-2", NEEDS_REPLY_CLASS_NAME)}>
+            <ReplyIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
+            <div className="min-w-0 flex-1 wrap-break-word">
+              {thread.needsReply.note ?? "Waiting on your reply"}
+            </div>
+          </div>
+        ) : null}
         {thread.runtime?.lastError ? (
           <div
             className={cn(
@@ -537,7 +546,10 @@ const TOP_STATUS_ICONS = {
   failed: CircleAlertIcon,
   done: CircleCheckIcon,
   woke: AlarmClockIcon,
+  reply: ReplyIcon,
 } as const;
+
+const NEEDS_REPLY_CLASS_NAME = "text-info-foreground";
 
 function TopStatusIcon(props: { icon: keyof typeof TOP_STATUS_ICONS; className: string }) {
   const Icon = TOP_STATUS_ICONS[props.icon];
@@ -799,11 +811,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         className: "text-warning-foreground",
                       }
                     : isUnread
-                      ? {
-                          label: "Done",
-                          icon: "done" as const,
-                          className: "text-success-foreground",
-                        }
+                      ? thread.needsReply != null
+                        ? {
+                            label: "Reply",
+                            icon: "reply" as const,
+                            className: NEEDS_REPLY_CLASS_NAME,
+                          }
+                        : {
+                            label: "Done",
+                            icon: "done" as const,
+                            className: "text-success-foreground",
+                          }
                       : null;
   const isWokeStatus = topStatus?.icon === "woke";
   // An unfinished agent tracker turns the status icon into a progress ring.
@@ -1548,6 +1566,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     ) : activeProgress !== null ? (
                       <span className="inline-flex items-center gap-1">
                         <SidebarProgressRing summary={activeProgress} />
+                        <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
+                      </span>
+                    ) : thread.needsReply != null ? (
+                      // Read but unanswered: a quiet icon instead of a status label.
+                      <span className="inline-flex items-center gap-1">
+                        <ReplyIcon
+                          aria-label="Needs reply"
+                          className={cn("size-3.5 shrink-0 opacity-80", NEEDS_REPLY_CLASS_NAME)}
+                        />
                         <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
                       </span>
                     ) : (

@@ -528,6 +528,32 @@ export const OrchestrationV2AgentProgressSummary = Schema.Struct({
 });
 export type OrchestrationV2AgentProgressSummary = typeof OrchestrationV2AgentProgressSummary.Type;
 
+export const REPLY_REQUEST_MAX_NOTE_LENGTH = 120;
+
+/** An agent marked the response of `runId` as waiting on the user. */
+export const OrchestrationV2ReplyRequest = Schema.Struct({
+  runId: RunId,
+  note: Schema.NullOr(Schema.String),
+  requestedAt: IsoDateTime,
+});
+export type OrchestrationV2ReplyRequest = typeof OrchestrationV2ReplyRequest.Type;
+
+/** The shell's view of a reply request: present only while the run that asked is the latest. */
+export const OrchestrationV2NeedsReply = Schema.Struct({
+  note: Schema.NullOr(Schema.String),
+  requestedAt: IsoDateTime,
+});
+export type OrchestrationV2NeedsReply = typeof OrchestrationV2NeedsReply.Type;
+
+/** A mark goes stale once the user replies, which starts a newer run. */
+export const needsReplyForShell = (
+  request: OrchestrationV2ReplyRequest | null | undefined,
+  latestRunId: RunId | null,
+): OrchestrationV2NeedsReply | null =>
+  request != null && request.runId === latestRunId
+    ? { note: request.note, requestedAt: request.requestedAt }
+    : null;
+
 const OrchestrationV2LastTitleRegeneration = Schema.Struct({
   ...ThreadTitleRegenerationOutcome.fields,
   requestId: CommandId,
@@ -587,6 +613,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   tags: Schema.optional(StoredThreadTags),
   /** The agent's progress tracker; subagents report to their topmost parent's. */
   progress: Schema.optional(Schema.NullOr(OrchestrationV2AgentProgress)),
+  /** Set by an agent's mark_needs_reply call; a newer run makes it stale. */
+  replyRequest: Schema.optional(Schema.NullOr(OrchestrationV2ReplyRequest)),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -2044,6 +2072,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.active-reordered",
       "thread.tags-updated",
       "thread.progress-updated",
+      "thread.reply-requested",
       "thread.visited",
       "thread.marked-unread",
       "thread.metadata-updated",
@@ -2285,6 +2314,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   goal: Schema.optional(Schema.NullOr(OrchestrationV2ProviderGoal)),
   // Not `progress`: shells and AppThreads are spread into each other, and the shapes differ.
   progressSummary: Schema.optional(Schema.NullOr(OrchestrationV2AgentProgressSummary)),
+  /** Not `replyRequest`, for the same reason as progressSummary. Absent from older servers. */
+  needsReply: Schema.optional(Schema.NullOr(OrchestrationV2NeedsReply)),
   itemCount: NonNegativeInt,
   visibleItemCount: NonNegativeInt,
   createdAt: Schema.DateTimeUtc,
@@ -2978,6 +3009,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.active-reordered",
       "thread.tags-updated",
       "thread.progress-updated",
+      "thread.reply-requested",
       "thread.visited",
       "thread.marked-unread",
       "thread.pull-request-synced",
@@ -3613,6 +3645,20 @@ const OrchestrationV2InternalCommand = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     update: OrchestrationV2AgentProgressUpdate,
+  }),
+  /** Internal so only an agent's own MCP call can mark its run; null clears the mark. */
+  Schema.Struct({
+    type: Schema.Literal("thread.reply.request"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    request: Schema.NullOr(
+      Schema.Struct({
+        runId: RunId,
+        note: Schema.NullOr(
+          TrimmedNonEmptyString.check(Schema.isMaxLength(REPLY_REQUEST_MAX_NOTE_LENGTH)),
+        ),
+      }),
+    ),
   }),
   // Guest share commands the server issues after checking T3 Connect and the guest token.
   Schema.Struct({
