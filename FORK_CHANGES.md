@@ -97,7 +97,7 @@ The same branch lets the composer's `@` picker offer the current thread's own su
 
 A `mark_needs_reply` MCP tool lets an agent mark the response it is writing as waiting on the user, with an optional short note. The thread stores the run that asked (`replyRequest`, event-sourced as `thread.reply-requested`), and the shell's `needsReply` shows it only while that run is the latest, so the user's next message clears it without any extra bookkeeping. `clear: true` drops it earlier. The orchestration instructions tell agents to use it when a turn ends on a question, a choice or a go-ahead.
 
-In the desktop and web sidebar, an unread marked thread shows "Reply" with a reply icon where it would show "Done", a read one shows a small reply icon next to its time, and the hover card shows the note. The mobile thread list does not show it yet.
+In the desktop and web sidebar, an unread marked thread shows "Reply" with a reply icon where it would show "Done", a read one shows a small reply icon next to its time, and the hover card shows the note. On the phone (`nowbar`), the thread list does the same: "Reply" instead of "Done" while unread, then a small reply arrow beside the time, and VoiceOver/TalkBack read "needs your reply".
 
 ## Android (on `nowbar`)
 

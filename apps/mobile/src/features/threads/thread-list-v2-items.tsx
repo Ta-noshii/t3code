@@ -139,6 +139,13 @@ const STATUS_LABEL_BY_STATUS: Partial<Record<ThreadListV2Status, StatusLabel>> =
     iconTintClassName: "accent-warning-foreground",
   },
 };
+// The agent marked its last response as waiting on the user (mark_needs_reply).
+const NEEDS_REPLY_STATUS_LABEL: StatusLabel = {
+  label: "Reply",
+  icon: "arrow.turn.left.up",
+  className: "text-adaptive-sky-600-400",
+  iconTintClassName: "accent-adaptive-sky-600-400",
+};
 const DONE_STATUS_LABEL: StatusLabel = {
   label: "Done",
   icon: "checkmark.circle",
@@ -771,13 +778,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
   const workingLabel = STATUS_LABEL_BY_STATUS[status];
   const showsWoke = status === "ready" && props.wokeAt !== null;
+  const needsReply = status === "ready" && thread.needsReply != null;
   const statusLabel =
     (status === "working" && workingLabel !== undefined && thread.goal?.status === "active"
       ? { ...workingLabel, label: "Goal" }
-      : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
+      : workingLabel) ??
+    (isUnread ? (needsReply ? NEEDS_REPLY_STATUS_LABEL : DONE_STATUS_LABEL) : undefined);
   const recede = shouldRecedeThreadRow({ status, selected });
   const isRegeneratingTitle = thread.titleRegeneration != null;
-  const rowAccessibilityLabel = `${thread.title}${providerNameLabel ? `, ${providerNameLabel}` : ""}${props.hasQueuedMessages ? ", messages queued to send" : ""}${isRegeneratingTitle ? ", regenerating title" : ""}`;
+  const rowAccessibilityLabel = `${thread.title}${providerNameLabel ? `, ${providerNameLabel}` : ""}${needsReply ? ", needs your reply" : ""}${props.hasQueuedMessages ? ", messages queued to send" : ""}${isRegeneratingTitle ? ", regenerating title" : ""}`;
   const timeLabel = props.timeLabel;
   // An unfinished agent tracker's count takes the timestamp's place.
   const progressCount =
@@ -1272,16 +1281,31 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               </Text>
             </View>
           ) : (
-            <Text
-              className={cn(
-                "text-xs tabular-nums",
-                selected
-                  ? selectedThreadRowColors.foregroundClassName
-                  : rowAppearance.tertiaryForegroundClassName,
-              )}
-            >
-              {progressCount ?? timeLabel}
-            </Text>
+            <View className="flex-row items-center gap-1">
+              {needsReply && progressCount === null ? (
+                // Read but unanswered: a quiet icon instead of a status label.
+                <SymbolView
+                  name={NEEDS_REPLY_STATUS_LABEL.icon}
+                  size={12}
+                  tintColorClassName={
+                    selected
+                      ? selectedThreadRowColors.iconTintClassName
+                      : NEEDS_REPLY_STATUS_LABEL.iconTintClassName
+                  }
+                  type="monochrome"
+                />
+              ) : null}
+              <Text
+                className={cn(
+                  "text-xs tabular-nums",
+                  selected
+                    ? selectedThreadRowColors.foregroundClassName
+                    : rowAppearance.tertiaryForegroundClassName,
+                )}
+              >
+                {progressCount ?? timeLabel}
+              </Text>
+            </View>
           )}
         </View>
       </View>
