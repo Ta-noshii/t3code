@@ -82,6 +82,17 @@ The sandboxed page can't use `localStorage`, so `window.t3.loadState()`, `saveSt
 
 Upstream relies on React Compiler to memoize ChatView and has no hand-written `useMemo` there. The compiler skips a whole component when it meets a `throw` inside `try/catch` or a `try/finally`, and the fork's "edit in new thread" and "copy to another machine" handlers had both. Without memoization, `useIncrementalTimelineEntries` and `useWorktreeSetup` set state on every render, and every draft crashed with React error #301. The handlers now run their body in an inner async function and catch errors with `.catch()`. The fix was lost once in a reconcile (0.1.3-nightly.20261023.3592), so check that ChatView still compiles after each reconcile.
 
+### `feat/persistent-backend`
+
+On the Linux AppImage, quitting or updating the desktop app no longer stops the local server, so running turns and background tasks keep going. The app starts the server through `apps/desktop/src/backendHost.ts`, a small detached process in its own systemd scope that holds the server's bootstrap and telemetry/browser pipes (fds 3-7), so the server never sees the app leave. The host runs from a per-build copy of the app files in `<T3 home>/desktop-runtimes`, because the AppImage unmounts on exit.
+
+- A new app reads `userdata/desktop-backend-host.json`, reuses the server's port and bootstrap secret, and attaches over `$XDG_RUNTIME_DIR/t3code-backend-<hash>.sock`. The host replays the telemetry control and active-turn lines, and releases the browser tabs of an app that left.
+- An updated app keeps using an older build's server and swaps it for its own once no thread has a run or background task in progress (`apps/desktop/src/backend/busyThreads.ts`, two checks 15 s apart). The manager treats that exit as a planned restart, not a crash.
+- With no app connected, the host stops the server once threads are idle (two checks 30 s apart), so quitting while idle still stops it.
+- `T3CODE_DESKTOP_BACKEND_HOST=0` turns it off. Windows, macOS, WSL and SSH backends are unchanged. Upstream has no equivalent; if upstream changes how the desktop spawns the server (`DesktopBackendManager.runBackendProcess`) or the fd layout, the hosted runner in `DesktopHostedBackend.ts` has to follow.
+
+The same branch lets the composer's `@` picker offer the current thread's own subagents and side chats (`packages/client-runtime/src/composerThreadItems.ts`); upstream leaves all of them out.
+
 ## Android (on `nowbar`)
 
 - **Samsung Now Bar agent monitoring.** The Android app shows agents in Samsung's Now Bar, with a distinct state per agent status, and keeps unread results. It handles attention, privacy and notification settings, keeps the bar fresh when React Native timers pause, and stops monitoring once every environment disconnects.
