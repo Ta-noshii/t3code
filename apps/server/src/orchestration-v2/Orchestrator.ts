@@ -630,6 +630,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.tag.set":
     case "thread.progress.clear":
     case "thread.progress.update":
+    case "thread.reply.request":
     case "thread.visit":
     case "thread.mark-unread":
     case "thread.metadata.update":
@@ -13646,6 +13647,51 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
   });
 
+  const dispatchThreadReplyRequest = Effect.fn("Orchestrator.dispatchThreadReplyRequest")(
+    function* (
+      command: Extract<OrchestrationV2ServerCommand, { readonly type: "thread.reply.request" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const thread = yield* projectionStore
+        .getThread(command.threadId)
+        .pipe(mapDispatchError(command));
+      if (thread.deletedAt !== null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} is deleted.`,
+        });
+      }
+      const current = thread.replyRequest ?? null;
+      const next = command.request;
+      if (
+        next === null
+          ? current === null
+          : current !== null && current.runId === next.runId && current.note === next.note
+      ) {
+        return;
+      }
+      const now = yield* DateTime.now;
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "thread.reply-requested",
+        threadId: command.threadId,
+        providerInstanceId: thread.providerInstanceId,
+        occurredAt: now,
+        // Like progress, a mark is not thread activity, so sidebar order stays put.
+        payload: {
+          ...thread,
+          replyRequest:
+            next === null
+              ? null
+              : { runId: next.runId, note: next.note, requestedAt: DateTime.formatIso(now) },
+        },
+      });
+    },
+  );
+
   /**
    * Thread lineage and fork origin are immutable, so this
    * is safe to read without holding either thread's dispatch lock.
@@ -14664,6 +14710,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.progress.update":
         yield* dispatchThreadProgress(command, events);
         break;
+      case "thread.reply.request":
+        yield* dispatchThreadReplyRequest(command, events);
+        break;
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);
         break;
@@ -15022,7 +15071,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           (command.type === "thread.delete" && command.onlyIfUnused === true) ||
           // An agent resending the tracker it already has, or a second dismiss, is not an error.
           command.type === "thread.progress.update" ||
-          command.type === "thread.progress.clear",
+          command.type === "thread.progress.clear" ||
+          command.type === "thread.reply.request",
         (_planned) =>
           new OrchestratorDispatchError({
             commandId: command.commandId,

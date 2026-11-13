@@ -2,9 +2,10 @@ import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
-import { NodeId, RunAttemptId, TrimmedNonEmptyString } from "./index.ts";
+import { NodeId, RunAttemptId, RunId, TrimmedNonEmptyString } from "./index.ts";
 import {
   latestProviderTurnForAttempt,
+  needsReplyForShell,
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
@@ -637,5 +638,25 @@ describe("latestProviderTurnForAttempt", () => {
     ];
     expect(latestProviderTurnForAttempt(turns, RunAttemptId.make("goal-attempt"))?.id).toBe("last");
     expect(latestProviderTurnForAttempt(turns, null)).toBeUndefined();
+  });
+});
+
+describe("needsReplyForShell", () => {
+  const request = {
+    runId: RunId.make("run-1"),
+    note: "Pick a schema option",
+    requestedAt: "2026-11-13T12:00:00.000Z",
+  };
+
+  it("shows a mark while the run that set it is the latest", () => {
+    expect(needsReplyForShell(request, RunId.make("run-1"))).toEqual({
+      note: "Pick a schema option",
+      requestedAt: "2026-11-13T12:00:00.000Z",
+    });
+  });
+
+  it("hides the mark once the user's reply starts a newer run", () => {
+    expect(needsReplyForShell(request, RunId.make("run-2"))).toBeNull();
+    expect(needsReplyForShell(undefined, RunId.make("run-1"))).toBeNull();
   });
 });

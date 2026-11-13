@@ -6,6 +6,7 @@ import type {
   MessageId,
   OrchestrationProjectShell,
   OrchestrationV2AgentProgressSummary,
+  OrchestrationV2NeedsReply,
   OrchestrationV2ProviderGoal,
   OrchestrationV2RunStatus,
   OrchestrationV2ProviderFailureClass,
@@ -177,6 +178,8 @@ export interface EnvironmentThreadShell {
   readonly goal: OrchestrationV2ProviderGoal | null;
   /** The agent-controlled progress tracker, or null when there is none. */
   readonly progressSummary: OrchestrationV2AgentProgressSummary | null;
+  /** The agent marked its latest response as waiting on the user, or null. */
+  readonly needsReply: OrchestrationV2NeedsReply | null;
   readonly itemCount: number;
   readonly visibleItemCount: number;
   readonly createdAt: string;
@@ -333,6 +336,7 @@ export function presentThreadShell(
     providerInstanceHistory: thread.providerInstanceHistory ?? [],
     goal: thread.goal ?? null,
     progressSummary: thread.progressSummary ?? null,
+    needsReply: thread.needsReply ?? null,
     itemCount: thread.itemCount,
     visibleItemCount: thread.visibleItemCount,
     createdAt: iso(thread.createdAt),

@@ -478,6 +478,9 @@ export function summarizeT3ToolCalls(
     case "progress-update":
       label = phrase("Updated", "update", `progress ${times}`);
       break;
+    case "needs-reply":
+      label = phrase("Marked", "mark", "as needing a reply");
+      break;
     case "capabilities":
       label = phrase("Checked", "check", `orchestration capabilities ${times}`);
       break;

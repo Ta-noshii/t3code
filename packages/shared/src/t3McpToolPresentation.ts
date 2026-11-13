@@ -70,7 +70,8 @@ export type T3McpToolSummaryAction =
   | "html-preview"
   | "html-render"
   | "canvas"
-  | "progress-update";
+  | "progress-update"
+  | "needs-reply";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -396,6 +397,7 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "canvas",
   ),
   progress_update: tool(["Update", "Updating", "Updated", "progress"], "progress-update"),
+  mark_needs_reply: tool(["Mark", "Marking", "Marked", "as needing a reply"], "needs-reply"),
 };
 
 export const T3_MCP_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(T3_MCP_TOOLS));

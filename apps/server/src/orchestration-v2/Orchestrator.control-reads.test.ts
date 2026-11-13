@@ -2252,6 +2252,65 @@ it.effect.each([
     }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("shows an agent's needs-reply mark on the shell only for the run that set it", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("thread:needs-reply");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-needs-reply"),
+      threadId,
+      projectId: ProjectId.make("project:needs-reply"),
+      title: "Pick a schema",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("start-needs-reply"),
+      threadId,
+      messageId: MessageId.make("message:needs-reply"),
+      text: "Propose two schemas and ask me which",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const run = (yield* projections.getThreadProjection(threadId)).runs[0]!;
+    const mark = (commandId: string, request: { runId: RunId; note: string | null } | null) =>
+      orchestrator.dispatch({
+        type: "thread.reply.request",
+        commandId: CommandId.make(commandId),
+        threadId,
+        request,
+      });
+
+    yield* mark("mark-needs-reply", { runId: run.id, note: "Pick a schema" });
+    // Marking again with the same note is not an error.
+    yield* mark("mark-needs-reply-again", { runId: run.id, note: "Pick a schema" });
+    assert.deepInclude((yield* projections.getThread(threadId)).replyRequest, {
+      runId: run.id,
+      note: "Pick a schema",
+    });
+    assert.deepInclude((yield* projections.getThreadShell(threadId))?.needsReply, {
+      note: "Pick a schema",
+    });
+
+    yield* mark("mark-older-run", { runId: RunId.make("run:older"), note: null });
+    assert.isNull((yield* projections.getThreadShell(threadId))?.needsReply);
+
+    yield* mark("clear-needs-reply", null);
+    assert.isNull((yield* projections.getThread(threadId)).replyRequest);
+    assert.isNull((yield* projections.getThreadShell(threadId))?.needsReply);
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("a user message dispatched first stays run 1 when its lineage read is slow", () => {
   const threadId = ThreadId.make("thread:dispatch-order");
   // A file database serves projection reads from a reader worker, so the lineage read a user
