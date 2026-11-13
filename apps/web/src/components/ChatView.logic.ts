@@ -1,5 +1,6 @@
 import {
   needsReplyForShell,
+  subagentCountsForShell,
   type OrchestrationV2ProviderTurn,
   type RunAttemptId,
 } from "@t3tools/contracts";
@@ -1496,6 +1497,7 @@ export function presentThreadShellFromProjection(
         )?.goal ?? null,
       progressSummary: summarizeAgentProgress(projection.thread.progress),
       needsReply: needsReplyForShell(projection.thread.replyRequest, latestRun?.runId ?? null),
+      subagentCounts: subagentCountsForShell(projection.subagents),
       itemCount: projection.turnItems.length,
       visibleItemCount: projection.visibleTurnItems.length,
       updatedAt,

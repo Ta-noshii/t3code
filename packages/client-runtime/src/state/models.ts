@@ -7,6 +7,7 @@ import type {
   OrchestrationProjectShell,
   OrchestrationV2AgentProgressSummary,
   OrchestrationV2NeedsReply,
+  OrchestrationV2SubagentCount,
   OrchestrationV2ProviderGoal,
   OrchestrationV2RunStatus,
   OrchestrationV2ProviderFailureClass,
@@ -180,6 +181,8 @@ export interface EnvironmentThreadShell {
   readonly progressSummary: OrchestrationV2AgentProgressSummary | null;
   /** The agent marked its latest response as waiting on the user, or null. */
   readonly needsReply: OrchestrationV2NeedsReply | null;
+  /** Subagent threads this thread started, per provider instance. */
+  readonly subagentCounts: ReadonlyArray<OrchestrationV2SubagentCount>;
   readonly itemCount: number;
   readonly visibleItemCount: number;
   readonly createdAt: string;
@@ -337,6 +340,7 @@ export function presentThreadShell(
     goal: thread.goal ?? null,
     progressSummary: thread.progressSummary ?? null,
     needsReply: thread.needsReply ?? null,
+    subagentCounts: thread.subagentCounts ?? [],
     itemCount: thread.itemCount,
     visibleItemCount: thread.visibleItemCount,
     createdAt: iso(thread.createdAt),
