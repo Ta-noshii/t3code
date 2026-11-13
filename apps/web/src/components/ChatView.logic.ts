@@ -1,4 +1,8 @@
-import { type OrchestrationV2ProviderTurn, type RunAttemptId } from "@t3tools/contracts";
+import {
+  needsReplyForShell,
+  type OrchestrationV2ProviderTurn,
+  type RunAttemptId,
+} from "@t3tools/contracts";
 import {
   deriveLatestThreadRun,
   deriveThreadRuntime,
@@ -1491,6 +1495,7 @@ export function presentThreadShellFromProjection(
           (thread) => thread.id === projection.thread.activeProviderThreadId,
         )?.goal ?? null,
       progressSummary: summarizeAgentProgress(projection.thread.progress),
+      needsReply: needsReplyForShell(projection.thread.replyRequest, latestRun?.runId ?? null),
       itemCount: projection.turnItems.length,
       visibleItemCount: projection.visibleTurnItems.length,
       updatedAt,

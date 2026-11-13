@@ -5,6 +5,7 @@ import {
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadShell,
   ProviderInstanceId,
+  RunId,
   ThreadId,
 } from "@t3tools/contracts";
 import { applyAgentProgressUpdate, summarizeAgentProgress } from "@t3tools/shared/agentProgress";
@@ -115,7 +116,18 @@ const makeHarness = Effect.fn("makeProgressToolkitHarness")(function* () {
       recorded.map((command) => ("threadId" in command ? command.threadId : null)),
     ),
   );
-  return { call, dispatchedTo, shells };
+  const markNeedsReply = (
+    caller: ThreadId,
+    params: Parameters<typeof toolkit.handle<"mark_needs_reply">>[1],
+  ) =>
+    toolkit.handle("mark_needs_reply", params).pipe(
+      Stream.unwrap,
+      Stream.runCollect,
+      Effect.map((chunk) => chunk.at(-1)!),
+      Effect.provideService(McpInvocationContext.McpInvocationContext, invocation(caller)),
+      Effect.provide(dependencies),
+    );
+  return { call, markNeedsReply, commands: Ref.get(commands), dispatchedTo, shells };
 });
 
 describe("progress toolkit handlers", () => {
@@ -171,6 +183,40 @@ describe("progress toolkit handlers", () => {
         total: 0,
         message: "No progress tracker on the orchestrating thread.",
       });
+    }),
+  );
+});
+
+describe("mark_needs_reply", () => {
+  it.effect("marks the caller's running run, and clear drops the mark", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      yield* harness.markNeedsReply(CHILD, { note: "Pick a schema option" });
+      yield* harness.markNeedsReply(CHILD, { clear: true });
+      const sent = (yield* harness.commands).map((command) =>
+        command.type === "thread.reply.request"
+          ? { threadId: command.threadId, request: command.request }
+          : command.type,
+      );
+      expect(sent).toEqual([
+        {
+          threadId: CHILD,
+          request: { runId: RunId.make("run:mcp-test"), note: "Pick a schema option" },
+        },
+        { threadId: CHILD, request: null },
+      ]);
+    }),
+  );
+
+  it.effect("refuses a thread with no run to mark", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      yield* Ref.update(harness.shells, (byId) =>
+        new Map(byId).set(ROOT, McpToolAccessTestkit.liveThreadShell(ROOT, { activeRunId: null })),
+      );
+      const result = yield* harness.markNeedsReply(ROOT, {});
+      expect(result.isFailure).toBe(true);
+      expect(yield* harness.commands).toEqual([]);
     }),
   );
 });

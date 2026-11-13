@@ -6,6 +6,7 @@ import {
   NonNegativeInt,
   OrchestrationV2AgentProgressItemStatus,
   OrchestratorMcpFailure,
+  REPLY_REQUEST_MAX_NOTE_LENGTH,
   ThreadId,
   TrimmedNonEmptyString,
   TrimmedString,
@@ -85,4 +86,35 @@ const ProgressUpdateTool = Tool.make("progress_update", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
-export const ProgressToolkit = Toolkit.make(ProgressUpdateTool);
+const MarkNeedsReplyTool = Tool.make("mark_needs_reply", {
+  description: `Mark the response you are writing now as waiting on the user, so their thread list shows that this thread needs a reply. Use it when you end the turn on a question, a choice, or a go-ahead only the user can give. Skip it for finished work and for a closing offer the user may ignore. The mark clears on its own when the user sends the next message; pass clear: true to drop it earlier in the same turn.`,
+  parameters: Schema.Struct({
+    note: Schema.optional(
+      TrimmedNonEmptyString.check(Schema.isMaxLength(REPLY_REQUEST_MAX_NOTE_LENGTH)).annotate({
+        description: `What you need from the user, ${REPLY_REQUEST_MAX_NOTE_LENGTH} characters at most, e.g. "Pick a schema option". Shown as a tooltip.`,
+      }),
+    ),
+    clear: Schema.optional(
+      Schema.Boolean.annotate({ description: "Remove the mark instead of setting it." }),
+    ),
+  }),
+  success: Schema.Struct({
+    threadId: ThreadId,
+    needsReply: Schema.Boolean,
+    message: Schema.String,
+  }),
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService.ThreadManagementService,
+    SecureRandom.SecureRandom,
+  ],
+})
+  .annotate(Tool.Title, "Mark needs reply")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
+export const ProgressToolkit = Toolkit.make(ProgressUpdateTool, MarkNeedsReplyTool);
