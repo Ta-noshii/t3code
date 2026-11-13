@@ -118,3 +118,47 @@ describe("matchComposerEnvironmentItems", () => {
     ).toEqual([]);
   });
 });
+
+it("offers the composer thread's own subagents and side chats, but no other thread's", () => {
+  const child = (id: string, title: string, parent: string, root: string) =>
+    shell(id, title, {
+      lineage: {
+        rootThreadId: ThreadId.make(root),
+        parentThreadId: ThreadId.make(parent),
+        relationshipToParent: "subagent",
+      },
+    });
+  const items = matchComposerThreadItems({
+    shells: [
+      shell("origin", "Original"),
+      shell("fork", "Save history fork", {
+        lineage: {
+          rootThreadId: ThreadId.make("origin"),
+          parentThreadId: ThreadId.make("origin"),
+          relationshipToParent: "fork",
+        },
+      }),
+      child("staging", "Save history MySQL staging", "fork", "fork"),
+      child("nested", "Save history query check", "staging", "fork"),
+      shell("side", "Save history side chat", {
+        lineage: {
+          rootThreadId: ThreadId.make("origin"),
+          parentThreadId: ThreadId.make("fork"),
+          relationshipToParent: null,
+          sideChat: true,
+        },
+      }),
+      child("stranger", "Save history elsewhere", "unrelated", "unrelated"),
+    ],
+    environmentId,
+    linkedEnvironments: new Map(),
+    excludeThreadId: ThreadId.make("fork"),
+    query: "save history",
+    now: Date.parse("2026-10-23T00:00:00.000Z"),
+  });
+  expect(items.map(({ thread, description }) => [thread.threadId, description]).sort()).toEqual([
+    ["nested", "Subagent"],
+    ["side", "Side chat"],
+    ["staging", "Subagent"],
+  ]);
+});

@@ -24,10 +24,9 @@ export interface ComposerThreadItem {
 }
 
 /**
- * Threads to reference from the composer, matched and ranked like the command
- * palette, without subagent or side chat threads. The agent reads threads on its own server
- * and on the machines it links to, so candidates stay within those, and a linked
- * machine's threads say which machine they are on.
+ * Threads to reference from the composer, ranked like the command palette. Subagents and side
+ * chats come only from the composer thread's own family. Candidates stay on the agent's server
+ * and the machines it links to, and a linked machine's threads name the machine.
  */
 export function matchComposerThreadItems(input: {
   shells: ReadonlyArray<ComposerThreadCandidate>;
@@ -41,13 +40,31 @@ export function matchComposerThreadItems(input: {
 }): ComposerThreadItem[] {
   const query = foldSearchQuery(input.query);
   if (query.length === 0) return [];
+  // Subagent and side chat threads under the composer's thread, however deep, or sharing its root.
+  const localShells = new Map(
+    input.shells
+      .filter((shell) => shell.environmentId === input.environmentId)
+      .map((shell) => [shell.id, shell] as const),
+  );
+  const activeThread =
+    input.excludeThreadId === null ? undefined : localShells.get(input.excludeThreadId);
+  const isFamily = (shell: ComposerThreadCandidate) => {
+    if (activeThread === undefined || shell.environmentId !== input.environmentId) return false;
+    if (shell.lineage.rootThreadId === activeThread.lineage.rootThreadId) return true;
+    let parentId = shell.lineage.parentThreadId;
+    for (let depth = 0; parentId !== null && depth < 32; depth += 1) {
+      if (parentId === activeThread.id) return true;
+      parentId = localShells.get(parentId)?.lineage.parentThreadId ?? null;
+    }
+    return false;
+  };
   const candidates = input.shells.filter(
     (shell) =>
       (shell.environmentId === input.environmentId ||
         input.linkedEnvironments.has(shell.environmentId)) &&
       shell.id !== input.excludeThreadId &&
       shell.archivedAt === null &&
-      isListedThreadLineage(shell.lineage),
+      (isListedThreadLineage(shell.lineage) || isFamily(shell)),
   );
   return rankSearchItems(candidates, (shell, options) =>
     scoreThreadSearch(query, threadSearchSubject(shell, null), input.now, {
@@ -66,7 +83,14 @@ export function matchComposerThreadItems(input: {
         type: "thread",
         thread: { environmentId: shell.environmentId, threadId: shell.id },
         label: shell.title,
-        description: machine === undefined ? "Thread" : `Thread on ${machine}`,
+        description:
+          machine !== undefined
+            ? `Thread on ${machine}`
+            : shell.lineage.relationshipToParent === "subagent"
+              ? "Subagent"
+              : shell.lineage.sideChat === true
+                ? "Side chat"
+                : "Thread",
       };
     });
 }
