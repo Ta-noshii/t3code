@@ -7,14 +7,18 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { ChevronRightIcon, CircleAlertIcon } from "lucide-react";
-import { useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useState, type SyntheticEvent } from "react";
 
 import { cn } from "~/lib/utils";
 import { useEnvironmentQuery } from "../../state/query";
 import { threadFamilies } from "../../state/threads";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { Spinner } from "../ui/spinner";
-import { buildSubagentTree, type SubagentTreeNode } from "./SidebarSubagents.logic";
+import {
+  buildSubagentTree,
+  runningSubagentTree,
+  type SubagentTreeNode,
+} from "./SidebarSubagents.logic";
 import type { SidebarProviderEntry } from "./SidebarThreadRow";
 
 const TREE_ORIGIN_PX = 7;
@@ -93,7 +97,7 @@ function SubagentTreeRows(props: {
         <button
           type="button"
           onClick={() => props.onOpen(scopeThreadRef(props.environmentId, thread.id))}
-          className="relative flex h-6 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-sm pe-1 text-left text-xs text-secondary-label outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="relative flex h-6 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-sm pe-1 text-left text-xs text-secondary-label outline-none hover:bg-foreground/5 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           style={{
             paddingInlineStart: TREE_ORIGIN_PX + (props.guides.length + 1) * TREE_INDENT_PX - 4,
           }}
@@ -136,12 +140,14 @@ function SubagentTree(props: {
   const family = useEnvironmentQuery(
     threadFamilies.familyAtom(props.environmentId, props.rootThreadId),
   );
-  const nodes = family.data ? buildSubagentTree(family.data.threads, props.threadId) : null;
+  const nodes = family.data
+    ? runningSubagentTree(buildSubagentTree(family.data.threads, props.threadId))
+    : null;
   if (nodes === null || nodes.length === 0) {
     return (
       <p className="flex h-6 items-center gap-1.5 ps-2 text-xs text-secondary-label">
         {nodes === null ? <Spinner size="xs" /> : null}
-        {nodes === null ? "Loading subagents" : "No subagent threads"}
+        {nodes === null ? "Loading subagents" : "No subagents running"}
       </p>
     );
   }
@@ -175,43 +181,37 @@ export function SidebarSubagents(props: {
   readonly className?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const total = props.counts.reduce((sum, entry) => sum + entry.count, 0);
-  const active = props.counts.reduce((sum, entry) => sum + entry.active, 0);
+  const running = props.counts.filter((entry) => entry.active > 0);
+  const total = running.reduce((sum, entry) => sum + entry.active, 0);
   if (total === 0) return null;
-  const toggle = (event: ReactMouseEvent) => {
-    event.stopPropagation();
-    setExpanded((value) => !value);
-  };
-  const label = `${total} ${total === 1 ? "subagent" : "subagents"}${active > 0 ? `, ${active} running` : ""}`;
+  // The strip sits inside the thread row, so its clicks must not also open the parent thread.
+  const contain = (event: SyntheticEvent) => event.stopPropagation();
+  const label = `${total} ${total === 1 ? "subagent" : "subagents"} running`;
   return (
-    <div className={props.className}>
+    <div className={props.className} onClick={contain} onDoubleClick={contain}>
       <button
         type="button"
         aria-expanded={expanded}
         aria-label={`${expanded ? "Hide" : "Show"} ${label}`}
-        onClick={toggle}
-        className="flex h-5 w-full cursor-pointer items-center gap-1 rounded-sm px-1 text-xs text-secondary-label outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        onClick={() => setExpanded((value) => !value)}
+        className="flex h-5 w-full cursor-pointer items-center gap-1 rounded-sm px-1 text-xs text-secondary-label outline-none hover:bg-foreground/5 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <ChevronRightIcon
           aria-hidden
           className={cn("size-3 shrink-0 transition-transform", expanded && "rotate-90")}
         />
         <span className="ms-auto inline-flex items-center gap-2 tabular-nums">
-          {props.counts.map((entry) => (
+          {running.map((entry) => (
             <span
               key={`${entry.providerInstanceId}:${entry.driver}`}
-              className={cn(
-                "inline-flex items-center gap-0.5",
-                entry.active > 0 && "text-sidebar-foreground",
-              )}
+              className="inline-flex items-center gap-0.5 text-sidebar-foreground"
             >
               <SubagentProviderIcon
                 instanceId={entry.providerInstanceId}
                 driver={entry.driver}
                 providerEntryByInstanceId={props.providerEntryByInstanceId}
-                className={entry.active > 0 ? undefined : "opacity-60"}
               />
-              {entry.count}
+              {entry.active}
             </span>
           ))}
         </span>

@@ -1241,18 +1241,22 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </span>
   ) : null;
 
-  const subagentStrip =
-    thread.subagentCounts.length === 0 ? null : (
-      <SidebarSubagents
-        environmentId={threadRef.environmentId}
-        threadId={threadRef.threadId}
-        rootThreadId={thread.lineage.rootThreadId}
-        counts={thread.subagentCounts}
-        providerEntryByInstanceId={props.providerEntryByInstanceId}
-        onOpen={onThreadActivate}
-        className={variant === "card" ? "px-1 pt-0.5" : "ps-7 pe-1"}
-      />
-    );
+  const hasRunningSubagents = thread.subagentCounts.some((entry) => entry.active > 0);
+  const subagentStrip = hasRunningSubagents ? (
+    <SidebarSubagents
+      environmentId={threadRef.environmentId}
+      threadId={threadRef.threadId}
+      rootThreadId={thread.lineage.rootThreadId}
+      counts={thread.subagentCounts}
+      providerEntryByInstanceId={props.providerEntryByInstanceId}
+      onOpen={onThreadActivate}
+      className={
+        variant === "card"
+          ? "relative z-10 -mt-1 px-(--sidebar-row-content-inset) pb-1.5"
+          : "-mx-1 pb-1"
+      }
+    />
+  ) : null;
 
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
@@ -1285,7 +1289,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   rowSurfaceClassName,
                   multiline
                     ? "flex flex-col justify-center px-2.5 py-1.5"
-                    : "flex h-9 items-center gap-2.5 px-2.5",
+                    : subagentStrip !== null
+                      ? "flex flex-col px-2.5"
+                      : "flex h-9 items-center gap-2.5 px-2.5",
                   // Lines titles up with the folder name, past its chevron and icon.
                   inFolder && "ps-9",
                 )}
@@ -1297,7 +1303,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             }
           >
             {/* `contents` keeps one-line rows a single flex row. */}
-            <div className={multiline ? "flex h-6 min-w-0 items-center gap-2.5" : "contents"}>
+            <div
+              className={
+                multiline
+                  ? "flex h-6 min-w-0 items-center gap-2.5"
+                  : subagentStrip !== null
+                    ? "flex h-9 min-w-0 items-center gap-2.5"
+                    : "contents"
+              }
+            >
               {accessibleTitle}
               {inFolder ? null : (
                 <span
@@ -1446,10 +1460,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.sweepAction !== null ? dragDestination : null}
             </div>
             {multiline ? metaLine : null}
+            {subagentStrip}
           </TooltipTrigger>
           {detailsTooltip}
         </Tooltip>
-        {subagentStrip}
       </li>
     );
   }
@@ -1668,10 +1682,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             </div>
             {metaLine}
           </div>
+          {subagentStrip}
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>
-      {subagentStrip}
     </li>
   );
 });

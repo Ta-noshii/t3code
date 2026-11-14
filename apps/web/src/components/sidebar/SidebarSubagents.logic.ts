@@ -39,3 +39,17 @@ export function buildSubagentTree(
   };
   return childrenOf(parentThreadId);
 }
+
+/** Keeps running subagents, and finished ones only while a running subagent sits below them. */
+export function runningSubagentTree(
+  nodes: ReadonlyArray<SubagentTreeNode>,
+): ReadonlyArray<SubagentTreeNode> {
+  const kept: SubagentTreeNode[] = [];
+  for (const node of nodes) {
+    const children = runningSubagentTree(node.children);
+    if (node.thread.activityRunStatus != null || children.length > 0) {
+      kept.push({ thread: node.thread, children });
+    }
+  }
+  return kept;
+}
