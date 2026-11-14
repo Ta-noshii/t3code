@@ -3,7 +3,11 @@ import { ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildSubagentTree, type SubagentTreeNode } from "./SidebarSubagents.logic";
+import {
+  buildSubagentTree,
+  runningSubagentTree,
+  type SubagentTreeNode,
+} from "./SidebarSubagents.logic";
 
 const shell = (
   id: string,
@@ -58,5 +62,23 @@ describe("buildSubagentTree", () => {
   it("stops at a lineage cycle", () => {
     const threads = [shell("a", "b", 1), shell("b", "a", 2), shell("c", "root", 3)];
     expect(ids(buildSubagentTree(threads, ThreadId.make("root")))).toEqual(["c"]);
+  });
+});
+
+describe("runningSubagentTree", () => {
+  it("keeps running subagents and the finished parents they sit under", () => {
+    const running = { activityRunStatus: "running" } as Partial<OrchestrationV2ThreadShell>;
+    const idle = { activityRunStatus: null } as Partial<OrchestrationV2ThreadShell>;
+    const threads = [
+      shell("root", null, 0),
+      shell("done", "root", 10, idle),
+      shell("parent", "root", 20, idle),
+      shell("child", "parent", 30, running),
+      shell("live", "root", 40, running),
+    ];
+    expect(ids(runningSubagentTree(buildSubagentTree(threads, ThreadId.make("root"))))).toEqual([
+      ["parent", ["child"]],
+      "live",
+    ]);
   });
 });
