@@ -6,8 +6,8 @@ import type {
   ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
-import { ChevronRightIcon, CircleAlertIcon } from "lucide-react";
-import { useState, type SyntheticEvent } from "react";
+import { CircleAlertIcon } from "lucide-react";
+import type { SyntheticEvent } from "react";
 
 import { cn } from "~/lib/utils";
 import { useEnvironmentQuery } from "../../state/query";
@@ -136,21 +136,23 @@ function SubagentTree(props: {
   readonly providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
   readonly onOpen: (ref: ScopedThreadRef) => void;
 }) {
-  // The shell leaves idle subagents out, so the tree reads the whole family on expand.
+  // The shell leaves idle subagents out, so the tree reads the whole family.
   const family = useEnvironmentQuery(
     threadFamilies.familyAtom(props.environmentId, props.rootThreadId),
   );
   const nodes = family.data
     ? runningSubagentTree(buildSubagentTree(family.data.threads, props.threadId))
     : null;
-  if (nodes === null || nodes.length === 0) {
+  if (nodes === null) {
     return (
       <p className="flex h-6 items-center gap-1.5 ps-2 text-xs text-secondary-label">
-        {nodes === null ? <Spinner size="xs" /> : null}
-        {nodes === null ? "Loading subagents" : "No subagents running"}
+        <Spinner size="xs" />
+        Loading subagents
       </p>
     );
   }
+  // The counts can lead the family query by a moment; show nothing until it catches up.
+  if (nodes.length === 0) return null;
   return (
     <ul aria-label="Subagents">
       <SubagentTreeRows
@@ -168,8 +170,7 @@ function SubagentTree(props: {
 }
 
 /**
- * A collapsed line under a thread row: a chevron, then one provider icon and count per
- * provider its subagents ran on. Expanding it shows the subagent threads as a tree.
+ * The running subagents under a thread row, as a tree. Renders nothing when none run.
  */
 export function SidebarSubagents(props: {
   readonly environmentId: EnvironmentId;
@@ -180,52 +181,20 @@ export function SidebarSubagents(props: {
   readonly onOpen: (ref: ScopedThreadRef) => void;
   readonly className?: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const running = props.counts.filter((entry) => entry.active > 0);
-  const total = running.reduce((sum, entry) => sum + entry.active, 0);
+  const total = props.counts.reduce((sum, entry) => sum + entry.active, 0);
   if (total === 0) return null;
-  // The strip sits inside the thread row, so its clicks must not also open the parent thread.
+  // The tree sits inside the thread row, so its clicks must not also open the parent thread.
   const contain = (event: SyntheticEvent) => event.stopPropagation();
-  const label = `${total} ${total === 1 ? "subagent" : "subagents"} running`;
   return (
     <div className={props.className} onClick={contain} onDoubleClick={contain}>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-label={`${expanded ? "Hide" : "Show"} ${label}`}
-        onClick={() => setExpanded((value) => !value)}
-        className="flex h-5 w-full cursor-pointer items-center gap-1 rounded-sm px-1 text-xs text-secondary-label outline-none hover:bg-foreground/5 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      >
-        <ChevronRightIcon
-          aria-hidden
-          className={cn("size-3 shrink-0 transition-transform", expanded && "rotate-90")}
-        />
-        <span className="ms-auto inline-flex items-center gap-2 tabular-nums">
-          {running.map((entry) => (
-            <span
-              key={`${entry.providerInstanceId}:${entry.driver}`}
-              className="inline-flex items-center gap-0.5 text-sidebar-foreground"
-            >
-              <SubagentProviderIcon
-                instanceId={entry.providerInstanceId}
-                driver={entry.driver}
-                providerEntryByInstanceId={props.providerEntryByInstanceId}
-              />
-              {entry.active}
-            </span>
-          ))}
-        </span>
-      </button>
-      {expanded ? (
-        <SubagentTree
-          environmentId={props.environmentId}
-          threadId={props.threadId}
-          rootThreadId={props.rootThreadId}
-          counts={props.counts}
-          providerEntryByInstanceId={props.providerEntryByInstanceId}
-          onOpen={props.onOpen}
-        />
-      ) : null}
+      <SubagentTree
+        environmentId={props.environmentId}
+        threadId={props.threadId}
+        rootThreadId={props.rootThreadId}
+        counts={props.counts}
+        providerEntryByInstanceId={props.providerEntryByInstanceId}
+        onOpen={props.onOpen}
+      />
     </div>
   );
 }
