@@ -7,6 +7,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { CircleAlertIcon } from "lucide-react";
+import { useAtomValue } from "@effect/atom-react";
 import type { SyntheticEvent } from "react";
 
 import { cn } from "~/lib/utils";
@@ -136,13 +137,28 @@ function SubagentTree(props: {
   readonly providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
   readonly onOpen: (ref: ScopedThreadRef) => void;
 }) {
-  // The shell leaves idle subagents out, so the tree reads the whole family.
+  // Running subagents are in the live shell. The family read fills in the idle ancestors the shell
+  // leaves out. It is read once, so its rows can be stale: a subagent started after it shows only
+  // through the shell, and its run status is dropped so a finished subagent never reads as running.
+  const snapshot = useAtomValue(threadFamilies.snapshotAtom(props.environmentId));
   const family = useEnvironmentQuery(
     threadFamilies.familyAtom(props.environmentId, props.rootThreadId),
   );
-  const nodes = family.data
-    ? runningSubagentTree(buildSubagentTree(family.data.threads, props.threadId))
-    : null;
+  const live =
+    snapshot?.threads.filter((thread) => thread.lineage.rootThreadId === props.rootThreadId) ??
+    null;
+  const liveIds = new Set(live?.map((thread) => thread.id));
+  const threads =
+    live === null
+      ? null
+      : [
+          ...live,
+          ...(family.data?.threads ?? [])
+            .filter((thread) => !liveIds.has(thread.id))
+            .map((thread) => ({ ...thread, activityRunStatus: null })),
+        ];
+  const nodes =
+    threads === null ? null : runningSubagentTree(buildSubagentTree(threads, props.threadId));
   if (nodes === null) {
     return (
       <p className="flex h-6 items-center gap-1.5 ps-2 text-xs text-secondary-label">
