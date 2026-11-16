@@ -1,3 +1,4 @@
+import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
 import type { ModelSelection, ProviderInstanceId, RuntimeMode } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { type ComponentProps, memo, useId, useRef, useState } from "react";
@@ -8,6 +9,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { focusRequestedPermission, useComposerMenuProps } from "./composerEventScope";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { ContextWindowMeter, type ContextWindowAutoCompactTarget } from "./ContextWindowMeter";
 import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { runtimeModeConfig } from "./runtimeModeConfig";
@@ -189,6 +191,10 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   children?: React.ReactNode;
   compact: boolean;
   canOperateThread: boolean;
+  activeContextWindow: ContextWindowSnapshot | null;
+  autoCompactTarget: ContextWindowAutoCompactTarget | null;
+  onCompactContext?: (() => void) | undefined;
+  compactDisabled: boolean;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -222,6 +228,15 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
 }) {
   return (
     <>
+      {props.activeContextWindow ? (
+        <ContextWindowMeter
+          usage={props.activeContextWindow}
+          onCompact={props.onCompactContext}
+          compactDisabled={props.compactDisabled}
+          compactAfterTurn={props.isRunning}
+          autoCompactTarget={props.autoCompactTarget}
+        />
+      ) : null}
       <ComposerPrimaryActions
         compact={props.compact}
         canOperateThread={props.canOperateThread}
