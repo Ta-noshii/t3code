@@ -16,6 +16,7 @@ import {
   dedupeSubagentBodies,
   dedupeTurnItemBodies,
 } from "@t3tools/shared/orchestrationV2DedupedBodies";
+import { MCP_APP_OUTPUT_KEY, readMcpAppReference } from "@t3tools/shared/mcpApp";
 import {
   compactDynamicToolOutput,
   omitToolOutputImageData,
@@ -256,7 +257,7 @@ function boundDynamicValue(value: unknown): unknown {
 }
 
 /** Preserve ordered image markers in truncated output so clients can load images by index. */
-function boundToolOutput(output: unknown): unknown {
+function boundToolResult(output: unknown): unknown {
   const omitted = omitToolOutputImageData(output);
   const bounded = boundDynamicValue(omitted);
   if (typeof bounded !== "string" || typeof omitted === "string") return bounded;
@@ -267,6 +268,22 @@ function boundToolOutput(output: unknown): unknown {
         { type: "text", text: bounded },
         ...images.map((image) => ({ type: "image", mimeType: image.mimeType })),
       ];
+}
+
+function boundToolOutput(output: unknown): unknown {
+  if (typeof output !== "object" || output === null || !("result" in output)) {
+    return boundToolResult(output);
+  }
+  const app =
+    MCP_APP_OUTPUT_KEY in output ? readMcpAppReference(output[MCP_APP_OUTPUT_KEY]) : undefined;
+  if (app === undefined) return boundToolResult(output);
+  // The app receives this result, so its image data stays unless it is too large to send.
+  // Measured, not compared by identity: bounding rebuilds every image it keeps.
+  const fits = (jsonByteLength(output.result) ?? Infinity) <= MAX_ON_DEMAND_BYTES;
+  return {
+    [MCP_APP_OUTPUT_KEY]: app,
+    result: fits ? output.result : boundToolResult(output.result),
+  };
 }
 
 export function projectTurnItemForDetail(item: OrchestrationV2TurnItem): OrchestrationV2TurnItem {

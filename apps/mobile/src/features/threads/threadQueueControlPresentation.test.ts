@@ -1,4 +1,6 @@
+import { ComposerContextId } from "@t3tools/contracts";
 import { formatAssistantCitationHref } from "@t3tools/shared/assistantCitations";
+import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
 import { describe, expect, it } from "vite-plus/test";
 
 import { resolveThreadQueueRowControls } from "./threadQueueControlPresentation";
@@ -63,6 +65,33 @@ describe("threadQueueControlPresentation", () => {
     expect(row("/logout").canSend).toBe(false);
     expect(row("/compact the parser notes").canSend).toBe(true);
     expect(row("/compact", true).canSend).toBe(true);
+  });
+
+  it("shows context chips by their labels", () => {
+    const environment = formatComposerContextReference({
+      kind: "environment",
+      contextId: ComposerContextId.make("environment_mac"),
+      label: "MacBook",
+    });
+    const file = formatComposerContextReference({
+      kind: "file",
+      contextId: ComposerContextId.make("report"),
+      label: "report.pdf",
+    });
+    const image = formatComposerContextReference({
+      kind: "image",
+      contextId: ComposerContextId.make("screenshot"),
+      label: "screenshot.png",
+    });
+
+    expect(
+      resolveThreadQueueRowControls({
+        busy: false,
+        canPromoteToSteer: true,
+        canSendNow: false,
+        text: `Check ${environment} for ${file} ${image} `,
+      }).displayText,
+    ).toBe("Check MacBook for report.pdf screenshot.png");
   });
 
   it("keeps the row already open in the composer from being reopened or steered", () => {

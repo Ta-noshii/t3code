@@ -6,7 +6,7 @@ import {
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 
 import * as CanvasService from "../../../canvas/CanvasService.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -53,7 +53,8 @@ const CanvasListTool = Tool.make("canvas_list", {
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const CanvasCreateTool = Tool.make("canvas_create", {
   description:
@@ -75,7 +76,8 @@ const CanvasCreateTool = Tool.make("canvas_create", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const CanvasMoveTool = Tool.make("canvas_move", {
   description:
@@ -93,7 +95,8 @@ const CanvasMoveTool = Tool.make("canvas_move", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const CanvasOpenTool = Tool.make("canvas_open", {
   description:
@@ -107,7 +110,8 @@ const CanvasOpenTool = Tool.make("canvas_open", {
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const CanvasReadTool = Tool.make("canvas_read", {
   description:
@@ -132,7 +136,8 @@ const CanvasReadTool = Tool.make("canvas_read", {
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const CanvasUpdateTool = Tool.make("canvas_update", {
   description:
@@ -153,7 +158,8 @@ const CanvasUpdateTool = Tool.make("canvas_update", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const CanvasAddImageTool = Tool.make("canvas_add_image", {
   description:
@@ -178,7 +184,8 @@ const CanvasAddImageTool = Tool.make("canvas_add_image", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, true);
+  .annotate(Tool.OpenWorld, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 export const CanvasScreenshotTool = Tool.make("canvas_screenshot", {
   description:
@@ -205,7 +212,8 @@ export const CanvasScreenshotTool = Tool.make("canvas_screenshot", {
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 export const CanvasStandardToolkit = Toolkit.make(
   CanvasListTool,
