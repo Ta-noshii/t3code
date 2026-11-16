@@ -57,6 +57,7 @@ import { vcsEnvironment } from "../../state/vcs";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { useDelayedStatus } from "../../lib/useDelayedStatus";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useServerConfigs, useThreadShell } from "../../state/entities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
@@ -101,7 +102,10 @@ import { resolveLatestMergeBackRun } from "@t3tools/client-runtime/state/thread-
 import { threadEnvironment } from "../../state/threads";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
 import { useProjects } from "../../state/entities";
-import { projectThreadContentPresentation } from "./threadContentPresentation";
+import {
+  projectThreadContentPresentation,
+  threadSyncStatusLabel,
+} from "./threadContentPresentation";
 import {
   Inspector,
   useAdaptiveWorkspaceLayout,
@@ -296,8 +300,11 @@ function LiveThreadRouteController(props: ThreadRouteScreenProps) {
   }
 
   if (selectedThread !== null && selectedThreadKey === routeThreadKey) {
-    return withInspectorHeader(
-      <ThreadRouteContent {...props} selectedThreadDetailState={selectedThreadDetailState} />,
+    // ThreadRouteContent draws its own inspector header so it can show the sync status.
+    return (
+      <InspectorHeaderShownContext value={props.inspectorPresentation !== undefined}>
+        <ThreadRouteContent {...props} selectedThreadDetailState={selectedThreadDetailState} />
+      </InspectorHeaderShownContext>
     );
   }
 
@@ -926,7 +933,7 @@ function ThreadRouteContent(
       selectedThread?.worktreePath != null ||
       (selectedThreadCreation?.message.creation?.workspaceMode === "worktree" &&
         selectedThreadCreation.outcome == null),
-    turnStarted: setupTurnStartedAt !== null,
+    runs: selectedThreadDetail?.runs ?? [],
     followUpSent:
       composer.selectedThreadFeed.filter(
         (entry) => entry.type === "message" && entry.message.role === "user",
@@ -1011,14 +1018,6 @@ function ThreadRouteContent(
       serverOwned: false,
     };
   })();
-  if (!environmentId || !threadId) {
-    return <OpeningThreadLoadingScreen />;
-  }
-
-  if (!selectedThread) {
-    return <OpeningThreadLoadingScreen />;
-  }
-
   // Queued creation displays its prompt before server creation; temporary not-found is expected.
   const contentPresentation =
     creationState !== null
@@ -1029,6 +1028,30 @@ function ThreadRouteContent(
           detailDeleted: selectedThreadDetailState.status === "deleted",
           connectionState: routeConnectionState,
         });
+  // Shown in the header subtitle so the composer's status slot doesn't jump while history syncs.
+  const threadSyncLabel = useDelayedStatus(
+    selectedThread === null ? "" : scopedThreadKey(selectedThread.environmentId, selectedThread.id),
+    // A thread this client is creating has nothing older to sync.
+    creationState === null
+      ? threadSyncStatusLabel(selectedThreadDetailState.status, contentPresentation.kind)
+      : null,
+  );
+  const inspectorHeader = props.inspectorPresentation ? (
+    <ThreadInspectorHeader
+      title={selectedThread?.title ?? "Thread"}
+      subtitle={threadSyncLabel ?? undefined}
+      {...props.inspectorPresentation}
+    />
+  ) : null;
+  if (!environmentId || !threadId || !selectedThread) {
+    return (
+      <>
+        {inspectorHeader}
+        <OpeningThreadLoadingScreen />
+      </>
+    );
+  }
+
   const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
   const renderThreadRouteBody = () => (
     <>
@@ -1044,7 +1067,7 @@ function ThreadRouteContent(
             props.inspectorPresentation ? null : (
               <ThreadHeader
                 title={selectedThread.title}
-                subtitle={headerSubtitle}
+                subtitle={threadSyncLabel ?? headerSubtitle}
                 gitControls={threadGitControlProps}
                 hasThreadCwd={selectedThreadCwd !== null}
                 inspectorMode={inspectorMode}
@@ -1057,7 +1080,10 @@ function ThreadRouteContent(
           selectedThread={selectedThreadWithDraftSettings ?? selectedThread}
           selectedThreadDetailRef={selectedThreadDetailRef}
           contentPresentation={contentPresentation}
-          screenTone={connectionTone(routeConnectionState)}
+          screenTone={connectionTone(
+            routeConnectionState,
+            routeEnvironmentRuntime?.connectionAwaitingApproval === true,
+          )}
           connectionError={routeConnectionError}
           environmentLabel={selectedEnvironmentConnection?.environmentLabel ?? null}
           feedbackSubmissions={composer.feedbackSubmissions}
@@ -1106,7 +1132,7 @@ function ThreadRouteContent(
           activePendingUserInputAnswers={requests.activePendingUserInputAnswers}
           respondingUserInputId={requests.respondingUserInputId}
           connectionStateLabel={routeConnectionState}
-          threadSyncStatus={selectedThreadDetailState.status}
+          connectionAwaitingApproval={routeEnvironmentRuntime?.connectionAwaitingApproval === true}
           historyControls={historyControls}
           activeThreadBusy={composer.activeThreadBusy}
           promptSuggestion={promptSuggestion}
@@ -1160,6 +1186,7 @@ function ThreadRouteContent(
 
   return (
     <>
+      {inspectorHeader}
       {!props.inspectorPresentation && inspectorContent ? (
         <Inspector
           // A route's own inspector (files) opens once per thread; going back keeps the user's choice.

@@ -13,7 +13,7 @@ import {
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -84,7 +84,8 @@ const ProgressUpdateTool = Tool.make("progress_update", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const MarkNeedsReplyTool = Tool.make("mark_needs_reply", {
   description: `Mark the response you are writing now as waiting on the user, so their thread list shows that this thread needs a reply. Use it when you end the turn on a question, a choice, or a go-ahead only the user can give. Skip it for finished work and for a closing offer the user may ignore. The mark clears on its own when the user sends the next message; pass clear: true to drop it earlier in the same turn.`,
@@ -115,6 +116,7 @@ const MarkNeedsReplyTool = Tool.make("mark_needs_reply", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 export const ProgressToolkit = Toolkit.make(ProgressUpdateTool, MarkNeedsReplyTool);

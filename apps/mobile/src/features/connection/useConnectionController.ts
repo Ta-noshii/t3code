@@ -41,7 +41,6 @@ export function useConnectionController() {
   const updateBearer = useAtomCommand(updateBearerConnection, { reportFailure: false });
   const registerEnvironment = useAtomCommand(environmentCatalog.register, "environment register");
   const removeEnvironmentMutation = useAtomCommand(environmentCatalog.remove, "environment remove");
-  const retryEnvironmentMutation = useAtomCommand(environmentCatalog.retryNow, "environment retry");
   const setEnvironmentEnabledMutation = useAtomCommand(
     environmentCatalog.setEnabled,
     "environment toggle",
@@ -87,8 +86,6 @@ export function useConnectionController() {
     );
   const removeEnvironment = (environmentId: EnvironmentId) =>
     removeEnvironmentMutation(environmentId);
-  const retryEnvironment = (environmentId: EnvironmentId) =>
-    retryEnvironmentMutation(environmentId);
   const setEnvironmentEnabled = async (environmentId: EnvironmentId, enabled: boolean) => {
     const result = await setEnvironmentEnabledMutation({ environmentId, enabled });
     // The switch snaps back on failure; say why instead of only logging it.
@@ -130,7 +127,6 @@ export function useConnectionController() {
     connectPairingUrl,
     connectRelayEnvironment,
     removeEnvironment,
-    retryEnvironment,
     setEnvironmentEnabled,
     updateEnvironment,
     refreshRelayEnvironments,
