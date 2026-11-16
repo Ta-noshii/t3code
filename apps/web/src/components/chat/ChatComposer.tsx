@@ -215,6 +215,9 @@ import {
 } from "./ComposerAttachmentStrip";
 import { CollapsedComposerStopAction, ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerFooterPrimaryActions } from "./ComposerFooterControls";
+import type { ContextWindowAutoCompactTarget } from "./ContextWindowMeter";
+import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
+import { providerSupportsManualCompaction } from "./compaction.logic";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
@@ -419,6 +422,8 @@ export interface ChatComposerProps {
 
   compactThreadUnavailable: boolean;
   compactDisabled: boolean;
+  /** The thread's latest context usage; the footer meter shows it. */
+  activeContextWindow: ContextWindowSnapshot | null;
 
   resolvedTheme: "light" | "dark";
   settings: UnifiedSettings;
@@ -534,6 +539,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectName,
     compactThreadUnavailable,
     compactDisabled,
+    activeContextWindow,
     resolvedTheme,
     settings,
     keybindings,
@@ -941,6 +947,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         (multipleModelSelections === null ? providerSendBlockReason : null)));
   const isSendDisabled = sendDisabledReason !== null;
   const selectedProviderStatus = selectedProviderEntry?.snapshot ?? null;
+  const compactCommandAvailable = providerSupportsManualCompaction(selectedProviderEntry);
+  // The meter reports the thread's own provider, so the auto-compact choice
+  // edits that instance on the thread's environment, not the picker's draft.
+  const contextWindowInstanceId =
+    activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId ?? null;
+  const contextWindowDriverKind =
+    contextWindowInstanceId === null
+      ? null
+      : (providerInstanceEntries.find((entry) => entry.instanceId === contextWindowInstanceId)
+          ?.driverKind ?? null);
+  const autoCompactTarget: ContextWindowAutoCompactTarget | null =
+    contextWindowInstanceId !== null && contextWindowDriverKind === "claudeAgent"
+      ? { environmentId, instanceId: contextWindowInstanceId, driverKind: contextWindowDriverKind }
+      : null;
   const selectedProviderSkills = selectedProviderStatus
     ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd)
     : NO_PROVIDER_SKILLS;
@@ -3746,6 +3766,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     key={`${environmentId}:${activeThreadId ?? "new"}`}
                     compact={isComposerPrimaryActionsCompact}
                     canOperateThread={canOperateThread}
+                    activeContextWindow={activeContextWindow}
+                    autoCompactTarget={autoCompactTarget}
+                    compactDisabled={compactDisabled || noProviderAvailable || isSendBusy}
+                    {...(compactCommandAvailable
+                      ? { onCompactContext: compactThreadContextStable }
+                      : {})}
                     pendingAction={pendingPrimaryAction}
                     // A side-chat command starts a side chat; it never queues or steers the turn.
                     isRunning={
