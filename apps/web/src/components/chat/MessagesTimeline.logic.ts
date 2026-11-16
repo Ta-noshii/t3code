@@ -2742,11 +2742,15 @@ function replaceStreamingMessageRows(
       for (const entry of groupedEntries) {
         if (thoughts.has(entry.id)) patchedLiveThoughtIds.add(entry.id);
       }
+      // The trail quotes the thought's text and times it, so it follows the patched entries.
+      const trail = row.trail ? collapsedActivityTrail(groupedEntries, row.active) : undefined;
+      const { trail: _staleTrail, ...rest } = row;
       return {
-        ...row,
+        ...rest,
         entry: patchThought(row.entry),
         groupedEntries,
         ...(row.thought ? { thought: patchThought(row.thought) } : {}),
+        ...(trail ? { trail } : {}),
       };
     }
     if (row.kind === "work") {
