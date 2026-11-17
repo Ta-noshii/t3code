@@ -3,6 +3,7 @@ import {
   normalizeInlineReplyLinks,
   parseInlineReplyHref,
   parseSuggestedReplies,
+  parseTrailingT3Blocks,
   stripInlineReplyLinks,
 } from "./suggestedReplies.ts";
 
@@ -68,5 +69,57 @@ describe("inline reply links", () => {
     expect(stripInlineReplyLinks('See [the tracklist](t3-reply: "Tell me").')).toBe(
       "See the tracklist.",
     );
+  });
+});
+
+describe("parseTrailingT3Blocks", () => {
+  it("reads a needs-reply note and hides the block", () => {
+    expect(
+      parseTrailingT3Blocks("Which target?\n\n```t3-needs-reply\nPick a deploy target\n```\n"),
+    ).toEqual({ text: "Which target?", replies: [], needsReply: { note: "Pick a deploy target" } });
+  });
+
+  it("takes both blocks in either order", () => {
+    const expected = {
+      text: "Deploy now?",
+      replies: ["Yes", "No"],
+      needsReply: { note: "Approve the deploy" },
+    };
+    expect(
+      parseTrailingT3Blocks(
+        "Deploy now?\n\n```t3-replies\nYes\nNo\n```\n\n```t3-needs-reply\nApprove the deploy\n```",
+      ),
+    ).toEqual(expected);
+    expect(
+      parseTrailingT3Blocks(
+        "Deploy now?\n\n```t3-needs-reply\nApprove the deploy\n```\n```t3-replies\nYes\nNo\n```",
+      ),
+    ).toEqual(expected);
+  });
+
+  it("allows an empty note", () => {
+    expect(parseTrailingT3Blocks("Ready?\n```t3-needs-reply\n```").needsReply).toEqual({
+      note: null,
+    });
+  });
+
+  it("hides a streaming block but does not mark it yet", () => {
+    expect(parseTrailingT3Blocks("Ready?\n```t3-needs-reply\nWaiting on")).toEqual({
+      text: "Ready?",
+      replies: [],
+      needsReply: null,
+    });
+  });
+
+  it("ignores a needs-reply block in the middle of the message", () => {
+    const text = "```t3-needs-reply\nnote\n```\nMore text after it.";
+    expect(parseTrailingT3Blocks(text)).toEqual({ text, replies: [], needsReply: null });
+  });
+
+  it("hides the needs-reply block from suggested replies parsing", () => {
+    expect(parseSuggestedReplies("Ok?\n```t3-needs-reply\nnote\n```")).toEqual({
+      text: "Ok?",
+      replies: [],
+    });
   });
 });

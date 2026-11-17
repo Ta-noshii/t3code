@@ -23,7 +23,9 @@ export interface SuggestedRepliesParse {
   readonly replies: ReadonlyArray<string>;
 }
 
-const OPEN_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*t3-replies[ \t]*$/;
+export const NEEDS_REPLY_INFO_STRING = "t3-needs-reply";
+export const MAX_NEEDS_REPLY_NOTE_LENGTH = 120;
+
 const ANY_FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
 function isClosingFence(line: string, opener: string): boolean {
@@ -32,6 +34,51 @@ function isClosingFence(line: string, opener: string): boolean {
   return (
     trimmed.length >= opener.length && [...trimmed].every((character) => character === fenceChar)
   );
+}
+
+function openFencePattern(infoString: string): RegExp {
+  return new RegExp(`^ {0,3}(\`{3,}|~{3,})[ \\t]*${infoString}[ \\t]*$`);
+}
+const OPEN_FENCES = {
+  [SUGGESTED_REPLIES_INFO_STRING]: openFencePattern(SUGGESTED_REPLIES_INFO_STRING),
+  [NEEDS_REPLY_INFO_STRING]: openFencePattern(NEEDS_REPLY_INFO_STRING),
+} as const;
+type TrailingBlockKind = keyof typeof OPEN_FENCES;
+
+/**
+ * Finds a trailing fenced block of one of the T3 kinds. `body` is null while
+ * the block is still streaming (no closing fence yet).
+ */
+function peelTrailingBlock(
+  lines: ReadonlyArray<string>,
+): { kind: TrailingBlockKind; rest: number; body: ReadonlyArray<string> | null } | null {
+  let end = lines.length;
+  while (end > 0 && lines[end - 1]!.trim() === "") end -= 1;
+  if (end === 0) return null;
+
+  // Walk up from the last line to the nearest fence line. If it opens a T3
+  // block, the block is unclosed. If it closes one, the next fence above must
+  // be that block's opener.
+  let index = end - 1;
+  while (index >= 0 && !ANY_FENCE.test(lines[index]!)) index -= 1;
+  if (index < 0) return null;
+
+  const lastFence = lines[index]!;
+  for (const kind of Object.keys(OPEN_FENCES) as TrailingBlockKind[]) {
+    if (OPEN_FENCES[kind].test(lastFence)) return { kind, rest: index, body: null };
+  }
+  if (index !== end - 1) return null;
+
+  let openIndex = index - 1;
+  while (openIndex >= 0 && !ANY_FENCE.test(lines[openIndex]!)) openIndex -= 1;
+  if (openIndex < 0) return null;
+  for (const kind of Object.keys(OPEN_FENCES) as TrailingBlockKind[]) {
+    const opener = OPEN_FENCES[kind].exec(lines[openIndex]!);
+    if (opener !== null && isClosingFence(lastFence, opener[1]!)) {
+      return { kind, rest: openIndex, body: lines.slice(openIndex + 1, index) };
+    }
+  }
+  return null;
 }
 
 function cleanReply(line: string): string | null {
@@ -45,44 +92,62 @@ function cleanReply(line: string): string | null {
     : reply;
 }
 
+export interface TrailingT3BlocksParse extends SuggestedRepliesParse {
+  /**
+   * Set when the message ends with a closed `t3-needs-reply` block: the agent
+   * is waiting on the user. `note` is the block's text, if any.
+   */
+  readonly needsReply: { readonly note: string | null } | null;
+}
+
+/**
+ * Strips the trailing `t3-replies` and `t3-needs-reply` blocks, in either
+ * order, and returns what they hold.
+ *
+ * ```t3-needs-reply
+ * Pick a deploy target
+ * ```
+ */
+export function parseTrailingT3Blocks(markdown: string): TrailingT3BlocksParse {
+  if (
+    !markdown.includes(SUGGESTED_REPLIES_INFO_STRING) &&
+    !markdown.includes(NEEDS_REPLY_INFO_STRING)
+  ) {
+    return { text: markdown, replies: [], needsReply: null };
+  }
+  let lines = markdown.split("\n");
+  let replies: string[] | null = null;
+  let needsReply: TrailingT3BlocksParse["needsReply"] = null;
+  let peeled = false;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const block = peelTrailingBlock(lines);
+    if (block === null) break;
+    if (block.kind === SUGGESTED_REPLIES_INFO_STRING) {
+      if (replies !== null) break;
+      replies = [];
+      for (const line of block.body ?? []) {
+        const reply = cleanReply(line);
+        if (reply !== null && !replies.includes(reply)) replies.push(reply);
+        if (replies.length === MAX_SUGGESTED_REPLIES) break;
+      }
+    } else {
+      if (needsReply !== null) break;
+      const note = (block.body ?? []).join(" ").replace(/\s+/g, " ").trim();
+      needsReply =
+        block.body === null
+          ? null
+          : { note: note.length === 0 ? null : note.slice(0, MAX_NEEDS_REPLY_NOTE_LENGTH).trimEnd() };
+    }
+    peeled = true;
+    lines = lines.slice(0, block.rest);
+  }
+  if (!peeled) return { text: markdown, replies: [], needsReply: null };
+  return { text: lines.join("\n").trimEnd(), replies: replies ?? [], needsReply };
+}
+
 export function parseSuggestedReplies(markdown: string): SuggestedRepliesParse {
-  if (!markdown.includes(SUGGESTED_REPLIES_INFO_STRING)) {
-    return { text: markdown, replies: [] };
-  }
-  const lines = markdown.split("\n");
-  let end = lines.length;
-  while (end > 0 && lines[end - 1]!.trim() === "") end -= 1;
-  if (end === 0) return { text: markdown, replies: [] };
-
-  // Walk up from the last line to the nearest fence line. If it opens a
-  // t3-replies block, the block is unclosed (still streaming). If it closes
-  // one, the next fence above must be the t3-replies opener.
-  let index = end - 1;
-  while (index >= 0 && !ANY_FENCE.test(lines[index]!)) index -= 1;
-  if (index < 0) return { text: markdown, replies: [] };
-
-  const lastFence = lines[index]!;
-  const openMatch = OPEN_FENCE.exec(lastFence);
-  if (openMatch !== null) {
-    return { text: lines.slice(0, index).join("\n").trimEnd(), replies: [] };
-  }
-  if (index !== end - 1) return { text: markdown, replies: [] };
-
-  let openIndex = index - 1;
-  while (openIndex >= 0 && !ANY_FENCE.test(lines[openIndex]!)) openIndex -= 1;
-  if (openIndex < 0) return { text: markdown, replies: [] };
-  const opener = OPEN_FENCE.exec(lines[openIndex]!);
-  if (opener === null || !isClosingFence(lastFence, opener[1]!)) {
-    return { text: markdown, replies: [] };
-  }
-
-  const replies: string[] = [];
-  for (const line of lines.slice(openIndex + 1, index)) {
-    const reply = cleanReply(line);
-    if (reply !== null && !replies.includes(reply)) replies.push(reply);
-    if (replies.length === MAX_SUGGESTED_REPLIES) break;
-  }
-  return { text: lines.slice(0, openIndex).join("\n").trimEnd(), replies };
+  const { text, replies } = parseTrailingT3Blocks(markdown);
+  return { text, replies };
 }
 
 /**

@@ -613,7 +613,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   tags: Schema.optional(StoredThreadTags),
   /** The agent's progress tracker; subagents report to their topmost parent's. */
   progress: Schema.optional(Schema.NullOr(OrchestrationV2AgentProgress)),
-  /** Set by an agent's mark_needs_reply call; a newer run makes it stale. */
+  /** Set when an agent ends a message with a t3-needs-reply block; a newer run makes it stale. */
   replyRequest: Schema.optional(Schema.NullOr(OrchestrationV2ReplyRequest)),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
