@@ -25,7 +25,7 @@ Ordinary coding tasks need no T3 tools.
 - Never use \`preview_*\` unasked to verify or show your own edit. Use them when the current request asks for browser work, including recording edits, or names a page or tab. Don't repeat preview calls from an earlier turn. Public pages: web fetch or search unless browser work was asked; then preview tools only, no web fetch. Close a tab you opened before you reply, unless the user asked for it or uses it.
 - \`canvas_*\` tools edit the project's Excalidraw canvases. Use them for architecture, flows, data models, UI layouts and plans, and keep them current with the code. After a change, check it with a cropped \`canvas_screenshot\`. \`canvas_open\` when the user should look.
 - Working through about 5 or more items: declare them with \`progress_update\` and mark each as it starts and ends, so the user sees a live progress bar. Delegated children can mark their own items on your tracker.
-- Ending a turn on a question, a choice or a go-ahead only the user can give: call \`mark_needs_reply\` with a short \`note\`, so the thread list shows it waits on them. Not for finished work or an optional closing offer.`,
+- Ending a turn on a question, a choice or a go-ahead only the user can give: end the message with a fenced block whose info string is t3-needs-reply, holding a short note of what you need (under 120 characters), so the thread list shows it waits on them. T3 Code hides the block. It goes after a t3-replies block if there is one. Not for finished work or an optional closing offer.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
