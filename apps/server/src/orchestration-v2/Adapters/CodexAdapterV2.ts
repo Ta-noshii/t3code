@@ -6478,7 +6478,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               runOrdinal: input.context.input.runOrdinal,
               status: terminalStatus,
               failure: null,
-              ...(terminalStatus === "interrupted" && input.context.hookStopReason !== undefined
+              ...(input.context.hookStopReason !== undefined
                 ? { reason: input.context.hookStopReason }
                 : {}),
               threadDisposition: "reusable",
@@ -8117,7 +8117,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             ),
           ),
           resumeTurn: (input) => runtime.startTurn(ProviderAdapter.resumeTurnInput(input)),
-          startTurn: (turnInput) => {
+          startTurn: Effect.fn("CodexAdapterV2.startTurn")((turnInput) => {
             const continuation =
               turnInput.restartContinuationOfRunId !== undefined || turnInput.resume === true;
             const goalCommand = !continuation ? parseGoalCommand(turnInput.message) : null;
@@ -8157,7 +8157,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   }),
               ),
             );
-          },
+          }),
           steerTurn: Effect.fn("CodexAdapterV2.steerTurn")(
             function* (turnInput) {
               const threadId = yield* getNativeThreadId(turnInput.providerThread);
