@@ -142,10 +142,7 @@ vi.mock("expo-file-system", () => ({
   Paths: { document: { uri: "file:///documents" } },
 }));
 
-vi.mock("../lib/composerImages", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../lib/composerImages")>()),
-  removePersistedComposerAttachmentFile: composerAttachmentCleanupMocks.remove,
-}));
+vi.mock("../lib/composerImages", { spy: true });
 
 vi.mock("../lib/uuid", () => ({ uuidv4: () => "uuid", randomHex: () => "0000" }));
 vi.mock("./assets", () => ({ assetEnvironment: {} }));
@@ -170,7 +167,10 @@ vi.mock("../features/sharing/incoming-share-storage", () => ({
   loadIncomingShareDrafts: incomingShareStorageMocks.load,
 }));
 
-import type { DraftComposerAttachment } from "../lib/composerImages";
+import {
+  removePersistedComposerAttachmentFile,
+  type DraftComposerAttachment,
+} from "../lib/composerImages";
 import {
   collectComposerContextReferences,
   formatComposerContextReference,
@@ -228,6 +228,10 @@ const DRAFT: ComposerDraft = {
   text: "hello",
   attachments: [],
 };
+
+vi.mocked(removePersistedComposerAttachmentFile).mockImplementation(
+  composerAttachmentCleanupMocks.remove,
+);
 
 afterEach(() => {
   vi.useRealTimers();
