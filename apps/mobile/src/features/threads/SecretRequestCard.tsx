@@ -1,4 +1,3 @@
-import { pipe } from "effect/Function";
 import {
   secretRequestAnswerInput,
   secretRequestCopy,
@@ -21,6 +20,7 @@ import type {
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import * as Clipboard from "expo-clipboard";
+import { useGT, useMessages } from "gt-react-native";
 import { useRef, useState } from "react";
 import { View, type ColorValue } from "react-native";
 
@@ -47,9 +47,10 @@ export function SecretRequestCard(props: {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
   readonly iconColor: ColorValue;
 }) {
+  const m = useMessages();
   const { item, visibility } = props.projectedItem;
   if (item.type !== "secret_request") return null;
-  const display = secretRequestDisplay(item, visibility);
+  const display = secretRequestDisplay(item, visibility, m);
   if (display.kind === "pending") {
     return (
       <PendingSecretRequestForm
@@ -80,8 +81,10 @@ function PendingSecretRequestForm(props: {
   readonly item: SecretRequestItem;
   readonly iconColor: ColorValue;
 }) {
+  const gt = useGT();
+  const m = useMessages();
   const { item } = props;
-  const copy = secretRequestCopy(item);
+  const copy = secretRequestCopy(item, m);
   const answer = useAtomCommand(serverEnvironment.answerSecretRequest, {
     label: "answer secret request",
     // The failure cause holds the request; keep it out of the console.
@@ -89,7 +92,7 @@ function PendingSecretRequestForm(props: {
     reportDefect: false,
   });
   const config = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
-  const sources = secretRequestSources(config, config?.settings.secretProviders ?? {});
+  const sources = secretRequestSources(config, config?.settings.secretProviders ?? {}, m);
   const [sourceId, setSourceId] = useState<SecretProviderId | null>(null);
   const source = sources.find((candidate) => candidate.id === sourceId) ?? null;
   const [secret, setSecret] = useState("");
@@ -115,7 +118,7 @@ function PendingSecretRequestForm(props: {
       return;
     }
     if (!isAtomCommandInterrupted(result)) {
-      pipe(squashAtomCommandFailure(result), secretRequestFailureMessage, setError);
+      setError(secretRequestFailureMessage(squashAtomCommandFailure(result), m));
     }
   };
   const save = () => {
@@ -137,7 +140,7 @@ function PendingSecretRequestForm(props: {
         {copy.command !== null ? (
           <>
             <Text className="font-sans text-sm leading-5 text-foreground-muted">
-              Enter your password to run as root:
+              {gt("Enter your password to run as root:")}
             </Text>
             <Text
               selectable
@@ -155,7 +158,7 @@ function PendingSecretRequestForm(props: {
       {link !== null ? (
         <View className="gap-1.5">
           <Button
-            label={`Open ${link.host}`}
+            label={gt("Open {host}", { host: link.host })}
             tone="secondary"
             fullWidth
             onPress={() => void tryOpenExternalUrl(link.href, "secret-request")}
@@ -171,7 +174,7 @@ function PendingSecretRequestForm(props: {
       {sources.length > 0 ? (
         <View className="flex-row flex-wrap gap-2">
           <Chip
-            label="Value"
+            label={gt("Value", { $context: "noun, enter the secret value directly" })}
             size="small"
             selected={source === null}
             disabled={submitting}
@@ -198,7 +201,10 @@ function PendingSecretRequestForm(props: {
       {source !== null ? (
         <TextInput
           key={source.id}
-          accessibilityLabel={`${item.label} reference in ${source.label}`}
+          accessibilityLabel={gt("{label} reference in {source}", {
+            label: item.label,
+            source: source.label,
+          })}
           placeholder={source.referencePlaceholder}
           value={reference}
           onChangeText={(next) => {
@@ -280,10 +286,11 @@ function MultilineSecretPaste(props: {
   readonly onChange: (secret: string) => void;
   readonly onError: (error: string | null) => void;
 }) {
+  const gt = useGT();
   const paste = async () => {
     const text = await Clipboard.getStringAsync().catch(() => "");
     if (text.trim().length === 0) {
-      props.onError("The clipboard is empty. Copy the value first.");
+      props.onError(gt("The clipboard is empty. Copy the value first."));
       return;
     }
     props.onError(null);
@@ -294,19 +301,22 @@ function MultilineSecretPaste(props: {
     <View className="flex-row items-center gap-2">
       <Text className="flex-1 font-sans text-sm text-foreground-muted">
         {props.secret.length === 0
-          ? "Copy the value, then paste it here."
-          : `Pasted ${props.secret.length} characters on ${lines} ${lines === 1 ? "line" : "lines"}`}
+          ? gt("Copy the value, then paste it here.")
+          : gt(
+              "Pasted {count} characters on {lines, plural, one {{lines} line} other {{lines} lines}}",
+              { count: props.secret.length, lines },
+            )}
       </Text>
       {props.secret.length > 0 ? (
         <Button
-          label="Clear"
+          label={gt("Clear")}
           tone="secondary"
           disabled={props.disabled}
           onPress={() => props.onChange("")}
         />
       ) : null}
       <Button
-        label="Paste"
+        label={gt("Paste")}
         tone="secondary"
         disabled={props.disabled}
         onPress={() => void paste()}

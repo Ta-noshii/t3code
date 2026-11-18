@@ -1,3 +1,4 @@
+import { errorDisplayMessage } from "./errors/translatable.ts";
 import {
   SecretReference,
   secretRequestPageUrl,
@@ -10,6 +11,8 @@ import {
 import { builtInSecretProviderDefinitions } from "@t3tools/secret-provider-definitions/registry";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { mFallback, msg } from "gt-i18n";
+import type { MFunctionType } from "gt-i18n/types";
 
 export type SecretRequestItem = Extract<
   OrchestrationV2TurnItem,
@@ -17,11 +20,16 @@ export type SecretRequestItem = Extract<
 >;
 
 /** A `file` request lets the agent's commands read the value, so its card must not promise more. */
-export const secretRequestPrivacyNote = (item: Pick<SecretRequestItem, "delivery">) =>
+export const secretRequestPrivacyNote = (
+  item: Pick<SecretRequestItem, "delivery">,
+  resolve: MFunctionType = mFallback,
+) =>
   item.delivery === "file"
-    ? "Kept out of chat, in a private file this agent's commands can read for 24 hours"
-    : "Stored securely, never shown to the agent";
-export const SECRET_REQUEST_DEFAULT_PLACEHOLDER = "Paste the secret";
+    ? resolve(
+        msg("Kept out of chat, in a private file this agent's commands can read for 24 hours"),
+      )
+    : resolve(msg("Stored securely, never shown to the agent"));
+export const SECRET_REQUEST_DEFAULT_PLACEHOLDER = msg("Paste the secret");
 
 // Backticks, <angle brackets> and markdown link targets (balanced parentheses allowed) keep their
 // exact text; a bare link drops trailing sentence punctuation.
@@ -93,24 +101,32 @@ export interface SecretRequestCopy {
 
 export function secretRequestCopy(
   item: Pick<SecretRequestItem, "placeholder" | "reason" | "shellPrompt" | "delivery">,
+  resolve: MFunctionType = mFallback,
 ): SecretRequestCopy {
   const prompt = item.shellPrompt;
   if (prompt === undefined) {
     return {
-      placeholder: item.placeholder ?? SECRET_REQUEST_DEFAULT_PLACEHOLDER,
-      privacyNote: secretRequestPrivacyNote(item),
-      saveLabel: "Save securely",
-      declineLabel: "Decline",
+      placeholder: item.placeholder ?? resolve(SECRET_REQUEST_DEFAULT_PLACEHOLDER),
+      privacyNote: secretRequestPrivacyNote(item, resolve),
+      saveLabel: resolve(msg("Save securely")),
+      declineLabel: resolve(msg("Decline")),
       multiline: false,
       command: null,
     };
   }
   const command = prompt.kind === "sudo" && item.reason.trim() ? item.reason.trim() : null;
   return {
-    placeholder: prompt.kind === "sudo" ? "Password" : prompt.multiline ? "Paste it here" : "Value",
-    privacyNote: "Sent only to the waiting command, never stored or shown to the agent",
-    saveLabel: prompt.kind === "sudo" ? "Allow" : "Send",
-    declineLabel: "Deny",
+    placeholder:
+      prompt.kind === "sudo"
+        ? resolve(msg("Password"))
+        : prompt.multiline
+          ? resolve(msg("Paste it here"))
+          : resolve(msg("Value")),
+    privacyNote: resolve(
+      msg("Sent only to the waiting command, never stored or shown to the agent"),
+    ),
+    saveLabel: prompt.kind === "sudo" ? resolve(msg("Allow")) : resolve(msg("Send")),
+    declineLabel: resolve(msg("Deny")),
     multiline: prompt.multiline,
     command,
   };
@@ -126,36 +142,7 @@ export type SecretRequestDisplay =
       readonly label: string;
     };
 
-const SAVED_DISPLAY: SecretRequestDisplay = {
-  kind: "answered",
-  outcome: "saved",
-  label: "Saved securely and kept private",
-};
-const DECLINED_DISPLAY: SecretRequestDisplay = {
-  kind: "answered",
-  outcome: "declined",
-  label: "Declined",
-};
-const ENDED_DISPLAY: SecretRequestDisplay = {
-  kind: "answered",
-  outcome: "ended",
-  label: "Request ended",
-};
-const SENT_DISPLAY: SecretRequestDisplay = {
-  kind: "answered",
-  outcome: "saved",
-  label: "Sent to the waiting command",
-};
-const DENIED_DISPLAY: SecretRequestDisplay = {
-  kind: "answered",
-  outcome: "declined",
-  label: "Denied",
-};
 const PENDING_DISPLAY: SecretRequestDisplay = { kind: "pending" };
-const PENDING_ELSEWHERE_DISPLAY: SecretRequestDisplay = {
-  kind: "pending-elsewhere",
-  label: "Waiting for an answer in the original thread",
-};
 
 /**
  * `visibility` is the projected row's: a request inherited from another
@@ -164,17 +151,33 @@ const PENDING_ELSEWHERE_DISPLAY: SecretRequestDisplay = {
 export function secretRequestDisplay(
   item: Pick<SecretRequestItem, "secretStatus" | "shellPrompt">,
   visibility: "local" | "inherited" | "synthetic",
+  resolve: MFunctionType = mFallback,
 ): SecretRequestDisplay {
   switch (item.secretStatus) {
     case "pending":
-      return visibility === "local" ? PENDING_DISPLAY : PENDING_ELSEWHERE_DISPLAY;
+      return visibility === "local"
+        ? PENDING_DISPLAY
+        : {
+            kind: "pending-elsewhere",
+            label: resolve(msg("Waiting for an answer in the original thread")),
+          };
     case "saved":
-      return item.shellPrompt === undefined ? SAVED_DISPLAY : SENT_DISPLAY;
+      return {
+        kind: "answered",
+        outcome: "saved",
+        label:
+          item.shellPrompt === undefined
+            ? resolve(msg("Saved securely and kept private"))
+            : resolve(msg("Sent to the waiting command")),
+      };
     case "declined":
-      return item.shellPrompt === undefined ? DECLINED_DISPLAY : DENIED_DISPLAY;
-    // Also how a prompt reads once its command exits or times out.
+      return {
+        kind: "answered",
+        outcome: "declined",
+        label: item.shellPrompt === undefined ? resolve(msg("Declined")) : resolve(msg("Denied")),
+      };
     case "cancelled":
-      return ENDED_DISPLAY;
+      return { kind: "answered", outcome: "ended", label: resolve(msg("Request ended")) };
   }
 }
 
@@ -188,6 +191,23 @@ export interface SecretRequestSource {
 }
 
 const NO_SOURCES: ReadonlyArray<SecretRequestSource> = [];
+
+// Secret provider packages author this text in English; the same English, translatable here.
+const INVALID_REFERENCE_MESSAGES: ReadonlyMap<string, string> = new Map([
+  [
+    "Use a 1Password reference like op://vault/item/field.",
+    msg("Use a 1Password reference like {example}.", { example: "op://vault/item/field" }),
+  ],
+]);
+
+/** A secret provider's `invalidReferenceMessage` in the UI language when it is a known one. */
+export function invalidSecretReferenceText(
+  message: string,
+  resolve: MFunctionType = mFallback,
+): string {
+  const translated = INVALID_REFERENCE_MESSAGES.get(message);
+  return translated === undefined ? message : resolve(translated);
+}
 const decodeConfigByKind = new Map(
   builtInSecretProviderDefinitions.definitions.map((definition) => [
     definition.kind,
@@ -199,13 +219,15 @@ const decodeConfigByKind = new Map(
 export function secretRequestSources(
   config: Pick<ServerConfig, "secretRequestReferences"> | null | undefined,
   providers: ServerSettings["secretProviders"],
+  resolve: MFunctionType = mFallback,
 ): ReadonlyArray<SecretRequestSource> {
   if (config?.secretRequestReferences !== true) return NO_SOURCES;
-  return configuredSecretSources(providers);
+  return configuredSecretSources(providers, resolve);
 }
 
 export function configuredSecretSources(
   providers: ServerSettings["secretProviders"],
+  resolve: MFunctionType = mFallback,
 ): ReadonlyArray<SecretRequestSource> {
   return (Object.keys(providers) as Array<SecretProviderId>).flatMap((id) => {
     const provider = providers[id];
@@ -224,7 +246,10 @@ export function configuredSecretSources(
         label: provider.label,
         isReference: definition.isReference,
         referencePlaceholder: definition.referencePlaceholder,
-        invalidReferenceMessage: definition.invalidReferenceMessage,
+        invalidReferenceMessage: invalidSecretReferenceText(
+          definition.invalidReferenceMessage,
+          resolve,
+        ),
       },
     ];
   });
@@ -278,7 +303,10 @@ const USER_FACING_FAILURE_TAGS = new Set(["SecretRequestError", "EnvironmentAuth
  * Only known server errors pass their message through: anything else (transport or encoding
  * failures) gets the generic copy, so the typed value can never surface in the UI.
  */
-export function secretRequestFailureMessage(failure: unknown): string {
+export function secretRequestFailureMessage(
+  failure: unknown,
+  resolve: MFunctionType = mFallback,
+): string {
   if (
     typeof failure === "object" &&
     failure !== null &&
@@ -289,7 +317,7 @@ export function secretRequestFailureMessage(failure: unknown): string {
     typeof failure.message === "string" &&
     failure.message.trim().length > 0
   ) {
-    return failure.message;
+    return errorDisplayMessage(failure, resolve) ?? failure.message;
   }
-  return "Could not answer the request. Try again.";
+  return resolve(msg("Could not answer the request. Try again."));
 }

@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 
 // Both Linux release jobs build on Ubuntu 24.04; this is a build ceiling, not a distro support promise.
-const GLIBC_BUILD_CEILING = "2.39";
+const GLIBC_BUILD_CEILING = process.env.T3CODE_GLIBC_BUILD_CEILING ?? "2.39";
 const readelf = NodeUtil.promisify(NodeChildProcess.execFile);
 
 function compareVersions(left: string, right: string): number {
@@ -25,7 +25,8 @@ export function parseGlibcNeeds(output: string): string | undefined {
     if (line.startsWith("Version ")) inNeeds = line.startsWith("Version needs section ");
     if (!inNeeds) continue;
     const name = /\bName:\s+(GLIBC_\S+)/.exec(line)?.[1];
-    if (!name) continue;
+    // The loader only warns when a WEAK version is missing, so it does not raise the floor.
+    if (!name || /\bFlags:[^:]*\bWEAK\b/.test(line)) continue;
     // DT_RELR's named ABI requirement was introduced in glibc 2.36.
     const version =
       name === "GLIBC_ABI_DT_RELR" ? "2.36" : /^GLIBC_(\d+(?:\.\d+)+)$/.exec(name)?.[1];

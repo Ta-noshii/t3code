@@ -9,6 +9,8 @@ import type {
   RelayEnvironmentStatusResponse,
 } from "@t3tools/contracts/relay";
 import * as Cause from "effect/Cause";
+import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
+import { msg, useMessages } from "gt-react-native";
 import * as Option from "effect/Option";
 import { useMemo } from "react";
 import { Alert } from "react-native";
@@ -33,6 +35,7 @@ export interface RelayEnvironmentView {
 }
 
 export function useConnectionController() {
+  const messages = useMessages();
   const connectedEnvironments = useWorkspaceEnvironments();
   const discovery = useAtomValue(relayEnvironmentDiscovery.stateValueAtom);
   const connectPairingUrlMutation = useAtomCommand(connectPairingUrlAtom, {
@@ -60,10 +63,10 @@ export function useConnectionController() {
         environment: entry.environment,
         availability: entry.availability,
         status: Option.getOrNull(entry.status),
-        error: Option.getOrNull(entry.error)?.message ?? null,
+        error: errorDisplayMessage(Option.getOrNull(entry.error), messages),
         traceId: Option.getOrNull(entry.error)?.traceId ?? null,
       })),
-    [discovery.environments],
+    [discovery.environments, messages],
   );
   const availableRelayEnvironments = useMemo(
     () => relayEnvironments.filter((entry) => !registeredIds.has(entry.environment.environmentId)),
@@ -98,7 +101,9 @@ export function useConnectionController() {
             ? error.message
             : String(error);
       Alert.alert(
-        enabled ? "Could not turn this environment on" : "Could not turn this environment off",
+        enabled
+          ? messages(msg("Could not turn this environment on"))
+          : messages(msg("Could not turn this environment off")),
         detail,
       );
     }
@@ -121,7 +126,7 @@ export function useConnectionController() {
     relayDiscovery: {
       isRefreshing: discovery.refreshing,
       isOffline: discovery.offline,
-      error: Option.getOrNull(discovery.error)?.message ?? null,
+      error: errorDisplayMessage(Option.getOrNull(discovery.error), messages),
       errorTraceId: Option.getOrNull(discovery.error)?.traceId ?? null,
     },
     connectPairingUrl,

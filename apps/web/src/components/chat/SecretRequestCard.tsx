@@ -21,6 +21,7 @@ import type {
   SecretProviderId,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { T, useMessages, Var } from "gt-react";
 import { CheckIcon, ExternalLinkIcon, LockIcon, MinusIcon, ShieldCheckIcon } from "lucide-react";
 import { useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 
@@ -33,20 +34,15 @@ import { Textarea } from "../ui/textarea";
 import { SecretSourceSelect } from "../settings/SecretSourceInput";
 import { WorkLogRow } from "./WorkLog";
 
-/**
- * Inline card for a secret an agent asked the user for, or a command in its
- * shell asked for through `t3 secret prompt`. The typed value lives only in
- * this component's state and the RPC payload: it is never logged, toasted, or
- * persisted, and the field clears once the answer is sent. A prompt whose
- * command exits switches to its ended row when the item updates.
- */
+/** Typed secrets stay in component state and the RPC payload until sent, then the field clears. */
 export function SecretRequestCard(props: {
   readonly environmentId: EnvironmentId;
   readonly item: SecretRequestItem;
   readonly visibility: OrchestrationV2ProjectedTurnItem["visibility"];
 }) {
   const { item } = props;
-  const display = secretRequestDisplay(item, props.visibility);
+  const messages = useMessages();
+  const display = secretRequestDisplay(item, props.visibility, messages);
   if (display.kind === "answered" || display.kind === "pending-elsewhere") {
     const Icon =
       display.kind === "pending-elsewhere"
@@ -73,8 +69,9 @@ const NO_SOURCES: ReadonlyArray<SecretRequestSource> = [];
 
 function useSecretRequestSources(environmentId: EnvironmentId) {
   const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
+  const messages = useMessages();
   return isSecretsFeatureEnabled
-    ? secretRequestSources(config, config?.settings.secretProviders ?? {})
+    ? secretRequestSources(config, config?.settings.secretProviders ?? {}, messages)
     : NO_SOURCES;
 }
 
@@ -83,7 +80,8 @@ function PendingSecretRequestForm(props: {
   readonly item: SecretRequestItem;
 }) {
   const { item } = props;
-  const copy = secretRequestCopy(item);
+  const messages = useMessages();
+  const copy = secretRequestCopy(item, messages);
   const inputId = useId();
   const errorId = useId();
   const privacyId = useId();
@@ -119,7 +117,11 @@ function PendingSecretRequestForm(props: {
       return;
     }
     if (!isAtomCommandInterrupted(result)) {
-      pipe(squashAtomCommandFailure(result), secretRequestFailureMessage, setError);
+      pipe(
+        squashAtomCommandFailure(result),
+        (failure) => secretRequestFailureMessage(failure, messages),
+        setError,
+      );
     }
   };
 
@@ -180,7 +182,9 @@ function PendingSecretRequestForm(props: {
         </label>
         {copy.command !== null ? (
           <>
-            <p className="text-sm text-muted-foreground">Enter your password to run as root:</p>
+            <p className="text-sm text-muted-foreground">
+              <T>Enter your password to run as root:</T>
+            </p>
             <code className="block min-w-0 rounded-md bg-muted px-2 py-1.5 font-mono text-sm break-all text-foreground">
               {copy.command}
             </code>
@@ -196,7 +200,9 @@ function PendingSecretRequestForm(props: {
             size="sm"
             render={<a href={link.href} target="_blank" rel="noopener noreferrer" />}
           >
-            Open {link.host}
+            <T>
+              Open <Var>{link.host}</Var>
+            </T>
             <ExternalLinkIcon aria-hidden />
           </Button>
           {/* A link found in the reason is already shown there. */}

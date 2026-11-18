@@ -16,7 +16,9 @@ import {
   type HtmlRenderTheme,
 } from "@t3tools/shared/htmlRender";
 import { applyHtmlRenderStateRequest } from "@t3tools/shared/htmlRenderState";
+import { m } from "../../i18n/messages";
 import { Storage } from "expo-sqlite/kv-store";
+import { msg, T, useGT } from "gt-react-native";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Platform, Pressable, View, type ColorValue } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
@@ -91,11 +93,11 @@ function readOverflowMessage(message: unknown): Overflow | null {
 const confirmSend = (text: string) =>
   new Promise<boolean>((resolve) => {
     Alert.alert(
-      "Send this message from the page?",
+      m(msg("Send this message from the page?")),
       text,
       [
-        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-        { text: "Send", onPress: () => resolve(true) },
+        { text: m(msg("Cancel")), style: "cancel", onPress: () => resolve(false) },
+        { text: m(msg("Send")), onPress: () => resolve(true) },
       ],
       { cancelable: true, onDismiss: () => resolve(false) },
     );
@@ -264,6 +266,7 @@ export function ThreadHtmlRender(props: {
   readonly frameWidth: number;
   readonly iconColor: ColorValue;
 }) {
+  const gt = useGT();
   const navigation = useNavigation();
   const { attachmentId, title } = props.render;
   const height = htmlRenderFrameHeight(props.render, props.frameWidth);
@@ -316,7 +319,7 @@ export function ThreadHtmlRender(props: {
         {uri !== null && !failed ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Open ${title}`}
+            accessibilityLabel={gt("Open {title}", { title })}
             hitSlop={8}
             className="h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-card/80"
             onPress={() =>
@@ -354,7 +357,7 @@ export function ThreadHtmlRender(props: {
         ) : failed || asset._tag === "Failure" ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Reload ${title}`}
+            accessibilityLabel={gt("Reload {title}", { title })}
             className="flex-1 items-center justify-center"
             onPress={() => {
               retried.current = false;
@@ -362,7 +365,9 @@ export function ThreadHtmlRender(props: {
               if (uri === null) void refresh().then((next) => next !== null && setUri(next));
             }}
           >
-            <Text className="text-sm text-foreground-muted">Page unavailable</Text>
+            <Text className="text-sm text-foreground-muted">
+              <T>Page unavailable</T>
+            </Text>
           </Pressable>
         ) : (
           <View className="flex-1 items-center justify-center">

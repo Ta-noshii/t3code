@@ -4,13 +4,14 @@ import {
   type MessageId,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2ProviderCapabilities,
-  type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
   type RunId,
   type ThreadId,
 } from "@t3tools/contracts";
 import { copySorted } from "@t3tools/shared/Array";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { mFallback, msg } from "gt-i18n";
+import type { MFunctionType } from "gt-i18n/types";
 
 import type { ThreadStructure } from "./models.ts";
 
@@ -142,7 +143,10 @@ export function getUserQueuedThreadRuns(
   );
 }
 
-export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQueueWorkflowState {
+export function deriveThreadQueueWorkflowState(
+  projection: Projection,
+  resolve: MFunctionType = mFallback,
+): ThreadQueueWorkflowState {
   const activeRun = resolveActiveThreadRun(projection);
   const session = resolveThreadProviderSession(projection);
   const capabilities = session?.capabilities.turns;
@@ -167,7 +171,7 @@ export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQu
     return {
       run,
       // A queued guest message shows the guest's words; the agent still gets the attributed text.
-      text: message?.context?.guest?.text ?? message?.text ?? "Queued message",
+      text: message?.context?.guest?.text ?? message?.text ?? resolve(msg("Queued message")),
       attachments: message?.attachments ?? [],
       messageId: run.userMessageId,
       ...(message?.context ? { context: message.context } : {}),
@@ -289,13 +293,7 @@ export type EditInNewThreadPlan =
       readonly type: "history_not_loaded";
     };
 
-/**
- * "Edit in new thread" on a user message: the new thread holds the conversation up to
- * just before that message, and the message goes back into its composer. The cut is the
- * end of the run that answered the previous message, which may belong to a parent thread
- * when the row is inherited. A steer shares its run with the prompt before it, so it
- * cannot be cut out on its own and returns null.
- */
+/** A steer shares its run with the preceding prompt and cannot be cut out on its own. */
 export function planEditInNewThread(
   visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
   messageId: MessageId,
