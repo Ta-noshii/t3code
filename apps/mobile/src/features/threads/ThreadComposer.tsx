@@ -85,6 +85,7 @@ import {
   composerStripAttachments,
   type DraftComposerFileAttachment,
 } from "../../lib/composerImages";
+import { composerAttachmentUploadKey } from "../../lib/composerAttachmentUploadQueue";
 import {
   buildModelOptions,
   isModelSelectionUnavailable,
@@ -306,7 +307,6 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     draftMessage.trim().length > 0 ||
     draftAttachments.length > 0 ||
     (queuedEdit?.existingAttachments.length ?? 0) > 0;
-  const stripAttachments = composerStripAttachments(draftAttachments);
   const showStopAction = !hasContent && props.canStopThread && queuedEdit === null;
   const onResumeQueue = props.onResumeQueue;
   const [resumingQueue, setResumingQueue] = useState(false);
@@ -324,6 +324,10 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     AuthOrchestrationOperateScope,
   );
   const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
+  const stripAttachments = composerStripAttachments(
+    draftAttachments,
+    (attachment) => uploadStates[composerAttachmentUploadKey(props.environmentId, attachment.id)],
+  );
   const attachmentsUploading =
     props.connectionState === "connected" &&
     composerAttachmentsStillUploading({
