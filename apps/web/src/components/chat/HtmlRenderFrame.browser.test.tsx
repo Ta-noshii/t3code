@@ -65,6 +65,7 @@ describe("HtmlRenderFrame", () => {
         environmentId={EnvironmentId.make("environment")}
         htmlRender={{ attachmentId: "measured", title: "Mockup", height: 200 }}
         threadRef={undefined}
+        onSendMessage={undefined}
       />
     );
     const frameHeight = (screen: Screen) =>
