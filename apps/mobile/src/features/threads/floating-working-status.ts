@@ -24,7 +24,12 @@ export type FloatingWorkingStatus =
       readonly unresponsive: boolean;
       readonly action: FloatingStatusAction | null;
     }
-  | { readonly kind: "goal"; readonly label: string; readonly accessibilityLabel: string }
+  | {
+      readonly kind: "goal";
+      readonly label: string;
+      readonly accessibilityLabel: string;
+      readonly actions: ReadonlyArray<FloatingStatusAction>;
+    }
   | {
       readonly kind: "progress";
       readonly label: string;

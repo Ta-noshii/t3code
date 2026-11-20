@@ -104,6 +104,15 @@ every client shows a one-line "While you were away" summary above the composer.
 It comes from Claude Code's `/recap`, run on a copy of the conversation, so it
 adds nothing to the thread. Each turn gets one recap; dismiss it to hide it.
 
+## Steering
+
+A steer waits until Claude finishes the tool calls it is running, then Claude reads it
+in the same turn. The message shows as unread until then. If Claude drops it before
+reading it, the message is sent as the next turn, after any messages queued before it.
+If Claude exits or the server restarts first, the message waits in the queue in that
+same place until you resume it. If you press Stop, T3 Code shows a notice with the text
+of any steer Claude had not read.
+
 ## Skills
 
 Claude skills come from the config directory's `skills` folder and the project's
