@@ -21,6 +21,7 @@ import {
 const item = {
   id: TurnItemId.make("turn-item:secret-request:1"),
   threadId: ThreadId.make("thread-1"),
+  label: "Token",
 };
 
 describe("secretRequestDisplay", () => {
@@ -35,6 +36,46 @@ describe("secretRequestDisplay", () => {
   });
 });
 
+describe("secretRequestAnswerInput", () => {
+  const single = { id: "item", threadId: "thread", label: "Token" } as const;
+  const login = {
+    ...single,
+    delivery: "file",
+    fields: [
+      { name: "email", label: "Email", secret: false },
+      { name: "password", label: "Password" },
+    ],
+  } as const;
+  const ids = { threadId: "thread", turnItemId: "item" };
+
+  it("answers a single request with its trimmed secret", () => {
+    expect(
+      secretRequestAnswerInput(single as never, { type: "save", values: { "": " t " } }),
+    ).toEqual({ ...ids, answer: { type: "save", secret: "t" } });
+    expect(secretRequestAnswerInput(single as never, { type: "save", values: { "": " " } })).toBe(
+      null,
+    );
+  });
+
+  it("answers a fields request only once every field has a value, keyed by name", () => {
+    expect(
+      secretRequestAnswerInput(login as never, {
+        type: "save",
+        values: { email: "a@acme.dev ", password: "pw" },
+      }),
+    ).toEqual({
+      ...ids,
+      answer: { type: "save", values: { email: "a@acme.dev", password: "pw" } },
+    });
+    expect(
+      secretRequestAnswerInput(login as never, { type: "save", values: { email: "a@acme.dev" } }),
+    ).toBe(null);
+    // An unset field named like an Object.prototype member is empty, not that member.
+    const named = { ...single, fields: [{ name: "constructor", label: "Key" }] } as const;
+    expect(secretRequestAnswerInput(named as never, { type: "save", values: {} })).toBe(null);
+  });
+});
+
 describe("secretRequestPrivacyNote", () => {
   it("does not promise to hide a value that the agent's commands can read", () => {
     expect(secretRequestPrivacyNote({})).toBe("Stored securely, never shown to the agent");
@@ -44,8 +85,8 @@ describe("secretRequestPrivacyNote", () => {
 
 describe("secretRequestAnswerInput", () => {
   it("refuses a blank save and trims the value the server will store", () => {
-    expect(secretRequestAnswerInput(item, { type: "save", secret: "   " })).toBeNull();
-    expect(secretRequestAnswerInput(item, { type: "save", secret: " whsec_1 " })).toEqual({
+    expect(secretRequestAnswerInput(item, { type: "save", values: { "": "   " } })).toBeNull();
+    expect(secretRequestAnswerInput(item, { type: "save", values: { "": " whsec_1 " } })).toEqual({
       threadId: item.threadId,
       turnItemId: item.id,
       answer: { type: "save", secret: "whsec_1" },
@@ -63,9 +104,11 @@ describe("shell prompts", () => {
 
   it("sends a waiting command's value as typed, but still refuses a blank one", () => {
     const shellItem = { ...item, shellPrompt: { kind: "secret", multiline: true } as const };
-    expect(secretRequestAnswerInput(shellItem, { type: "save", secret: " \n " })).toBeNull();
     expect(
-      secretRequestAnswerInput(shellItem, { type: "save", secret: "-----KEY-----\n" }),
+      secretRequestAnswerInput(shellItem, { type: "save", values: { "": " \n " } }),
+    ).toBeNull();
+    expect(
+      secretRequestAnswerInput(shellItem, { type: "save", values: { "": "-----KEY-----\n" } }),
     ).toMatchObject({ answer: { type: "save", secret: "-----KEY-----\n" } });
   });
 
@@ -182,7 +225,11 @@ describe("secretRequestSources", () => {
   it("answers with a reference only in the provider's syntax", () => {
     const [source] = secretRequestSources({ secretRequestReferences: true }, providers);
     if (source === undefined) throw new Error("expected a source");
-    const item = { id: TurnItemId.make("item-1"), threadId: ThreadId.make("thread-1") };
+    const item = {
+      id: TurnItemId.make("item-1"),
+      threadId: ThreadId.make("thread-1"),
+      label: "Deploy token",
+    };
     expect(
       secretRequestAnswerInput(item, {
         type: "reference",
@@ -195,6 +242,14 @@ describe("secretRequestSources", () => {
     });
     expect(
       secretRequestAnswerInput(item, { type: "reference", source, reference: "vault/item" }),
+    ).toBeNull();
+    // A reference answers one value, never a card with fields.
+    const fields = [{ name: "password", label: "Password" }];
+    expect(
+      secretRequestAnswerInput(
+        { ...item, fields },
+        { type: "reference", source, reference: "op://vault/item/field" },
+      ),
     ).toBeNull();
   });
 });

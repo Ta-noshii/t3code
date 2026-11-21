@@ -63,13 +63,22 @@ export function matchComposerThreadItems(
     }
     return false;
   };
+  // Closing an unused side chat deletes it, so only one with a message is offered.
+  const isOwnSideChat = (shell: ComposerThreadCandidate) =>
+    shell.lineage.sideChat === true &&
+    shell.environmentId === input.environmentId &&
+    shell.lineage.parentThreadId === input.excludeThreadId &&
+    shell.latestUserMessageAt !== null;
   const candidates = input.shells.filter(
     (shell) =>
       (shell.environmentId === input.environmentId ||
         input.linkedEnvironments.has(shell.environmentId)) &&
       shell.id !== input.excludeThreadId &&
       shell.archivedAt === null &&
-      (isListedThreadLineage(shell.lineage) || isFamily(shell)),
+      (isListedThreadLineage(shell.lineage) ||
+        isOwnSideChat(shell) ||
+        (isFamily(shell) &&
+          (shell.lineage.sideChat !== true || shell.latestUserMessageAt !== null))),
   );
   return rankSearchItems(candidates, (shell, options) =>
     scoreThreadSearch(query, threadSearchSubject(shell, null), input.now, {

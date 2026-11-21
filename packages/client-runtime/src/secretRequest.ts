@@ -21,15 +21,50 @@ export type SecretRequestItem = Extract<
 
 /** A `file` request lets the agent's commands read the value, so its card must not promise more. */
 export const secretRequestPrivacyNote = (
-  item: Pick<SecretRequestItem, "delivery">,
+  item: Pick<SecretRequestItem, "delivery" | "fields">,
   resolve: MFunctionType = mFallback,
 ) =>
-  item.delivery === "file"
-    ? resolve(
-        msg("Kept out of chat, in a private file this agent's commands can read for 24 hours"),
-      )
-    : resolve(msg("Stored securely, never shown to the agent"));
-export const SECRET_REQUEST_DEFAULT_PLACEHOLDER = msg("Paste the secret");
+  item.delivery !== "file"
+    ? resolve(msg("Stored securely, never shown to the agent"))
+    : item.fields === undefined
+      ? resolve(
+          msg("Kept out of chat, in a private file this agent's commands can read for 24 hours"),
+        )
+      : resolve(
+          msg("Kept out of chat, in private files this agent's commands can read for 24 hours"),
+        );
+const SECRET_REQUEST_DEFAULT_PLACEHOLDER = msg("Paste the secret");
+
+export interface SecretRequestInput {
+  /** Key in the card's values: the field name, or "" for a request without fields. */
+  readonly key: string;
+  readonly label: string;
+  readonly placeholder: string;
+  /** Masked, with a toggle to show it. */
+  readonly secret: boolean;
+}
+
+export function secretRequestInputs(
+  item: Pick<SecretRequestItem, "label" | "placeholder" | "fields">,
+  resolve: MFunctionType = mFallback,
+): ReadonlyArray<SecretRequestInput> {
+  if (item.fields === undefined) {
+    return [
+      {
+        key: "",
+        label: item.label,
+        placeholder: item.placeholder ?? resolve(SECRET_REQUEST_DEFAULT_PLACEHOLDER),
+        secret: true,
+      },
+    ];
+  }
+  return item.fields.map((field) => ({
+    key: field.name,
+    label: field.label,
+    placeholder: field.placeholder ?? "",
+    secret: field.secret !== false,
+  }));
+}
 
 // Backticks, <angle brackets> and markdown link targets (balanced parentheses allowed) keep their
 // exact text; a bare link drops trailing sentence punctuation.
@@ -100,7 +135,7 @@ export interface SecretRequestCopy {
 }
 
 export function secretRequestCopy(
-  item: Pick<SecretRequestItem, "placeholder" | "reason" | "shellPrompt" | "delivery">,
+  item: Pick<SecretRequestItem, "placeholder" | "reason" | "shellPrompt" | "delivery" | "fields">,
   resolve: MFunctionType = mFallback,
 ): SecretRequestCopy {
   const prompt = item.shellPrompt;
@@ -268,33 +303,49 @@ export function secretRequestReference(
     : undefined;
 }
 
+/** A card value by input key. Own keys only: a field may be named `constructor`. */
+export const secretRequestValue = (values: Readonly<Record<string, string>>, key: string) =>
+  Object.hasOwn(values, key) ? (values[key] ?? "") : "";
+
 export type SecretRequestReply =
-  | { readonly type: "save"; readonly secret: string }
+  /** Keyed by `SecretRequestInput.key`. */
+  | { readonly type: "save"; readonly values: Readonly<Record<string, string>> }
+  /** Single-value cards only: the server reads it through `source`. */
   | { readonly type: "reference"; readonly source: SecretRequestSource; readonly reference: string }
   | { readonly type: "decline" };
 
-/**
- * Builds the RPC payload for an answer. A save with a blank value returns null,
- * since the server rejects it; callers keep Save disabled instead. A stored
- * secret is trimmed. A value for a waiting command goes as typed, since a
- * password or key may carry spaces or a final newline that matter.
- */
+/** Shell values retain whitespace; stored values are trimmed. */
 export function secretRequestAnswerInput(
-  item: Pick<SecretRequestItem, "id" | "threadId" | "shellPrompt">,
+  item: Pick<
+    SecretRequestItem,
+    "id" | "threadId" | "label" | "placeholder" | "fields" | "shellPrompt"
+  >,
   answer: SecretRequestReply,
 ): SecretRequestAnswerInput | null {
-  if (answer.type === "decline") {
-    return { threadId: item.threadId, turnItemId: item.id, answer: { type: "decline" } };
-  }
+  const base = { threadId: item.threadId, turnItemId: item.id };
+  if (answer.type === "decline") return { ...base, answer: { type: "decline" } };
   if (answer.type === "reference") {
-    const reference = secretRequestReference(answer.source, answer.reference);
-    return reference === undefined
-      ? null
-      : { threadId: item.threadId, turnItemId: item.id, answer: { type: "reference", reference } };
+    const reference =
+      item.fields === undefined
+        ? secretRequestReference(answer.source, answer.reference)
+        : undefined;
+    return reference === undefined ? null : { ...base, answer: { type: "reference", reference } };
   }
-  if (answer.secret.trim().length === 0) return null;
-  const secret = item.shellPrompt === undefined ? answer.secret.trim() : answer.secret;
-  return { threadId: item.threadId, turnItemId: item.id, answer: { type: "save", secret } };
+  const entries = secretRequestInputs(item).map(
+    (input) =>
+      [
+        input.key,
+        item.shellPrompt === undefined
+          ? secretRequestValue(answer.values, input.key).trim()
+          : secretRequestValue(answer.values, input.key),
+      ] as const,
+  );
+  if (entries.some(([, value]) => value.trim().length === 0)) return null;
+  if (item.fields === undefined) {
+    return { ...base, answer: { type: "save", secret: entries[0]?.[1] ?? "" } };
+  }
+
+  return { ...base, answer: { type: "save", values: Object.fromEntries(entries) } };
 }
 
 const USER_FACING_FAILURE_TAGS = new Set(["SecretRequestError", "EnvironmentAuthorizationError"]);

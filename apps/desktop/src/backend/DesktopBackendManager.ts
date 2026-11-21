@@ -87,6 +87,7 @@ export interface DesktopBackendStartConfig extends BackendProcessContext {
   readonly wslRuntimeId?: string;
   /** Runs the server through the backend host, so it outlives the app. */
   readonly hosted?: DesktopHostedBackend.HostedBackendConfig;
+  readonly wslT3Home?: string | null;
 }
 
 export interface PreflightFailure {
@@ -1021,6 +1022,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
               yield* wslEnvironment.pruneRuntimes(
                 config.value.runningDistro,
                 config.value.wslRuntimeId,
+                config.value.wslT3Home ?? null,
               );
             }
           }),
