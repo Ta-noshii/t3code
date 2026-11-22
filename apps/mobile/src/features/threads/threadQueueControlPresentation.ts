@@ -1,4 +1,3 @@
-import { runsAsOwnTurn } from "@t3tools/client-runtime/state/thread-workflows";
 import type { EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import { msg } from "gt-react-native";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
@@ -39,12 +38,7 @@ export function resolveThreadQueueRowControls(input: {
     // away whatever has been typed since.
     canEdit:
       mutationEnabled && !isEditing && input.isGuestMessage !== true && input.editBlocked !== true,
-    // /compact and /logout cannot join a running turn, so they offer Send now only.
-    canSend:
-      mutationEnabled &&
-      ((input.canPromoteToSteer && !runsAsOwnTurn(input.text, input.attachments)) ||
-        input.canSendNow) &&
-      !isEditing,
+    canSend: mutationEnabled && (input.canPromoteToSteer || input.canSendNow) && !isEditing,
     dismissAccessibilityLabel: REMOVE_QUEUED_MESSAGE_ACCESSIBILITY_LABEL,
     // Editing and sending keep the original text so quoted citations stay linked.
     displayText: isAttachmentOnlyBootstrapPrompt(input.text)

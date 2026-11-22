@@ -6,19 +6,20 @@ import {
 import {
   deriveThreadQueueWorkflowState,
   getSendAllQueuedRuns,
-  runsAsOwnTurn,
 } from "@t3tools/client-runtime/state/thread-workflows";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+import { isSlashCommand } from "@t3tools/shared/composerTrigger";
 import {
   isAttachmentOnlyBootstrapPrompt,
   replaceComposerContextReferences,
 } from "@t3tools/shared/composerContextReferences";
-import type {
-  ChatAttachment as ContractChatAttachment,
-  EnvironmentId,
-  MessageId,
-  RunId,
-  ThreadId,
+import {
+  parseGoalCommand,
+  type ChatAttachment as ContractChatAttachment,
+  type EnvironmentId,
+  type MessageId,
+  type RunId,
+  type ThreadId,
 } from "@t3tools/contracts";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
@@ -235,7 +236,6 @@ export function QueuedRunsControl({
     steerNext(repeat) {
       const next = queued[0];
       if (!next || !canSendRun(next.run.freshContext === true)) return false;
-      if (!workflow?.canSendNow && runsAsOwnTurn(next.text, next.attachments)) return false;
       if (!repeat && busyRunId === null) void sendQueuedMessage(next.run.id);
       return true;
     },
@@ -321,6 +321,9 @@ export function QueuedRunsControl({
                 replaceComposerContextReferences(item.text, (reference) => reference.label),
               ).trim();
           const isEditing = item.runId !== null && item.runId === props.editingRunId;
+          // The server decides on the agent's text, and a goal command can stop the turn.
+          const sentText = { text: item.message?.text ?? item.text, attachments: item.attachments };
+          const movesCommandFirst = isSlashCommand(sentText) && parseGoalCommand(sentText) === null;
           return (
             <li
               key={item.key}
@@ -350,11 +353,7 @@ export function QueuedRunsControl({
                         <Button
                           size="xs"
                           variant="ghost-muted"
-                          disabled={
-                            item.runId === null ||
-                            busyRunId !== null ||
-                            (!workflow?.canSendNow && runsAsOwnTurn(item.text, item.attachments))
-                          }
+                          disabled={item.runId === null || busyRunId !== null}
                           onClick={() => {
                             if (item.runId !== null) {
                               void sendQueuedMessage(item.runId);
@@ -366,25 +365,29 @@ export function QueuedRunsControl({
                         </Button>
                       </TooltipTrigger>
                       <TooltipPopup>
-                        {!workflow?.canSendNow && runsAsOwnTurn(item.text, item.attachments)
-                          ? gt("Runs as its own turn after the current one")
-                          : item.serverIndex === 0 && props.steerShortcutLabel
-                            ? workflow?.canSendNow
-                              ? gt("Start a turn with this message ({shortcut})", {
+                        {item.serverIndex === 0 && props.steerShortcutLabel
+                          ? workflow?.canSendNow
+                            ? gt("Start a turn with this message ({shortcut})", {
+                                shortcut: props.steerShortcutLabel,
+                              })
+                            : workflow?.promoteSkipsCompaction
+                              ? gt("Skip compaction and send this message ({shortcut})", {
                                   shortcut: props.steerShortcutLabel,
                                 })
-                              : workflow?.promoteSkipsCompaction
-                                ? gt("Skip compaction and send this message ({shortcut})", {
+                              : movesCommandFirst
+                                ? gt("Move this command to the front of the queue ({shortcut})", {
                                     shortcut: props.steerShortcutLabel,
                                   })
                                 : gt("Send into the current turn ({shortcut})", {
                                     shortcut: props.steerShortcutLabel,
                                   })
-                            : workflow?.canSendNow
-                              ? gt("Start a turn with this message")
-                              : workflow?.promoteSkipsCompaction
-                                ? gt("Skip compaction and send this message")
-                                : gt("Send into the current turn")}{" "}
+                          : workflow?.canSendNow
+                            ? gt("Start a turn with this message")
+                            : workflow?.promoteSkipsCompaction
+                              ? gt("Skip compaction and send this message")
+                              : movesCommandFirst
+                                ? gt("Move this command to the front of the queue")
+                                : gt("Send into the current turn")}
                       </TooltipPopup>
                     </Tooltip>
                   </>
