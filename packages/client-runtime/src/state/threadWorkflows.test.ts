@@ -3,7 +3,6 @@ import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 
 import {
   buildEarlierConversationTranscript,
-  canDetachThreadProviderSession,
   canForkProjectedAssistantItem,
   deriveThreadQueueWorkflowState,
   getSendAllQueuedRuns,
@@ -11,7 +10,6 @@ import {
   planEditInNewThread,
   getUserQueuedThreadRuns,
   resolveLatestMergeBackRun,
-  runsAsOwnTurn,
   threadSupportsProviderHandoff,
 } from "./threadWorkflows.ts";
 
@@ -428,15 +426,11 @@ describe("thread workflows", () => {
 });
 
 describe("commands that run as their own turn", () => {
-  it("matches a bare /compact or /logout and nothing else", () => {
+  it("matches a bare /compact and nothing else", () => {
     expect(isCompactCommand(" /COMPACT ", [])).toBe(true);
     expect(isCompactCommand("/compact", [{}])).toBe(false);
     expect(isCompactCommand("/compact now", [])).toBe(false);
     expect(isCompactCommand("/logout", [])).toBe(false);
-    expect(runsAsOwnTurn("/compact", [])).toBe(true);
-    expect(runsAsOwnTurn("/logout ", [])).toBe(true);
-    expect(runsAsOwnTurn("/logout", [{}])).toBe(false);
-    expect(runsAsOwnTurn("Fix the parser", [])).toBe(false);
   });
 });
 

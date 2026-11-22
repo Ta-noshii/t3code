@@ -51,7 +51,7 @@ describe("threadQueueControlPresentation", () => {
     );
   });
 
-  it("does not steer /compact or /logout into a live turn, which run as their own turn", () => {
+  it("lets the server promote queued commands without steering them", () => {
     const row = (text: string, canSendNow = false) =>
       resolveThreadQueueRowControls({
         busy: false,
@@ -61,8 +61,8 @@ describe("threadQueueControlPresentation", () => {
         attachments: [],
       });
 
-    expect(row(" /compact").canSend).toBe(false);
-    expect(row("/logout").canSend).toBe(false);
+    expect(row(" /compact").canSend).toBe(true);
+    expect(row("/logout").canSend).toBe(true);
     expect(row("/compact", true).canSend).toBe(true);
     expect(row("/compact the parser notes").canSend).toBe(true);
   });
