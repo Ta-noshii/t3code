@@ -237,6 +237,7 @@ const startLocalBackend = Effect.gen(function* () {
     return yield* new DesktopDevelopmentBackendPortRequiredError();
   }
 
+  yield* DesktopBackendPool.recoverLocalBackend;
   // A server an earlier app left running through the backend host is ours to attach to.
   const liveHost =
     !(settings.wslOnly && settings.wslBackendEnabled) &&
