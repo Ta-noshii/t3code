@@ -18,6 +18,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.firebase.messaging.RemoteMessage
 import expo.modules.notifications.service.ExpoFirebaseMessagingService
 import expo.modules.t3nowbar.NowBarService
+import java.security.MessageDigest
 
 class AgentMessagingService : ExpoFirebaseMessagingService() {
   override fun onMessageReceived(remoteMessage: RemoteMessage) {
@@ -121,9 +122,12 @@ object AgentNotifications {
   fun receive(context: Context, data: Map<String, String>) {
     val prefs = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
     val updatedAt = data["updated_at"]?.toLongOrNull() ?: return
+    val deviceId = prefs.getString("deviceId", null)
+    val userId = prefs.getString("userId", null)
     val registered = prefs.getBoolean("enabled", false) &&
-      data["device_id"] == prefs.getString("deviceId", null) &&
-      data["user_id"] == prefs.getString("userId", null)
+      deviceId != null && userId != null &&
+      data["device_id"] == deviceId &&
+      data["user_hash"] == userHash(userId, deviceId)
     val fresh = System.currentTimeMillis() - updatedAt in -MAX_MESSAGE_AGE_MS..MAX_MESSAGE_AGE_MS
     if (registered && fresh && NotificationManagerCompat.from(context).areNotificationsEnabled()) {
       if (Build.VERSION.SDK_INT >= 26 && data.containsKey("nowbar_rows")) {
@@ -136,6 +140,11 @@ object AgentNotifications {
       updateActivity(context, prefs, data, updatedAt, alerted)
     }
   }
+
+  // The relay sends this hash instead of the account id, which FCM would see.
+  private fun userHash(userId: String, deviceId: String): String =
+    MessageDigest.getInstance("SHA-256").digest("$userId:$deviceId".toByteArray())
+      .joinToString("") { "%02x".format(it) }
 
   private fun showAlert(
     context: Context,
