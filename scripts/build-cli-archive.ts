@@ -132,7 +132,7 @@ const requireInput = Effect.fn("requireInput")(function* (inputPath: string, hin
 });
 
 /** Installed runtimes cannot rely on pnpm's store layout surviving archival. */
-const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (input: {
+export const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (input: {
   readonly repoRoot: string;
   readonly stageDir: string;
   readonly platform: BuildPlatform;
@@ -193,7 +193,15 @@ const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (inpu
     yield* fs.copy(path.join(input.repoRoot, "patches"), path.join(input.stageDir, "patches"));
   }
 
-  const install = yield* resolveSpawnCommand("vp", [...STAGE_INSTALL_ARGS]);
+  // Minimal archive containers have Node and npm, but no global vp or pnpm installation.
+  const install = yield* resolveSpawnCommand("npm", [
+    "exec",
+    "--yes",
+    `--package=${rootPackageJson.packageManager}`,
+    "--",
+    "pnpm",
+    ...STAGE_INSTALL_ARGS,
+  ]);
   yield* runCommand(
     ChildProcess.make(install.command, install.args, {
       cwd: input.stageDir,
@@ -201,7 +209,7 @@ const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (inpu
       stdout: "inherit",
       stderr: "inherit",
     }),
-    "vp install --prod (cli archive runtime externals)",
+    "npm exec pnpm install --prod (cli archive runtime externals)",
   );
 
   const platformKey = cliArchivePlatformKey(input.platform, input.arch);
