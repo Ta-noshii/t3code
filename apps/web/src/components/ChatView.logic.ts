@@ -5,6 +5,8 @@ import {
   type OrchestrationV2ProviderTurn,
   type RunAttemptId,
 } from "@t3tools/contracts";
+import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
+import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { msg } from "gt-react";
 import { m, type MessageResolver } from "../i18n/messages";
 import {
@@ -87,10 +89,11 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadDetails } from "../state/threads";
 import {
   filterTerminalContextsWithText,
-  formatTerminalContextLabel,
+  terminalContextDisplayLabels,
   type TerminalContextDraft,
 } from "../lib/terminalContext";
 import {
+  formatInlineContextReference,
   removeInlineContextReference,
   stripInlineContextReferences,
 } from "~/lib/composerContextReferences";
@@ -1601,16 +1604,21 @@ export function optimisticMessageAttachments(
   );
 }
 
-/** Fallback title sources for a message with no text of its own. */
-export function sendTitleFallbackLabels(
+export function deriveComposerSendTitle(
   snapshot: ComposerSendSnapshot,
   resolve: MessageResolver = m,
 ) {
-  const terminalContext = snapshot.terminalContexts[0];
+  const terminalLabels = terminalContextDisplayLabels(snapshot.terminalContexts, resolve);
+  const text = replaceComposerContextReferences(snapshot.messageText, (reference) => {
+    const label = terminalLabels.get(reference.contextId);
+    return reference.kind === "terminal" && label !== undefined
+      ? formatInlineContextReference({ ...reference, label })
+      : reference.source;
+  });
   const reviewComment = snapshot.reviewComments[0];
   const previewAnnotation = snapshot.previewAnnotations[0];
-  return [
-    terminalContext ? formatTerminalContextLabel(terminalContext) : undefined,
+  const fallbackLabels = [
+    terminalLabels.values().next().value,
     reviewComment
       ? resolve(
           msg("Review: {label}", {
@@ -1621,6 +1629,10 @@ export function sendTitleFallbackLabels(
       : undefined,
     previewAnnotation ? previewAnnotationContextLabel(previewAnnotation, resolve) : undefined,
   ];
+  return deriveThreadTitleSeed(
+    { text, attachments: snapshot.attachments, fallbackLabels },
+    resolve,
+  );
 }
 
 /**
