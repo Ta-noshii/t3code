@@ -109,6 +109,7 @@ import {
 import { pruneNewTaskFlowStates } from "./features/threads/new-task-flow-state";
 import { pruneNewTaskBranchCheckouts } from "./features/threads/NewTaskDraftRouteScreen";
 import { installAppUpdateChecks } from "./features/updates/app-updates";
+import { perfProbe } from "./features/development/perf-probe-hooks";
 
 import { NowBarCoordinator } from "./features/nowbar/NowBarCoordinator";
 import { NowBarUpdateDialog } from "./features/nowbar/NowBarUpdateDialog";
@@ -309,7 +310,12 @@ function AppContent() {
       <QuickActionsLanguage />
       <SubscriptionUsageCoordinator />
       <ConnectDeviceApprovalCoordinator />
-      <GestureHandlerRootView className="flex-1">
+      <GestureHandlerRootView
+        className="flex-1"
+        onTouchStartCapture={perfProbe?.touchStart}
+        onTouchEndCapture={perfProbe?.touchEnd}
+        onTouchCancelCapture={perfProbe?.touchEnd}
+      >
         <KeyboardProvider statusBarTranslucent>
           <SafeAreaProvider>
             <StatusBar barStyle={themeAppearance === "dark" ? "light-content" : "dark-content"} />

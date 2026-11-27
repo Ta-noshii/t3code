@@ -12,6 +12,7 @@ import {
   extractInlineCodeSpans,
   extractMarkdownLinkHrefs,
   inlineCodeFilePathCandidate,
+  parseMarkdownSandboxFileLink,
 } from "@t3tools/shared/markdownLinks";
 import { taskListMarkerOffset } from "@t3tools/shared/markdownTaskEdits";
 import { isHostPath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
@@ -116,8 +117,7 @@ import {
   resolveExternalWebLinkHost,
   showExternalLinkContextMenu,
 } from "./chat/externalLinkContextMenu";
-import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
-import { SharedTooltipProvider, SharedTooltipTrigger } from "./ui/shared-tooltip";
+import { SharedTooltipTrigger } from "./ui/shared-tooltip";
 import { Button } from "./ui/button";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { recordVisitForThread } from "../browserHistoryStore";
@@ -252,6 +252,8 @@ interface ChatMarkdownProps {
   environmentId?: EnvironmentId | undefined;
   onTaskListChange?: ((input: { markerOffset: number; checked: boolean }) => void) | undefined;
   isStreaming?: boolean;
+  /** Identifies a streaming reply across remounts, so text already shown does not fade in again. */
+  streamingId?: string | undefined;
   skills?: ReadonlyArray<ServerProviderSkill>;
   className?: string;
   lineBreaks?: boolean;
@@ -287,6 +289,7 @@ export interface ChatMarkdownContextReference {
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<ServerProviderSkill> = [];
 const NO_EXTENSIONS: MarkdownExtensions = {};
+const shownStreamingIds = new Set<string>();
 
 const ARTIFACT_TEMPLATE_ICON_BY_KIND = {
   document: FileTextIcon,
@@ -451,6 +454,7 @@ function markdownUrlTransform(href: string) {
   if (parseInlineReplyHref(href)) return href;
   if (isWindowsDrivePathHref(href)) return href;
   if (isLocalEditorFileHref(href)) return href;
+  if (parseMarkdownSandboxFileLink(href)) return href;
   return rewriteMarkdownFileUriHref(href) ?? safeUrl(href);
 }
 
@@ -1158,47 +1162,49 @@ function InlineReplyLink({
 }) {
   const [sending, setSending] = useState(false);
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            className="inline cursor-pointer rounded-sm text-left font-medium text-foreground underline decoration-muted-foreground/50 decoration-dotted underline-offset-4 hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-60"
-            disabled={sending}
-            aria-description="Sends this as your next message"
-            onClick={(event) => {
-              if (event.shiftKey) {
-                onInsert(reply);
-                return;
-              }
-              setSending(true);
-              onSend(reply).then(
-                () => setSending(false),
-                (error: unknown) => {
-                  setSending(false);
-                  toastManager.add({
-                    type: "error",
-                    title: "Reply not sent",
-                    description:
-                      error instanceof Error ? error.message : "Try again from the composer.",
-                  });
-                },
-              );
-            }}
-          />
-        }
-      >
-        <CornerDownRightIcon
-          aria-hidden
-          className="mr-0.5 inline size-3.5 -translate-y-px text-muted-foreground"
+    <SharedTooltipTrigger
+      side="top"
+      className="max-w-80"
+      label={
+        <>
+          <span className="block">{`Send "${reply}"`}</span>
+          <span className="block text-muted-foreground">Shift+click to edit it first</span>
+        </>
+      }
+      render={
+        <button
+          type="button"
+          className="inline cursor-pointer rounded-sm text-left font-medium text-foreground underline decoration-muted-foreground/50 decoration-dotted underline-offset-4 hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-60"
+          disabled={sending}
+          aria-description="Sends this as your next message"
+          onClick={(event) => {
+            if (event.shiftKey) {
+              onInsert(reply);
+              return;
+            }
+            setSending(true);
+            onSend(reply).then(
+              () => setSending(false),
+              (error: unknown) => {
+                setSending(false);
+                toastManager.add({
+                  type: "error",
+                  title: "Reply not sent",
+                  description:
+                    error instanceof Error ? error.message : "Try again from the composer.",
+                });
+              },
+            );
+          }}
         />
-        {children}
-      </TooltipTrigger>
-      <TooltipPopup side="top" className="max-w-80">
-        <span className="block">{`Send "${reply}"`}</span>
-        <span className="block text-muted-foreground">Shift+click to edit it first</span>
-      </TooltipPopup>
-    </Tooltip>
+      }
+    >
+      <CornerDownRightIcon
+        aria-hidden
+        className="mr-0.5 inline size-3.5 -translate-y-px text-muted-foreground"
+      />
+      {children}
+    </SharedTooltipTrigger>
   );
 }
 
@@ -1686,7 +1692,12 @@ const CHAT_MARKDOWN_COMPONENTS = {
       source.startsWith("[") && source.includes("](")
         ? source
         : `[${(label || fileLinkMeta.basename).replace(/[\\[\]]/g, "\\$&")}](${normalizedHref})`;
-    const chip = fileLinkChip(fileLinkMeta, copyMarkdown, normalizedHref);
+    // Media previews resolve the parsed host path; they do not understand the sandbox: scheme.
+    const chip = fileLinkChip(
+      fileLinkMeta,
+      copyMarkdown,
+      parseMarkdownSandboxFileLink(normalizedHref) ? undefined : normalizedHref,
+    );
     return isMarkdownFileLinkLabel(label, normalizedHref) ? (
       chip
     ) : (
@@ -2170,6 +2181,15 @@ function ChatMarkdown({
   renderInsights = false,
   ...props
 }: ChatMarkdownProps) {
+  const { isStreaming, streamingId } = props;
+  const [textAtMount] = useState(text);
+  const [remounted] = useState(
+    () => streamingId !== undefined && shownStreamingIds.has(streamingId),
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Records the reply outside React so the next mount after a thread switch or virtualized scroll knows it was shown.
+  useEffect(() => {
+    if (isStreaming && streamingId !== undefined) shownStreamingIds.add(streamingId);
+  }, [isStreaming, streamingId]);
   // Streaming re-renders only the last block; offsets for task edits, and extensions that read
   // the whole message, need the whole text.
   const streamingBlocks =
@@ -2199,22 +2219,22 @@ function ChatMarkdown({
           "text-sm leading-relaxed text-foreground/[calc(90%+var(--appearance-contrast-boost)/10)]",
         className,
       )}
-      data-streaming={componentState.isStreaming ? "" : undefined}
+      data-streaming={
+        componentState.isStreaming && (!remounted || text !== textAtMount) ? "" : undefined
+      }
       onCopy={handleCopy}
     >
       <ChatMarkdownRendererContext value={componentState}>
-        <SharedTooltipProvider>
-          {blocks.map((source, index) => (
-            <MarkdownSource
-              // oxlint-disable-next-line react/no-array-index-key -- streamed blocks only change at the end
-              key={index}
-              text={source}
-              markdown={markdown}
-              // Every block before the last is finished, so its parse can be reused.
-              cache={!props.isStreaming || index < blocks.length - 1}
-            />
-          ))}
-        </SharedTooltipProvider>
+        {blocks.map((source, index) => (
+          <MarkdownSource
+            // oxlint-disable-next-line react/no-array-index-key -- streamed blocks only change at the end
+            key={index}
+            text={source}
+            markdown={markdown}
+            // Every block before the last is finished, so its parse can be reused.
+            cache={!props.isStreaming || index < blocks.length - 1}
+          />
+        ))}
       </ChatMarkdownRendererContext>
       {localMediaPreview ? (
         <ExpandedImageDialog preview={localMediaPreview} onClose={closeLocalMediaPreview} />
