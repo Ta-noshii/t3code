@@ -45,6 +45,7 @@ import { ShellCommandBlock } from "./ShellCommandBlock";
 import { useInitialOutputReady, type TurnItemSource } from "./timelineRowContext";
 import { useEnvironmentProviders } from "../../state/environments";
 import { ToolCallDigestView, ToolOutputView, type ToolViewContext } from "./ToolOutputView";
+import { formatFileChangeLine } from "./V2ItemInspector.logic";
 
 interface V2ItemInspectorProps {
   readonly onInitialOutputReady?: (() => void) | undefined;
@@ -430,11 +431,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
             <ul className="space-y-1 font-mono text-muted-foreground">
               {item.changes.map((change) => (
                 <li key={JSON.stringify([change.operation, change.oldPath, change.path])}>
-                  {change.operation} {change.oldPath ? `${change.oldPath} → ` : ""}
-                  {formatWorkspaceRelativePath(change.path, props.workspaceRoot)}
-                  {change.fileType || change.mimeType
-                    ? ` (${[change.fileType, change.mimeType].filter(Boolean).join(", ")})`
-                    : ""}
+                  {formatFileChangeLine(change, props.workspaceRoot)}
                 </li>
               ))}
             </ul>
